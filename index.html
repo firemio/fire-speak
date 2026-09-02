@@ -1,43 +1,270 @@
 <!doctype html>
-<html lang="en">
+<html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri App</title>
+    <title>fire-speak 🔥</title>
+    <link rel="stylesheet" href="/src/styles.css" />
     <script type="module" src="/src/main.ts" defer></script>
   </head>
 
   <body>
-    <main class="container">
-      <h1>Welcome to Tauri</h1>
+    <div id="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-flame">🔥</span>
+          <span class="brand-name">fire-speak</span>
+        </div>
+        <nav class="nav" id="nav">
+          <button class="nav-item is-active" data-section="home">
+            <span class="nav-icon">🏠</span>ホーム
+          </button>
+          <button class="nav-item" data-section="stt">
+            <span class="nav-icon">🎙️</span>音声認識
+          </button>
+          <button class="nav-item" data-section="llm">
+            <span class="nav-icon">✨</span>AI整形
+          </button>
+          <button class="nav-item" data-section="modes">
+            <span class="nav-icon">🧩</span>モード
+          </button>
+          <button class="nav-item" data-section="history">
+            <span class="nav-icon">🕘</span>履歴
+          </button>
+          <button class="nav-item" data-section="general">
+            <span class="nav-icon">⚙️</span>一般
+          </button>
+          <button class="nav-item" data-section="setup">
+            <span class="nav-icon">📦</span>セットアップ
+          </button>
+        </nav>
+        <div class="sidebar-footer">
+          <button class="btn btn-ghost btn-sm" id="btn-quit" title="アプリを終了">
+            終了
+          </button>
+          <span class="version">v0.1.0</span>
+        </div>
+      </aside>
 
-      <div class="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/src/assets/vite.svg" class="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img
-            src="/src/assets/tauri.svg"
-            class="logo tauri"
-            alt="Tauri logo"
-          />
-        </a>
-        <a href="https://www.typescriptlang.org/docs" target="_blank">
-          <img
-            src="/src/assets/typescript.svg"
-            class="logo typescript"
-            alt="typescript logo"
-          />
-        </a>
-      </div>
-      <p>Click on the Tauri logo to learn more about the framework</p>
+      <main class="content">
+        <header class="topbar">
+          <h1 id="section-title">ホーム</h1>
+          <div class="status-pill" id="status-pill" data-status="idle">
+            <span class="status-dot"></span>
+            <span class="status-label" id="status-label">待機中</span>
+          </div>
+        </header>
 
-      <form class="row" id="greet-form">
-        <input id="greet-input" placeholder="Enter a name..." />
-        <button type="submit">Greet</button>
-      </form>
-      <p id="greet-msg"></p>
-    </main>
+        <!-- ホーム -->
+        <section class="section is-active" id="section-home">
+          <div class="hero-card">
+            <div class="hero-left">
+              <div class="hero-title">音声入力の準備ができています</div>
+              <div class="hero-sub">
+                <span class="hotkey-chip" id="home-hotkey">Ctrl+Alt+Space</span>
+                を押すと録音を開始 / 停止します
+              </div>
+            </div>
+            <button class="btn btn-primary" id="btn-record-test">
+              🎙️ 録音テスト
+            </button>
+          </div>
+
+          <h2 class="section-heading">アクティブモード</h2>
+          <div class="mode-grid" id="home-modes"></div>
+
+          <h2 class="section-heading">直近の履歴</h2>
+          <div class="recent-list" id="home-recent"></div>
+        </section>
+
+        <!-- 音声認識 -->
+        <section class="section" id="section-stt">
+          <h2 class="section-heading">音声認識エンジン</h2>
+          <div class="segmented" id="stt-engine-seg">
+            <button data-engine="local">ローカル (whisper.cpp)</button>
+            <button data-engine="cloud">クラウド (OpenAI互換)</button>
+          </div>
+
+          <div id="stt-local-panel">
+            <div class="card">
+              <div class="card-title">モデル選択</div>
+              <div class="hint">
+                使用する Whisper モデルを選択します。未インストールのモデルは
+                <a href="#" id="link-goto-setup">セットアップ</a> からダウンロードできます。
+              </div>
+              <div class="model-select-list" id="stt-model-list"></div>
+            </div>
+
+            <details class="card details-card">
+              <summary>詳細設定</summary>
+              <div class="form-grid">
+                <label class="field">
+                  <span class="field-label">サーバポート</span>
+                  <input type="number" id="in-local-port" min="1" max="65535" />
+                </label>
+                <label class="field">
+                  <span class="field-label">スレッド数</span>
+                  <input type="number" id="in-local-threads" min="1" max="64" />
+                </label>
+                <label class="field field-wide">
+                  <span class="field-label">モデルパス上書き (空 = 既定)</span>
+                  <input type="text" id="in-local-model-path" placeholder="C:\...\ggml-base.bin" spellcheck="false" />
+                </label>
+                <label class="field field-wide">
+                  <span class="field-label">whisper-server パス上書き (空 = 既定)</span>
+                  <input type="text" id="in-local-server-path" placeholder="C:\...\whisper-server.exe" spellcheck="false" />
+                </label>
+              </div>
+            </details>
+          </div>
+
+          <div id="stt-cloud-panel" hidden>
+            <div class="card">
+              <div class="form-grid">
+                <label class="field field-wide">
+                  <span class="field-label">Base URL</span>
+                  <input type="text" id="in-cloud-base-url" placeholder="https://api.openai.com/v1" spellcheck="false" />
+                </label>
+                <label class="field field-wide">
+                  <span class="field-label">APIキー</span>
+                  <span class="input-with-btn">
+                    <input type="password" id="in-cloud-api-key" placeholder="sk-..." spellcheck="false" autocomplete="off" />
+                    <button class="btn btn-ghost btn-sm eye-btn" id="btn-cloud-key-eye" title="表示切替">👁</button>
+                  </span>
+                </label>
+                <label class="field">
+                  <span class="field-label">モデル</span>
+                  <input type="text" id="in-cloud-model" placeholder="whisper-1" spellcheck="false" />
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="test-row">
+            <button class="btn" id="btn-test-stt">🔌 接続テスト</button>
+            <span class="test-result" id="stt-test-result"></span>
+          </div>
+        </section>
+
+        <!-- AI整形 -->
+        <section class="section" id="section-llm">
+          <div class="section-head-row">
+            <h2 class="section-heading">整形プロバイダ</h2>
+            <button class="btn btn-sm" id="btn-add-provider">＋ プロバイダを追加</button>
+          </div>
+          <div class="hint">
+            アクティブに設定したプロバイダが、モードの整形指示の実行に使われます。
+          </div>
+          <div id="provider-list" class="stack"></div>
+        </section>
+
+        <!-- モード -->
+        <section class="section" id="section-modes">
+          <div class="section-head-row">
+            <h2 class="section-heading">モード管理</h2>
+            <button class="btn btn-sm" id="btn-add-mode">＋ モードを追加</button>
+          </div>
+          <div class="hint">
+            モードごとの整形指示を編集できます。「AI整形を使う」をオフにすると文字起こし結果をそのまま使います。
+          </div>
+          <div id="mode-list" class="stack"></div>
+        </section>
+
+        <!-- 履歴 -->
+        <section class="section" id="section-history">
+          <div class="section-head-row">
+            <h2 class="section-heading">履歴</h2>
+            <button class="btn btn-danger btn-sm" id="btn-clear-history">🗑 全消去</button>
+          </div>
+          <div id="history-list" class="stack"></div>
+        </section>
+
+        <!-- 一般 -->
+        <section class="section" id="section-general">
+          <h2 class="section-heading">一般設定</h2>
+          <div class="card">
+            <div class="form-grid">
+              <label class="field field-wide">
+                <span class="field-label">グローバルホットキー</span>
+                <input
+                  type="text"
+                  id="in-hotkey"
+                  class="hotkey-input"
+                  readonly
+                  placeholder="クリックしてキーを押してください"
+                />
+                <span class="field-hint">クリックして、割り当てたいキーの組み合わせを押してください (例: Ctrl+Alt+Space)</span>
+              </label>
+              <label class="field">
+                <span class="field-label">認識言語</span>
+                <select id="in-language">
+                  <option value="auto">自動判定</option>
+                  <option value="ja">日本語</option>
+                  <option value="en">英語</option>
+                </select>
+              </label>
+              <label class="field">
+                <span class="field-label">貼り付け方法</span>
+                <select id="in-paste-mode">
+                  <option value="paste">自動貼り付け (Ctrl+V送信)</option>
+                  <option value="clipboard">クリップボードにコピーのみ</option>
+                </select>
+              </label>
+              <label class="field">
+                <span class="field-label">履歴保存件数</span>
+                <input type="number" id="in-history-limit" min="0" max="1000" />
+              </label>
+            </div>
+            <div class="switch-rows">
+              <label class="switch-row">
+                <span>
+                  <span class="switch-title">クリップボードを復元</span>
+                  <span class="switch-desc">貼り付け後に元のクリップボード内容を戻します</span>
+                </span>
+                <input type="checkbox" id="in-restore-clipboard" class="switch" />
+              </label>
+              <label class="switch-row">
+                <span>
+                  <span class="switch-title">Windows 起動時に自動起動</span>
+                  <span class="switch-desc">サインイン時に fire-speak を常駐開始します</span>
+                </span>
+                <input type="checkbox" id="in-autostart" class="switch" />
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <!-- セットアップ -->
+        <section class="section" id="section-setup">
+          <h2 class="section-heading">ローカル音声認識のセットアップ</h2>
+          <div class="hint">
+            ローカルエンジンを使うには whisper-server 本体と、いずれかのモデルが必要です。
+          </div>
+
+          <div class="card setup-card" id="setup-server-card">
+            <div class="setup-row">
+              <div class="setup-info">
+                <div class="setup-name">whisper-server <span class="badge" id="server-badge">未インストール</span></div>
+                <div class="setup-path mono" id="server-path">—</div>
+              </div>
+              <button class="btn btn-primary btn-sm" id="btn-install-server">インストール</button>
+            </div>
+            <div class="progress" id="server-progress" hidden>
+              <div class="progress-bar" id="server-progress-bar"></div>
+              <span class="progress-text" id="server-progress-text"></span>
+            </div>
+          </div>
+
+          <h2 class="section-heading">モデル</h2>
+          <div class="stack" id="setup-model-list"></div>
+
+          <div class="test-row">
+            <button class="btn" id="btn-open-config">📂 設定フォルダを開く</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast-host"></div>
   </body>
 </html>

@@ -1,0 +1,219 @@
+/* fire-speak — recording HUD (overlay window, 380x110, transparent) */
+
+:root {
+  --accent: #ff6b35;
+  --accent-2: #ff9558;
+  --accent-grad: linear-gradient(180deg, #ff9558, #ff6b35);
+  --danger: #ff5468;
+  --ok: #3ddc84;
+  --text: #eef0f4;
+  --text-dim: #a7afbd;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  font-family: "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  user-select: none;
+  cursor: default;
+}
+
+.hud {
+  position: absolute;
+  inset: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  background: rgba(17, 20, 26, 0.86);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  padding: 10px 14px 8px;
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.hud[data-status="recording"] {
+  border-color: rgba(255, 107, 53, 0.4);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.5),
+    0 0 18px rgba(255, 107, 53, 0.18);
+}
+
+.hud[data-status="error"] {
+  border-color: rgba(255, 84, 104, 0.45);
+}
+
+.hud[data-status="done"] {
+  border-color: rgba(61, 220, 132, 0.4);
+}
+
+/* ---------- top row ---------- */
+
+.hud-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+}
+
+.rec-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(255, 107, 53, 0.8);
+  animation: blink 1.15s ease-in-out infinite;
+}
+
+.hud[data-status="transcribing"] .rec-dot,
+.hud[data-status="polishing"] .rec-dot {
+  background: var(--accent-2);
+  box-shadow: 0 0 8px rgba(255, 149, 88, 0.7);
+  animation: blink 0.8s ease-in-out infinite;
+}
+
+.hud[data-status="done"] .rec-dot {
+  background: var(--ok);
+  box-shadow: 0 0 8px rgba(61, 220, 132, 0.7);
+  animation: none;
+}
+
+.hud[data-status="error"] .rec-dot {
+  background: var(--danger);
+  box-shadow: 0 0 8px rgba(255, 84, 104, 0.7);
+  animation: none;
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.status-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.2px;
+}
+
+.hud[data-status="error"] .status-text {
+  color: var(--danger);
+}
+
+.hud[data-status="done"] .status-text {
+  color: var(--ok);
+}
+
+.mode-chip {
+  flex: none;
+  max-width: 110px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--accent-2);
+  background: rgba(255, 107, 53, 0.14);
+  border: 1px solid rgba(255, 107, 53, 0.25);
+  border-radius: 999px;
+  padding: 1px 9px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mode-chip:empty {
+  display: none;
+}
+
+.close-btn {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.12s, color 0.12s;
+}
+
+.close-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+/* ---------- visualizer ---------- */
+
+.viz {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 6px 2px;
+}
+
+.viz .bar {
+  width: 5px;
+  height: 4px;
+  border-radius: 3px;
+  background: var(--accent-grad);
+  transition: none;
+  will-change: height;
+}
+
+.hud[data-status="done"] .viz .bar {
+  background: linear-gradient(180deg, #6ff0ac, #3ddc84);
+}
+
+.hud[data-status="error"] .viz .bar {
+  background: linear-gradient(180deg, #ff8291, #ff5468);
+}
+
+/* gentle idle wave while transcribing / polishing */
+.hud[data-status="transcribing"] .viz .bar,
+.hud[data-status="polishing"] .viz .bar {
+  animation: procwave 1.15s ease-in-out infinite;
+  animation-delay: calc(var(--i) * 0.07s);
+}
+
+@keyframes procwave {
+  0%,
+  100% {
+    height: 5px;
+    opacity: 0.55;
+  }
+  50% {
+    height: 16px;
+    opacity: 1;
+  }
+}

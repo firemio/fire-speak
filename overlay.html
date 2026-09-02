@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>fire-speak HUD</title>
+    <link rel="stylesheet" href="/src/overlay.css" />
+    <script type="module" src="/src/overlay.ts" defer></script>
+  </head>
+
+  <body>
+    <div class="hud" id="hud" data-status="idle">
+      <div class="hud-top">
+        <span class="rec-dot" id="rec-dot"></span>
+        <span class="status-text" id="status-text">話してください…</span>
+        <span class="mode-chip" id="mode-chip"></span>
+        <button class="close-btn" id="close-btn" title="キャンセル" aria-label="キャンセル">✕</button>
+      </div>
+      <div class="viz" id="viz" aria-hidden="true"></div>
+    </div>
+  </body>
+</html>
