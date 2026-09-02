@@ -89,8 +89,15 @@ let historyEntries: HistoryEntry[] = [];
 let saveTimer: number | undefined;
 let apiKeyDirty = false;
 
-/** Last 5 saved settings snapshots, used to suppress settings-changed echoes. */
+/** Last 5 saved settings snapshots, used to suppress settings-changed echoes.
+ * Snapshots are stored with active_mode_id stripped: the tray switches modes
+ * autonomously, and a mode round-trip re-produces byte-identical JSON that a
+ * naive ring would swallow forever. */
 const savedSnapshots: string[] = [];
+
+function snapshotKey(s: Settings): string {
+  return JSON.stringify({ ...s, active_mode_id: "" });
+}
 
 function recordSavedSnapshot(json: string): void {
   savedSnapshots.push(json);
@@ -128,7 +135,7 @@ async function persistSettings(): Promise<void> {
     saveTimer = undefined;
   }
   apiKeyDirty = false;
-  recordSavedSnapshot(JSON.stringify(settings));
+  recordSavedSnapshot(snapshotKey(settings));
   await invoke("save_settings", { settings });
 }
 
@@ -902,6 +909,10 @@ async function applyHotkey(combo: string): Promise<void> {
       settings.hotkey = prev;
       input("in-hotkey").value = prev;
       $("home-hotkey").textContent = prev;
+      // The rejected save also un-queued any coincidental pending edits
+      // (persistSettings cleared the debounce timer); re-arm so they retry
+      // without the bad hotkey.
+      scheduleSave();
     }
   }
 }
@@ -1221,22 +1232,24 @@ async function setupListeners(): Promise<void> {
   });
 
   await listen<Settings>("settings-changed", (event) => {
-    const incoming = JSON.stringify(event.payload);
-    // Ignore echoes of our own recent saves, and no-op updates. Keep the
-    // current settings object so live input closures (provider/mode cards)
-    // stay valid.
-    if (savedSnapshots.includes(incoming) || incoming === JSON.stringify(settings)) {
-      return;
-    }
-    // Pending local edits (debounced save armed, or a dirty API key not yet
-    // blurred): don't wholesale-replace. Merge only active_mode_id — the only
-    // field the backend changes autonomously (via tray) — and re-render the
-    // mode views.
-    const hasPendingEdits = saveTimer !== undefined || apiKeyDirty;
-    if (hasPendingEdits && settings) {
+    // Adopt active_mode_id unconditionally first — the tray changes it
+    // autonomously, and the echo suppression below must never swallow it.
+    if (settings && event.payload.active_mode_id !== settings.active_mode_id) {
       settings.active_mode_id = event.payload.active_mode_id;
       renderHomeModes();
       renderModeList();
+    }
+    // Ignore echoes of our own recent saves, and no-op updates (compared with
+    // active_mode_id stripped). Keep the current settings object so live input
+    // closures (provider/mode cards) stay valid.
+    const incoming = snapshotKey(event.payload);
+    if (savedSnapshots.includes(incoming) || (settings && incoming === snapshotKey(settings))) {
+      return;
+    }
+    // Pending local edits (debounced save armed, or a dirty API key not yet
+    // blurred): don't wholesale-replace; active_mode_id was already merged.
+    const hasPendingEdits = saveTimer !== undefined || apiKeyDirty;
+    if (hasPendingEdits && settings) {
       return;
     }
     settings = event.payload;
@@ -1283,7 +1296,7 @@ async function init(): Promise<void> {
 
   try {
     settings = await invoke<Settings>("get_settings");
-    recordSavedSnapshot(JSON.stringify(settings));
+    recordSavedSnapshot(snapshotKey(settings));
   } catch (e: unknown) {
     toast(`設定の読み込みに失敗しました: ${errMsg(e)}`, true);
   }
@@ -1293,6 +1306,15 @@ async function init(): Promise<void> {
     setStatusPill({ status: status as AppStatus });
   } catch {
     setStatusPill({ status: "idle" });
+  }
+
+  // Errors that happened before this page could listen (e.g. the saved hotkey
+  // is taken by another app at startup).
+  try {
+    const startupError = await invoke<string | null>("get_startup_error");
+    if (startupError) toast(startupError, true);
+  } catch {
+    // non-fatal
   }
 
   renderAll();

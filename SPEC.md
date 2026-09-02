@@ -74,6 +74,7 @@ serde は全フィールド `#[serde(default = ...)]` で欠損に耐えるこ�
 | `toggle_recording` | — | `()` — ホットキーと同じ動作 |
 | `cancel_recording` | — | `()` — 録音/処理を破棄しoverlayを隠す |
 | `get_status` | — | `string` (下記status値) |
+| `get_startup_error` | — | `string \| null` — 起動時(リスナー登録前)に発生したエラーを1回だけ返す(取得で消費)。フロントはinitで取得しトースト表示 |
 | `set_active_mode` | `{ modeId: string }` | `()` — 保存+`settings-changed`発火+トレイメニュー更新 |
 | `get_history` | — | `HistoryEntry[]` (新しい順) |
 | `clear_history` | — | `()` |

@@ -245,11 +245,16 @@ fn spawn_and_health_check(
     threads: u32,
 ) -> Result<(Child, win32job::Job), String> {
     // Refuse to spawn onto a port something already listens on (e.g. an
-    // orphaned whisper-server from a previous crash).
+    // orphaned whisper-server from a previous crash). A stale managed server
+    // may still be mid-kill on another thread (it is killed after the lock is
+    // released), so on a hit wait briefly and re-probe before erroring.
     if tcp_ok(port, Duration::from_millis(300)) {
-        return Err(format!(
-            "ポート{port}は既に使用されています。孤児のwhisper-server.exeが残っていないか確認するか、設定でポートを変更してください。"
-        ));
+        std::thread::sleep(Duration::from_millis(400));
+        if tcp_ok(port, Duration::from_millis(300)) {
+            return Err(format!(
+                "ポート{port}は既に使用されています。孤児のwhisper-server.exeが残っていないか確認するか、設定でポートを変更してください。"
+            ));
+        }
     }
 
     let mut cmd = Command::new(server_path);
@@ -407,21 +412,29 @@ async fn stream_download(
     let mut downloaded: u64 = 0;
     let mut last_emit = Instant::now();
     emit_progress(app, kind, name, 0, total, false, None);
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("ダウンロード中にエラーが発生しました: {e}"))?;
-        file.write_all(&chunk)
-            .await
-            .map_err(|e| format!("ファイルの書き込みに失敗しました: {e}"))?;
-        downloaded += chunk.len() as u64;
-        if last_emit.elapsed() >= Duration::from_millis(200) {
-            last_emit = Instant::now();
-            emit_progress(app, kind, name, downloaded, total, false, None);
+    // Any mid-stream failure must not leave a partial file on disk.
+    let write_result: Result<(), String> = async {
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| format!("ダウンロード中にエラーが発生しました: {e}"))?;
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| format!("ファイルの書き込みに失敗しました: {e}"))?;
+            downloaded += chunk.len() as u64;
+            if last_emit.elapsed() >= Duration::from_millis(200) {
+                last_emit = Instant::now();
+                emit_progress(app, kind, name, downloaded, total, false, None);
+            }
         }
+        file.flush()
+            .await
+            .map_err(|e| format!("ファイルの書き込みに失敗しました: {e}"))
     }
-    file.flush()
-        .await
-        .map_err(|e| format!("ファイルの書き込みに失敗しました: {e}"))?;
+    .await;
     drop(file);
+    if let Err(e) = write_result {
+        let _ = tokio::fs::remove_file(dest).await;
+        return Err(e);
+    }
 
     // If the server told us the size, a short read means a truncated download.
     if total > 0 && downloaded != total {
@@ -488,13 +501,15 @@ async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
     let (downloaded, total) =
         stream_download(app, &client, &url, &zip_path, "server", &name).await?;
 
-    // extract in a blocking thread
+    // extract in a blocking thread; the temp zip is removed on every outcome
     let bin2 = bin.clone();
     let zip2 = zip_path.clone();
-    tokio::task::spawn_blocking(move || extract_zip(&zip2, &bin2))
+    let extract_result = tokio::task::spawn_blocking(move || extract_zip(&zip2, &bin2))
         .await
-        .map_err(|e| format!("内部エラー(展開): {e}"))??;
+        .map_err(|e| format!("内部エラー(展開): {e}"))
+        .and_then(|r| r);
     let _ = tokio::fs::remove_file(&zip_path).await;
+    extract_result?;
 
     if find_server_exe(&bin).is_none() {
         return Err("展開後にwhisper-server(.exe)が見つかりませんでした".to_string());

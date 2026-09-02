@@ -157,6 +157,7 @@ pub fn stop_and_process(app: &AppHandle) {
             }
             *status = Status::Idle;
         }
+        emit_status(app, "idle", None);
         hide_overlay(app);
         return;
     };

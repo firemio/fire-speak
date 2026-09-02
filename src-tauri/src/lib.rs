@@ -25,6 +25,9 @@ pub struct AppState {
     pub generation: AtomicU64,
     pub server: Mutex<Option<setup::ManagedServer>>,
     pub server_starting: AtomicBool,
+    /// Error that occurred before the webview could listen (e.g. startup
+    /// hotkey registration failure); drained once by `get_startup_error`.
+    pub startup_error: Mutex<Option<String>>,
 }
 
 impl AppState {
@@ -36,6 +39,7 @@ impl AppState {
             generation: AtomicU64::new(0),
             server: Mutex::new(None),
             server_starting: AtomicBool::new(false),
+            startup_error: Mutex::new(None),
         }
     }
 }
@@ -249,6 +253,11 @@ fn get_status(state: State<'_, AppState>) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn get_startup_error(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    Ok(state.startup_error.lock().unwrap().take())
+}
+
+#[tauri::command]
 async fn set_active_mode(app: AppHandle, mode_id: String) -> Result<(), String> {
     do_set_active_mode(&app, mode_id)
 }
@@ -366,9 +375,11 @@ pub fn run() {
             app.manage(AppState::new(loaded.clone()));
 
             if let Err(e) = register_hotkey(&handle, &loaded.hotkey, None) {
-                // non-fatal, but surface it to the UI
+                // non-fatal; the webview has no listener yet, so stash the
+                // error for the frontend to drain via get_startup_error
                 eprintln!("hotkey registration failed: {e}");
-                pipeline::emit_status(&handle, "error", Some(&e));
+                let msg = format!("グローバルホットキーを登録できませんでした: {e}");
+                *handle.state::<AppState>().startup_error.lock().unwrap() = Some(msg);
             }
             if let Err(e) = apply_autostart(&handle, loaded.autostart) {
                 eprintln!("autostart sync failed: {e}");
@@ -397,6 +408,7 @@ pub fn run() {
             toggle_recording,
             cancel_recording,
             get_status,
+            get_startup_error,
             set_active_mode,
             get_history,
             clear_history,
