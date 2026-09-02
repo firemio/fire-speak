@@ -70,7 +70,7 @@ serde は全フィールド `#[serde(default = ...)]` で欠損に耐えるこ�
 | コマンド | 引数 | 戻り値 |
 |---|---|---|
 | `get_settings` | — | `Settings` |
-| `save_settings` | `{ settings: Settings }` | `()` — 保存+ホットキー再登録+autostart適用+ローカルSTT設定変更時はサーバ再起動 |
+| `save_settings` | `{ settings: Settings }` | `()` — 保存+ホットキー再登録+autostart適用+ローカルSTT設定変更時はサーバ再起動。**ホットキーが解釈不能/登録失敗の場合は何も永続化せず Err**(既存ホットキーは維持)。フロントは Err 時に旧値へ戻す |
 | `toggle_recording` | — | `()` — ホットキーと同じ動作 |
 | `cancel_recording` | — | `()` — 録音/処理を破棄しoverlayを隠す |
 | `get_status` | — | `string` (下記status値) |
@@ -93,6 +93,7 @@ type HistoryEntry = { id: string; timestamp: number /*unix ms*/; mode_id: string
 type SetupStatus = {
   server_installed: boolean; server_path: string;
   model_installed: boolean; model_path: string;
+  models_dir: string; // 管理モデルディレクトリ({app_data}/models)の絶対パス
   models: { name: string; installed: boolean; size_mb: number }[];
 };
 ```

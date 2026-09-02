@@ -76,6 +76,8 @@ export interface SetupStatus {
   server_path: string;
   model_installed: boolean;
   model_path: string;
+  /** Absolute path of the managed models directory ({app_data}/models). */
+  models_dir: string;
   models: SetupModelInfo[];
 }
 

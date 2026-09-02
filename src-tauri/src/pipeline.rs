@@ -97,7 +97,21 @@ pub fn start_recording(app: &AppHandle) {
 
     match crate::audio::start(app.clone()) {
         Ok(handle) => {
-            *state.recorder.lock().unwrap() = Some(handle);
+            // audio::start blocks (up to 8s); a cancel/other transition may
+            // have happened meanwhile. Only store the handle if this start is
+            // still the current one — otherwise drop it (Drop stops the
+            // capture thread) so no orphaned recorder keeps running.
+            {
+                let mut recorder = state.recorder.lock().unwrap();
+                let status_ok = *state.status.lock().unwrap() == Status::Recording;
+                let gen_ok = state.generation.load(Ordering::SeqCst) == gen;
+                if !(status_ok && gen_ok) {
+                    drop(recorder);
+                    drop(handle); // RecorderHandle::drop signals the thread to stop
+                    return;
+                }
+                *recorder = Some(handle);
+            }
             // safety watchdog: auto stop+process after 5 minutes
             let app2 = app.clone();
             tauri::async_runtime::spawn(async move {
@@ -111,7 +125,14 @@ pub fn start_recording(app: &AppHandle) {
             });
         }
         Err(e) => {
-            *state.status.lock().unwrap() = Status::Idle;
+            {
+                let mut status = state.status.lock().unwrap();
+                if state.generation.load(Ordering::SeqCst) != gen {
+                    // canceled while starting: cancel() owns the Idle write
+                    return;
+                }
+                *status = Status::Idle;
+            }
             error_flow(app, e);
         }
     }
@@ -119,29 +140,43 @@ pub fn start_recording(app: &AppHandle) {
 
 pub fn stop_and_process(app: &AppHandle) {
     let state = app.state::<AppState>();
-    {
+    let gen = {
         let mut status = state.status.lock().unwrap();
         if *status != Status::Recording {
             return;
         }
         *status = Status::Transcribing;
-    }
+        state.generation.load(Ordering::SeqCst)
+    };
     let handle = state.recorder.lock().unwrap().take();
     let Some(handle) = handle else {
-        *state.status.lock().unwrap() = Status::Idle;
+        {
+            let mut status = state.status.lock().unwrap();
+            if state.generation.load(Ordering::SeqCst) != gen {
+                return; // canceled: cancel() owns the Idle write
+            }
+            *status = Status::Idle;
+        }
         hide_overlay(app);
         return;
     };
-    let gen = state.generation.load(Ordering::SeqCst);
     emit_status(app, "transcribing", None);
 
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
         let result = run_pipeline(app2.clone(), handle, gen).await;
         if let Err(e) = result {
-            if !is_canceled(&app2, gen) {
-                let state = app2.state::<AppState>();
-                *state.status.lock().unwrap() = Status::Idle;
+            let state = app2.state::<AppState>();
+            let notify = {
+                let mut status = state.status.lock().unwrap();
+                if is_canceled(&app2, gen) {
+                    false // canceled: never write status
+                } else {
+                    *status = Status::Idle;
+                    true
+                }
+            };
+            if notify {
                 error_flow(&app2, e);
             }
         }
@@ -206,8 +241,13 @@ async fn run_pipeline(
     if mode.use_llm {
         if let Some(p) = provider.filter(|p| !p.api_key.trim().is_empty()) {
             {
+                // Only advance to Polishing if this pipeline is still current.
                 let state = app.state::<AppState>();
-                *state.status.lock().unwrap() = Status::Polishing;
+                let mut status = state.status.lock().unwrap();
+                if is_canceled(&app, gen) || *status != Status::Transcribing {
+                    return Ok(());
+                }
+                *status = Status::Polishing;
             }
             emit_status(&app, "polishing", None);
             match crate::llm::polish(&p, &mode.instruction, &raw_text).await {
@@ -222,6 +262,7 @@ async fn run_pipeline(
             }
         }
     }
+    // A canceled pipeline must not paste.
     if is_canceled(&app, gen) {
         return Ok(());
     }
@@ -254,10 +295,15 @@ async fn run_pipeline(
 
     paste_result?; // paste failure -> error flow
 
-    // 6. done -> idle
+    // 6. done -> idle (skip entirely if canceled meanwhile; cancel() owns
+    // the Idle write on cancellation)
     {
         let state = app.state::<AppState>();
-        *state.status.lock().unwrap() = Status::Idle;
+        let mut status = state.status.lock().unwrap();
+        if is_canceled(&app, gen) {
+            return Ok(());
+        }
+        *status = Status::Idle;
     }
     emit_status(&app, "done", warning.as_deref());
     let app2 = app.clone();
@@ -284,9 +330,10 @@ pub fn cancel(app: &AppHandle) {
 }
 
 /// Emit an error status, then hide the overlay after 2.5s and return to idle.
+/// Callers must have already set the status to Idle under their own
+/// generation-guarded critical section (this function never writes status).
 pub fn error_flow(app: &AppHandle, message: String) {
     let state = app.state::<AppState>();
-    *state.status.lock().unwrap() = Status::Idle;
     emit_status(app, "error", Some(&message));
     let gen = state.generation.load(Ordering::SeqCst);
     let app2 = app.clone();

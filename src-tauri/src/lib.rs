@@ -8,7 +8,7 @@ mod setup;
 mod stt;
 
 use settings::Settings;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Mutex;
 use tauri::menu::{CheckMenuItem, Menu, MenuBuilder, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -24,6 +24,7 @@ pub struct AppState {
     pub recorder: Mutex<Option<audio::RecorderHandle>>,
     pub generation: AtomicU64,
     pub server: Mutex<Option<setup::ManagedServer>>,
+    pub server_starting: AtomicBool,
 }
 
 impl AppState {
@@ -34,6 +35,7 @@ impl AppState {
             recorder: Mutex::new(None),
             generation: AtomicU64::new(0),
             server: Mutex::new(None),
+            server_starting: AtomicBool::new(false),
         }
     }
 }
@@ -50,14 +52,28 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
-fn register_hotkey(app: &AppHandle, hotkey: &str) -> Result<(), String> {
-    let gs = app.global_shortcut();
-    let _ = gs.unregister_all();
+/// Register `hotkey` as the global shortcut.
+///
+/// The new hotkey string is parsed BEFORE touching the currently registered
+/// shortcut, so an invalid string leaves the existing hotkey working. If
+/// registration of the new (valid) hotkey fails (e.g. the combo is taken by
+/// another app), we attempt to re-register `previous` before returning Err.
+fn register_hotkey(app: &AppHandle, hotkey: &str, previous: Option<&str>) -> Result<(), String> {
     let shortcut: Shortcut = hotkey
         .parse()
-        .map_err(|_| format!("ホットキー「{hotkey}」を解釈できませんでした"))?;
-    gs.register(shortcut)
-        .map_err(|e| format!("ホットキーの登録に失敗しました: {e}"))
+        .map_err(|_| format!("ホットキー「{hotkey}」を解釈できません"))?;
+    let gs = app.global_shortcut();
+    let _ = gs.unregister_all();
+    if let Err(e) = gs.register(shortcut) {
+        // best effort: restore the previous hotkey so the user keeps a working one
+        if let Some(prev) = previous {
+            if let Ok(prev_shortcut) = prev.parse::<Shortcut>() {
+                let _ = gs.register(prev_shortcut);
+            }
+        }
+        return Err(format!("ホットキーの登録に失敗しました: {e}"));
+    }
+    Ok(())
 }
 
 fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
@@ -174,17 +190,21 @@ fn do_set_active_mode(app: &AppHandle, mode_id: String) -> Result<(), String> {
 
 fn apply_settings(app: &AppHandle, new_settings: Settings) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let old_settings = {
+    let old_settings = state.settings.lock().unwrap().clone();
+
+    // Hotkey first: if the new hotkey cannot be registered, fail WITHOUT
+    // persisting or replacing the in-memory settings (the old hotkey stays
+    // registered, best effort).
+    if old_settings.hotkey != new_settings.hotkey {
+        register_hotkey(app, &new_settings.hotkey, Some(&old_settings.hotkey))?;
+    }
+
+    {
         let mut guard = state.settings.lock().unwrap();
-        let old = guard.clone();
         *guard = new_settings.clone();
-        old
-    };
+    }
     settings::save(app, &new_settings)?;
 
-    if old_settings.hotkey != new_settings.hotkey {
-        register_hotkey(app, &new_settings.hotkey)?;
-    }
     if old_settings.autostart != new_settings.autostart {
         apply_autostart(app, new_settings.autostart)?;
     }
@@ -326,13 +346,16 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
+            Some(vec!["--hidden"]),
         ))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
                     if event.state == ShortcutState::Pressed {
-                        pipeline::toggle(app);
+                        // Never run the pipeline inline: audio::start can block
+                        // for up to 8s and would freeze the main thread.
+                        let app = app.clone();
+                        std::thread::spawn(move || pipeline::toggle(&app));
                     }
                 })
                 .build(),
@@ -342,13 +365,22 @@ pub fn run() {
             let loaded = settings::load(&handle);
             app.manage(AppState::new(loaded.clone()));
 
-            if let Err(e) = register_hotkey(&handle, &loaded.hotkey) {
+            if let Err(e) = register_hotkey(&handle, &loaded.hotkey, None) {
+                // non-fatal, but surface it to the UI
                 eprintln!("hotkey registration failed: {e}");
+                pipeline::emit_status(&handle, "error", Some(&e));
             }
             if let Err(e) = apply_autostart(&handle, loaded.autostart) {
                 eprintln!("autostart sync failed: {e}");
             }
             build_tray(&handle, &loaded)?;
+
+            // Launched by autostart with --hidden: start minimized to tray.
+            if std::env::args().any(|a| a == "--hidden") {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
             Ok(())
         })
         .on_window_event(|window, event| {

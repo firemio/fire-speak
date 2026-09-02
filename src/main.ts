@@ -87,8 +87,15 @@ let setupStatus: SetupStatus | null = null;
 let historyEntries: HistoryEntry[] = [];
 
 let saveTimer: number | undefined;
-let lastSavedJson = "";
 let apiKeyDirty = false;
+
+/** Last 5 saved settings snapshots, used to suppress settings-changed echoes. */
+const savedSnapshots: string[] = [];
+
+function recordSavedSnapshot(json: string): void {
+  savedSnapshots.push(json);
+  if (savedSnapshots.length > 5) savedSnapshots.shift();
+}
 
 const activeDownloads = new Map<string, DownloadProgressPayload>();
 
@@ -113,16 +120,21 @@ function scheduleSave(): void {
   }, 500);
 }
 
-async function doSave(): Promise<void> {
+/** Persist settings immediately. Throws on backend rejection (nothing is persisted then). */
+async function persistSettings(): Promise<void> {
   if (!settings) return;
   if (saveTimer !== undefined) {
     window.clearTimeout(saveTimer);
     saveTimer = undefined;
   }
   apiKeyDirty = false;
-  lastSavedJson = JSON.stringify(settings);
+  recordSavedSnapshot(JSON.stringify(settings));
+  await invoke("save_settings", { settings });
+}
+
+async function doSave(): Promise<void> {
   try {
-    await invoke("save_settings", { settings });
+    await persistSettings();
   } catch (e: unknown) {
     toast(`保存に失敗しました: ${errMsg(e)}`, true);
   }
@@ -230,6 +242,7 @@ async function activateMode(modeId: string): Promise<void> {
   if (!settings) return;
   settings.active_mode_id = modeId;
   renderHomeModes();
+  renderModeList();
   try {
     await invoke("set_active_mode", { modeId });
   } catch (e: unknown) {
@@ -280,14 +293,11 @@ function renderSttSection(): void {
   renderSttModelList();
 }
 
-/** Derive the managed models directory from setup_status.model_path if possible. */
+/** Build the managed model path from setup_status.models_dir. */
 function managedModelPathFor(name: string): string | null {
-  if (!setupStatus || !setupStatus.model_path) return null;
-  const p = setupStatus.model_path;
-  const idx = Math.max(p.lastIndexOf("\\"), p.lastIndexOf("/"));
-  if (idx < 0) return null;
-  const sep = p.includes("\\") ? "\\" : "/";
-  return `${p.slice(0, idx)}${sep}ggml-${name}.bin`;
+  if (!setupStatus || !setupStatus.models_dir) return null;
+  const dir = setupStatus.models_dir.replace(/[\\/]+$/, "");
+  return `${dir}\\ggml-${name}.bin`;
 }
 
 function renderSttModelList(): void {
@@ -825,18 +835,75 @@ function renderGeneralSection(): void {
   input("in-autostart").checked = settings.autostart;
 }
 
+/**
+ * Map a keydown to a key name accepted by the global-hotkey 0.8 parser,
+ * based on the physical key (e.code) so IME/layout cannot interfere.
+ * Returns null for anything else (IME keys, JIS punctuation, dead keys, ...).
+ */
 function normalizeHotkeyKey(e: KeyboardEvent): string | null {
-  const k = e.key;
-  if (k === "Control" || k === "Alt" || k === "Shift" || k === "Meta") return null;
-  if (k === " " || e.code === "Space") return "Space";
-  if (k.length === 1) {
-    const upper = k.toUpperCase();
-    // use physical key for letters so IME/layout doesn't interfere
-    if (/^Key[A-Z]$/.test(e.code)) return e.code.slice(3);
-    if (/^Digit[0-9]$/.test(e.code)) return e.code.slice(5);
-    return upper;
+  const code = e.code;
+  const letter = /^Key([A-Z])$/.exec(code);
+  if (letter) return letter[1];
+  const digit = /^Digit([0-9])$/.exec(code);
+  if (digit) return digit[1];
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code;
+  switch (code) {
+    case "Space":
+      return "Space";
+    case "Enter":
+      return "Enter";
+    case "Tab":
+      return "Tab";
+    case "Backspace":
+      return "Backspace";
+    case "Delete":
+      return "Delete";
+    case "Insert":
+      return "Insert";
+    case "Home":
+      return "Home";
+    case "End":
+      return "End";
+    case "PageUp":
+      return "PageUp";
+    case "PageDown":
+      return "PageDown";
+    // global-hotkey accepts "UP"/"DOWN"/"LEFT"/"RIGHT" aliases for the arrows.
+    case "ArrowUp":
+      return "Up";
+    case "ArrowDown":
+      return "Down";
+    case "ArrowLeft":
+      return "Left";
+    case "ArrowRight":
+      return "Right";
+    default:
+      return null;
   }
-  return k; // F1-F12, Enter, Tab, ArrowUp, Home, ...
+}
+
+/**
+ * Save a new hotkey immediately. The backend validates before persisting and
+ * returns Err on a bad/taken hotkey; on rejection, toast the backend message
+ * and revert the field and local state to the previous value.
+ */
+async function applyHotkey(combo: string): Promise<void> {
+  if (!settings) return;
+  const prev = settings.hotkey;
+  settings.hotkey = combo;
+  input("in-hotkey").value = combo;
+  $("home-hotkey").textContent = combo;
+  if (combo === prev) return;
+  try {
+    await persistSettings();
+  } catch (e: unknown) {
+    toast(errMsg(e), true);
+    if (settings) {
+      settings.hotkey = prev;
+      input("in-hotkey").value = prev;
+      $("home-hotkey").textContent = prev;
+    }
+  }
 }
 
 function wireGeneralSection(): void {
@@ -862,9 +929,13 @@ function wireGeneralSection(): void {
     if (e.altKey) mods.push("Alt");
     if (e.shiftKey) mods.push("Shift");
     if (e.metaKey) mods.push("Super");
-    const key = normalizeHotkeyKey(e);
-    if (!key) {
+    if (e.key === "Control" || e.key === "Alt" || e.key === "Shift" || e.key === "Meta") {
       hotkeyInput.value = mods.length > 0 ? `${mods.join("+")}+…` : "キーを押してください…";
+      return;
+    }
+    const key = normalizeHotkeyKey(e);
+    if (key === null) {
+      hotkeyInput.value = "このキーは使用できません";
       return;
     }
     const isFKey = /^F([1-9]|1[0-9]|2[0-4])$/.test(key);
@@ -873,10 +944,7 @@ function wireGeneralSection(): void {
       return;
     }
     const combo = [...mods, key].join("+");
-    settings.hotkey = combo;
-    hotkeyInput.value = combo;
-    $("home-hotkey").textContent = combo;
-    scheduleSave();
+    void applyHotkey(combo);
     hotkeyInput.blur();
   });
 
@@ -1036,10 +1104,13 @@ async function startServerDownload(): Promise<void> {
   try {
     await invoke("download_whisper_server");
   } catch (e: unknown) {
+    // If the key is gone, a download-progress done/error event already
+    // handled (and toasted) this failure — don't toast twice.
+    const stillPending = activeDownloads.has(key);
     activeDownloads.delete(key);
     wrap.hidden = true;
     ($("btn-install-server") as HTMLButtonElement).disabled = false;
-    toast(`サーバのインストールに失敗しました: ${errMsg(e)}`, true);
+    if (stillPending) toast(`サーバのインストールに失敗しました: ${errMsg(e)}`, true);
   }
 }
 
@@ -1056,9 +1127,12 @@ async function startModelDownload(name: string): Promise<void> {
   try {
     await invoke("download_model", { model: name });
   } catch (e: unknown) {
+    // If the key is gone, a download-progress done/error event already
+    // handled (and toasted) this failure — don't toast twice.
+    const stillPending = activeDownloads.has(key);
     activeDownloads.delete(key);
     renderSetupModels();
-    toast(`モデルのダウンロードに失敗しました: ${errMsg(e)}`, true);
+    if (stillPending) toast(`モデルのダウンロードに失敗しました: ${errMsg(e)}`, true);
   }
 }
 
@@ -1148,13 +1222,25 @@ async function setupListeners(): Promise<void> {
 
   await listen<Settings>("settings-changed", (event) => {
     const incoming = JSON.stringify(event.payload);
-    // Ignore echoes of our own save, and no-op updates. Keep the current
-    // settings object so live input closures (provider/mode cards) stay valid.
-    if (incoming === lastSavedJson || incoming === JSON.stringify(settings)) {
+    // Ignore echoes of our own recent saves, and no-op updates. Keep the
+    // current settings object so live input closures (provider/mode cards)
+    // stay valid.
+    if (savedSnapshots.includes(incoming) || incoming === JSON.stringify(settings)) {
+      return;
+    }
+    // Pending local edits (debounced save armed, or a dirty API key not yet
+    // blurred): don't wholesale-replace. Merge only active_mode_id — the only
+    // field the backend changes autonomously (via tray) — and re-render the
+    // mode views.
+    const hasPendingEdits = saveTimer !== undefined || apiKeyDirty;
+    if (hasPendingEdits && settings) {
+      settings.active_mode_id = event.payload.active_mode_id;
+      renderHomeModes();
+      renderModeList();
       return;
     }
     settings = event.payload;
-    lastSavedJson = incoming;
+    recordSavedSnapshot(incoming);
     renderAll();
   });
 
@@ -1197,7 +1283,7 @@ async function init(): Promise<void> {
 
   try {
     settings = await invoke<Settings>("get_settings");
-    lastSavedJson = JSON.stringify(settings);
+    recordSavedSnapshot(JSON.stringify(settings));
   } catch (e: unknown) {
     toast(`設定の読み込みに失敗しました: ${errMsg(e)}`, true);
   }

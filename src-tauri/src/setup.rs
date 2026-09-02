@@ -24,6 +24,11 @@ const SETUP_REQUIRED_MSG: &str =
 pub struct ManagedServer {
     pub child: Child,
     pub signature: String,
+    /// Job object with kill-on-close: keeps the whisper-server bound to this
+    /// process's lifetime even on crash / Task Manager kill. Must stay alive
+    /// as long as the child runs.
+    #[allow(dead_code)]
+    pub job: win32job::Job,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -32,6 +37,8 @@ pub struct SetupStatus {
     pub server_path: String,
     pub model_installed: bool,
     pub model_path: String,
+    /// Absolute path of the managed models directory ({app_data}/models).
+    pub models_dir: String,
     pub models: Vec<ModelInfo>,
 }
 
@@ -136,6 +143,7 @@ pub fn get_setup_status(app: &AppHandle, settings: &Settings) -> Result<SetupSta
         model_path: model
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default(),
+        models_dir: mdir.to_string_lossy().to_string(),
         models,
     })
 }
@@ -159,6 +167,8 @@ pub async fn ensure_server(app: AppHandle) -> Result<u16, String> {
 }
 
 fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, String> {
+    use std::sync::atomic::Ordering;
+
     let port = settings.stt.local.server_port;
     let threads = settings.stt.local.threads;
     let server_path =
@@ -174,21 +184,77 @@ fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, S
     );
 
     let state = app.state::<crate::AppState>();
-    let mut guard = state.server.lock().unwrap();
 
-    if let Some(managed) = guard.as_mut() {
-        let alive = matches!(managed.child.try_wait(), Ok(None));
-        if alive && managed.signature == signature && tcp_ok(port, Duration::from_millis(600)) {
-            return Ok(port);
+    // The slow spawn + health-check must never run while holding the mutex.
+    // Concurrent callers coordinate through the `server_starting` flag.
+    loop {
+        let stale = {
+            let mut guard = state.server.lock().unwrap();
+            match guard.as_mut() {
+                Some(managed) => {
+                    let alive = matches!(managed.child.try_wait(), Ok(None));
+                    if alive
+                        && managed.signature == signature
+                        && tcp_ok(port, Duration::from_millis(600))
+                    {
+                        return Ok(port);
+                    }
+                    // stale/dead/mismatched server: take it out, kill outside
+                    guard.take()
+                }
+                None => {
+                    if state.server_starting.swap(true, Ordering::SeqCst) {
+                        // another caller is starting; wait and re-check
+                        None
+                    } else {
+                        // we own the start
+                        break;
+                    }
+                }
+            }
+        };
+        if let Some(mut managed) = stale {
+            let _ = managed.child.kill();
+            let _ = managed.child.wait();
+            continue;
         }
-        let _ = managed.child.kill();
-        let _ = managed.child.wait();
-        *guard = None;
+        std::thread::sleep(Duration::from_millis(100));
     }
 
-    let mut cmd = Command::new(&server_path);
+    // We own `server_starting`: spawn + health-check with no lock held.
+    let result = spawn_and_health_check(&server_path, &model_path, port, threads);
+    let mut guard = state.server.lock().unwrap();
+    state.server_starting.store(false, Ordering::SeqCst);
+    match result {
+        Ok((child, job)) => {
+            *guard = Some(ManagedServer {
+                child,
+                signature,
+                job,
+            });
+            Ok(port)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn spawn_and_health_check(
+    server_path: &Path,
+    model_path: &Path,
+    port: u16,
+    threads: u32,
+) -> Result<(Child, win32job::Job), String> {
+    // Refuse to spawn onto a port something already listens on (e.g. an
+    // orphaned whisper-server from a previous crash).
+    if tcp_ok(port, Duration::from_millis(300)) {
+        return Err(format!(
+            "ポート{port}は既に使用されています。孤児のwhisper-server.exeが残っていないか確認するか、設定でポートを変更してください。"
+        ));
+    }
+
+    let mut cmd = Command::new(server_path);
     cmd.arg("-m")
-        .arg(&model_path)
+        .arg(model_path)
         .arg("--port")
         .arg(port.to_string())
         .arg("--host")
@@ -210,6 +276,17 @@ fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, S
         .spawn()
         .map_err(|e| format!("Whisperサーバの起動に失敗しました: {e}"))?;
 
+    // Bind the child to a kill-on-close Job Object so it dies with this
+    // process even on crash / Task Manager kill.
+    let job = match assign_kill_on_close_job(&child) {
+        Ok(job) => job,
+        Err(e) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(e);
+        }
+    };
+
     // health check: retry TCP connect for up to 20 seconds
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
@@ -229,8 +306,18 @@ fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, S
         std::thread::sleep(Duration::from_millis(500));
     }
 
-    *guard = Some(ManagedServer { child, signature });
-    Ok(port)
+    Ok((child, job))
+}
+
+fn assign_kill_on_close_job(child: &Child) -> Result<win32job::Job, String> {
+    use std::os::windows::io::AsRawHandle;
+    let mut info = win32job::ExtendedLimitInfo::new();
+    info.limit_kill_on_job_close();
+    let job = win32job::Job::create_with_limit_info(&info)
+        .map_err(|e| format!("ジョブオブジェクトの作成に失敗しました: {e}"))?;
+    job.assign_process(child.as_raw_handle() as isize)
+        .map_err(|e| format!("ジョブオブジェクトへの割り当てに失敗しました: {e}"))?;
+    Ok(job)
 }
 
 fn tcp_ok(port: u16, timeout: Duration) -> bool {
@@ -239,13 +326,18 @@ fn tcp_ok(port: u16, timeout: Duration) -> bool {
 }
 
 /// Kill the managed whisper-server, if any.
+/// The server is taken out under the lock but killed after releasing it.
 pub fn kill_server(app: &AppHandle) {
     if let Some(state) = app.try_state::<crate::AppState>() {
-        if let Ok(mut guard) = state.server.lock() {
-            if let Some(mut managed) = guard.take() {
-                let _ = managed.child.kill();
-                let _ = managed.child.wait();
-            }
+        let managed = match state.server.lock() {
+            Ok(mut guard) => guard.take(),
+            Err(_) => None,
+        };
+        if let Some(mut managed) = managed {
+            let _ = managed.child.kill();
+            let _ = managed.child.wait();
+            // dropping `managed.job` closes the job handle, which also kills
+            // the process tree thanks to kill-on-close
         }
     }
 }
@@ -329,6 +421,15 @@ async fn stream_download(
     file.flush()
         .await
         .map_err(|e| format!("ファイルの書き込みに失敗しました: {e}"))?;
+    drop(file);
+
+    // If the server told us the size, a short read means a truncated download.
+    if total > 0 && downloaded != total {
+        let _ = tokio::fs::remove_file(dest).await;
+        return Err(
+            "ダウンロードが不完全です。ネットワークを確認して再試行してください。".to_string(),
+        );
+    }
     Ok((downloaded, total))
 }
 
@@ -444,6 +545,24 @@ async fn download_model_inner(app: &AppHandle, model: &str) -> Result<(), String
 
     let (downloaded, total) =
         stream_download(app, &client, &url, &part, "model", model).await?;
+
+    // Sanity check: final size must be within ±20% of the expected size.
+    let expected_bytes = MODELS
+        .iter()
+        .find(|(n, _)| *n == model)
+        .map(|(_, size_mb)| size_mb * 1024 * 1024)
+        .unwrap_or(0);
+    if expected_bytes > 0 {
+        let lo = expected_bytes * 8 / 10;
+        let hi = expected_bytes * 12 / 10;
+        if downloaded < lo || downloaded > hi {
+            let _ = tokio::fs::remove_file(&part).await;
+            return Err(
+                "ダウンロードが不完全です。ネットワークを確認して再試行してください。"
+                    .to_string(),
+            );
+        }
+    }
 
     tokio::fs::rename(&part, &dest)
         .await

@@ -31,6 +31,14 @@ impl RecorderHandle {
     }
 }
 
+impl Drop for RecorderHandle {
+    /// Any dropped/overwritten handle must terminate its capture thread so a
+    /// recorder can never be orphaned recording into the void.
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+    }
+}
+
 /// Start recording from the default input device.
 /// Emits `level` events (~60ms) with `{ rms: 0.0..1.0 }` while recording.
 pub fn start(app: AppHandle) -> Result<RecorderHandle, String> {
@@ -50,7 +58,12 @@ pub fn start(app: AppHandle) -> Result<RecorderHandle, String> {
             rx: result_rx,
         }),
         Ok(Err(e)) => Err(e),
-        Err(_) => Err("マイクの初期化がタイムアウトしました".to_string()),
+        Err(_) => {
+            // Signal the (still initializing) capture thread to exit so it
+            // does not keep recording after we report the timeout.
+            stop.store(true, Ordering::SeqCst);
+            Err("マイクの初期化がタイムアウトしました".to_string())
+        }
     }
 }
 
@@ -83,6 +96,12 @@ fn record_thread(
             ))
         }
     };
+
+    // If the caller already gave up (init timeout), exit before capturing.
+    if stop.load(Ordering::SeqCst) {
+        let msg = "録音は開始前に中断されました".to_string();
+        return Err(fail(msg.clone(), &ready_tx));
+    }
 
     let sample_rate: u32 = supported.sample_rate();
     let channels = supported.channels() as usize;
