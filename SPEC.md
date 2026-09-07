@@ -320,3 +320,36 @@ type UpdateInfo = {
 - フロントエンド(コア): `src/**`(locales含む), `index.html`, `overlay.html`
 - 翻訳担当(言語別): `src/locales/{自分のcode}.json` **のみ**
 - 変更禁止: `src-tauri/tauri.conf.json`, `src-tauri/capabilities/default.json`, `package.json`(バージョンは統合者が管理)
+
+---
+
+# v0.3 追加仕様: 修飾キー単体ホットキー（既定: 右Alt）
+
+## 設定値
+
+- `settings.hotkey` は従来のコンボ(`"Ctrl+Alt+Space"`)に加え、**特殊トークン** `RAlt | LAlt | RCtrl | LCtrl | RShift | LShift` を許可。
+- **既定値を `"RAlt"`(右Alt単体)に変更**(新規作成時のみ。既存settings.jsonは変更しない)。
+
+## バックエンド (hook.rs 新設)
+
+- 特殊トークン時は global-shortcut プラグインを使わず、**WH_KEYBOARD_LL 低レベルフック**で検知:
+  - 起動時に専用スレッド(メッセージポンプ付き)でフックを1回インストール。監視VKは `AtomicU32`(0=無効)。RAlt=0xA5, LAlt=0xA4, RCtrl=0xA3, LCtrl=0xA2, RShift=0xA1, LShift=0xA0。
+  - 対象VKの keydown で `pipeline::toggle`(コールバック内は最小処理、toggleは別スレッドへ)。
+  - `LLKHF_INJECTED` は無視(enigo等の合成入力に反応しない)。オートリピート抑止(down状態を保持し、up→downの遷移のみ発火)。
+  - 対象キーの down/up は **swallow**(return 1)し、他アプリへのAltメニュー等の副作用を防ぐ。downをswallowしたら対応するupもswallowする。
+- コンボ⇔特殊トークン切替: `register_hotkey` で「特殊トークンならフックatomicをセットしプラグインを全解除」「コンボならatomic=0にしプラグイン登録」。検証順序は従来通り(**先に検証・成功時のみ永続化**)。特殊トークンはフック有効化が失敗した場合のみ `ERR_HOTKEY_REGISTER|{token}`。
+- 新コマンド `set_hotkey_suspended` `{ suspended: bool }` → `()`:
+  - true の間、**ホットキー経路**(フック・プラグインの両ハンドラ先頭でAtomicBoolチェック)での toggle を無効化。フックは swallow もしない(素通し=キャプチャ欄にキーが届く)。
+  - UIの録音ボタン(`toggle_recording`)には影響しない。
+
+## フロントエンド
+
+- キャプチャ欄: focus で `set_hotkey_suspended(true)`、blur で `false`(失敗は無視)。
+- **修飾キー単体タップ検出**: keydown が修飾キーのみなら保留表示し、対応する keyup までに他キーが来なければ e.code から確定(AltRight→RAlt, AltLeft→LAlt, ControlRight→RCtrl, ControlLeft→LCtrl, ShiftRight→RShift, ShiftLeft→LShift)。途中で他キーが来たら従来のコンボ処理。確定は既存の applyHotkey 経由(バックエンド検証・失敗時ロールバック)。
+- **表示**: `displayHotkey(hotkey)` — 特殊トークンは locale キー `hotkey.RAlt` 等で表示(ja「右Alt」/ en「Right Alt」等)。ホームと一般タブの表示・トースト等ホットキーを表示する全箇所で使用。
+- locale キー追加(**12言語全ファイル、キーパリティ維持**): `hotkey.RAlt` `hotkey.LAlt` `hotkey.RCtrl` `hotkey.LCtrl` `hotkey.RShift` `hotkey.LShift` `general.hotkeyHint`(修飾キー単体も設定可能という短い説明)。
+
+## 注意
+
+- windows-sys の features に `Win32_UI_WindowsAndMessaging` `Win32_Foundation` 等フックに必要なものを追加。
+- 貼り付け前の修飾キー解放待ち(paste.rs)は従来通り(RAltを押したまま確定した場合は物理解放を待つ)。
