@@ -323,18 +323,30 @@ type UpdateInfo = {
 
 ---
 
-# v0.3 追加仕様: 修飾キー単体ホットキー（既定: 右Alt）
+# v0.3 追加仕様: 押しっぱなし録音（プッシュ・トゥ・トーク）+ 修飾キー単体ホットキー（既定: 右Alt押しっぱなし）
+
+Genspark Speak と同じ「**右Altを押している間だけ録音、離すと確定**」を既定動作にする。
 
 ## 設定値
 
 - `settings.hotkey` は従来のコンボ(`"Ctrl+Alt+Space"`)に加え、**特殊トークン** `RAlt | LAlt | RCtrl | LCtrl | RShift | LShift` を許可。
 - **既定値を `"RAlt"`(右Alt単体)に変更**(新規作成時のみ。既存settings.jsonは変更しない)。
+- `settings.hotkey_mode` を追加: `"hold"`(押している間録音・既定) | `"toggle"`(押すたび開始/確定)。serde default = `"hold"`(既存ファイルは欠損→hold)。
+
+## ホットキー動作モード (pipeline)
+
+- 共通エントリを2つに分離: `pipeline::hotkey_pressed(app)` / `pipeline::hotkey_released(app)`。プラグイン(`ShortcutState::Pressed/Released`)とフック(keydown/keyup)の**両方**がこの2つを呼ぶ。suspend中はどちらも無視。
+- **toggle モード**: Pressed = 従来の toggle()(idle→開始 / recording→確定)。Released は無視。
+- **hold モード(既定)**:
+  - Pressed: idle→録音開始+押下時刻記録。recording(タップロック中)→確定(stop_and_process)。処理中→無視。
+  - Released: recording かつ押下から **400ms以上** → 確定。**400ms未満** → 何もしない(録音継続=**タップロック**。誤タップによる0.2秒録音を防ぎ、短押し=トグルとしても使える)。
+  - オートリピート対策: held フラグ(AtomicBool)。Pressed は held false→true の遷移のみ処理、Released で held=false に戻す。
 
 ## バックエンド (hook.rs 新設)
 
 - 特殊トークン時は global-shortcut プラグインを使わず、**WH_KEYBOARD_LL 低レベルフック**で検知:
   - 起動時に専用スレッド(メッセージポンプ付き)でフックを1回インストール。監視VKは `AtomicU32`(0=無効)。RAlt=0xA5, LAlt=0xA4, RCtrl=0xA3, LCtrl=0xA2, RShift=0xA1, LShift=0xA0。
-  - 対象VKの keydown で `pipeline::toggle`(コールバック内は最小処理、toggleは別スレッドへ)。
+  - 対象VKの keydown→`hotkey_pressed` / keyup→`hotkey_released`(コールバック内は最小処理: atomic判定+swallow判断のみ。pressed/released 呼び出しは別スレッドへ。**LLフックのコールバックが遅いと全システムのキー入力を遅延させるため、割り当て・ロック待ち・I/Oを一切しないこと**)。
   - `LLKHF_INJECTED` は無視(enigo等の合成入力に反応しない)。オートリピート抑止(down状態を保持し、up→downの遷移のみ発火)。
   - 対象キーの down/up は **swallow**(return 1)し、他アプリへのAltメニュー等の副作用を防ぐ。downをswallowしたら対応するupもswallowする。
 - コンボ⇔特殊トークン切替: `register_hotkey` で「特殊トークンならフックatomicをセットしプラグインを全解除」「コンボならatomic=0にしプラグイン登録」。検証順序は従来通り(**先に検証・成功時のみ永続化**)。特殊トークンはフック有効化が失敗した場合のみ `ERR_HOTKEY_REGISTER|{token}`。
@@ -347,7 +359,9 @@ type UpdateInfo = {
 - キャプチャ欄: focus で `set_hotkey_suspended(true)`、blur で `false`(失敗は無視)。
 - **修飾キー単体タップ検出**: keydown が修飾キーのみなら保留表示し、対応する keyup までに他キーが来なければ e.code から確定(AltRight→RAlt, AltLeft→LAlt, ControlRight→RCtrl, ControlLeft→LCtrl, ShiftRight→RShift, ShiftLeft→LShift)。途中で他キーが来たら従来のコンボ処理。確定は既存の applyHotkey 経由(バックエンド検証・失敗時ロールバック)。
 - **表示**: `displayHotkey(hotkey)` — 特殊トークンは locale キー `hotkey.RAlt` 等で表示(ja「右Alt」/ en「Right Alt」等)。ホームと一般タブの表示・トースト等ホットキーを表示する全箇所で使用。
-- locale キー追加(**12言語全ファイル、キーパリティ維持**): `hotkey.RAlt` `hotkey.LAlt` `hotkey.RCtrl` `hotkey.LCtrl` `hotkey.RShift` `hotkey.LShift` `general.hotkeyHint`(修飾キー単体も設定可能という短い説明)。
+- **動作モードUI**: 一般タブに `hotkey_mode` のラジオ/セグメント(「押している間だけ録音(推奨)」「押すたびに開始/停止」)。変更は通常のdebounce保存。
+- **overlay**: hold モード時の録音中テキストは `overlay.recordingHold`(「話してください…(離すと確定)」)、toggle モード時は従来の `overlay.recording`。overlayは settings.hotkey_mode で分岐(settings-changedで追随)。
+- locale キー追加(**12言語全ファイル、キーパリティ維持**): `hotkey.RAlt` `hotkey.LAlt` `hotkey.RCtrl` `hotkey.LCtrl` `hotkey.RShift` `hotkey.LShift` `general.hotkeyHint`(修飾キー単体も設定可能という短い説明) `general.hotkeyMode` `general.hotkeyModeHold` `general.hotkeyModeToggle` `overlay.recordingHold`。翻訳は全12言語とも自然なUI文で書くこと。
 
 ## 注意
 
