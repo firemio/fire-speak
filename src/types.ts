@@ -44,9 +44,19 @@ export interface Mode {
   use_llm: boolean;
 }
 
+export interface UpdateSettings {
+  auto_check: boolean;
+  owner: string;
+  repo: string;
+}
+
 export interface Settings {
   hotkey: string;
   language: string;
+  /** UI display language code (one of the 12 SPEC codes). The backend
+   * resolves "" (auto) to a concrete code before the frontend sees it. */
+  ui_lang: string;
+  update: UpdateSettings;
   active_mode_id: string;
   paste_mode: PasteMode;
   restore_clipboard: boolean;
@@ -101,6 +111,14 @@ export interface LevelPayload {
 export interface ResultPayload {
   raw_text: string;
   final_text: string;
+}
+
+export interface UpdateInfo {
+  current: string; // e.g. "0.2.0" (tauri app version)
+  latest: string; // e.g. "0.3.1" (leading "v" stripped from the tag)
+  update_available: boolean; // semver-ish comparison latest > current
+  url: string; // setup.exe asset browser_download_url, else the release html_url
+  notes: string; // release notes body, truncated to 4000 chars (UNTRUSTED — render as textContent only)
 }
 
 export interface DownloadProgressPayload {

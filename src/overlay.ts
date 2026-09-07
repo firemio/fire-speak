@@ -2,6 +2,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { applyDom, getLang, setLang, t, tMsg } from "./i18n";
 import type {
   AppStatus,
   LevelPayload,
@@ -21,6 +22,8 @@ const viz = document.getElementById("viz") as HTMLDivElement;
 
 let currentStatus: AppStatus = "idle";
 let settings: Settings | null = null;
+/** Last payload, replayed when the UI language changes live. */
+let lastStatusPayload: StatusChangedPayload = { status: "recording" };
 
 // ---------------------------------------------------------------------------
 // visualizer
@@ -83,29 +86,30 @@ function resetBars(): void {
 // ---------------------------------------------------------------------------
 
 function applyStatus(payload: StatusChangedPayload): void {
+  lastStatusPayload = payload;
   currentStatus = payload.status;
   hud.dataset.status = payload.status;
   switch (payload.status) {
     case "recording":
       resetBars();
-      statusText.textContent = "話してください… (ホットキーで確定)";
+      statusText.textContent = t("overlay.recording");
       break;
     case "transcribing":
-      statusText.textContent = "文字起こし中…";
+      statusText.textContent = t("overlay.transcribing");
       break;
     case "polishing":
-      statusText.textContent = "AI整形中…";
+      statusText.textContent = t("overlay.polishing");
       break;
     case "done":
       statusText.textContent = payload.message
-        ? `✓ 貼り付けました — ${payload.message}`
-        : "✓ 貼り付けました";
+        ? t("overlay.doneWith", tMsg(payload.message))
+        : t("overlay.done");
       break;
     case "error":
-      statusText.textContent = payload.message ?? "エラーが発生しました";
+      statusText.textContent = payload.message ? tMsg(payload.message) : t("overlay.error");
       break;
     case "idle":
-      statusText.textContent = "待機中";
+      statusText.textContent = t("overlay.idle");
       resetBars();
       break;
   }
@@ -150,15 +154,24 @@ async function init(): Promise<void> {
 
   await listen<Settings>("settings-changed", (event) => {
     settings = event.payload;
+    // Follow live UI-language changes made in the settings window.
+    if (settings.ui_lang !== getLang()) {
+      setLang(settings.ui_lang);
+      applyDom();
+      applyStatus(lastStatusPayload);
+    }
     updateModeChip();
   });
 
   try {
     settings = await invoke<Settings>("get_settings");
+    // ui_lang arrives already resolved to a concrete code by the backend.
+    setLang(settings.ui_lang);
     updateModeChip();
   } catch {
-    // non-fatal: chip stays hidden
+    // non-fatal: chip stays hidden, language stays at default
   }
+  applyDom();
 }
 
 window.addEventListener("DOMContentLoaded", () => {

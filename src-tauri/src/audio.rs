@@ -21,7 +21,7 @@ impl RecorderHandle {
         self.stop.store(true, Ordering::SeqCst);
         self.rx
             .recv_timeout(Duration::from_secs(10))
-            .map_err(|_| "録音の停止に失敗しました(タイムアウト)".to_string())?
+            .map_err(|_| "ERR_INTERNAL|record stop timeout".to_string())?
     }
 
     /// Stop recording and discard the result.
@@ -62,7 +62,7 @@ pub fn start(app: AppHandle) -> Result<RecorderHandle, String> {
             // Signal the (still initializing) capture thread to exit so it
             // does not keep recording after we report the timeout.
             stop.store(true, Ordering::SeqCst);
-            Err("マイクの初期化がタイムアウトしました".to_string())
+            Err("ERR_MIC_INIT|timeout".to_string())
         }
     }
 }
@@ -81,25 +81,17 @@ fn record_thread(
     let device = match host.default_input_device() {
         Some(d) => d,
         None => {
-            return Err(fail(
-                "録音デバイス(マイク)が見つかりません。マイクを接続してください".to_string(),
-                &ready_tx,
-            ))
+            return Err(fail("ERR_NO_MIC".to_string(), &ready_tx))
         }
     };
     let supported = match device.default_input_config() {
         Ok(c) => c,
-        Err(e) => {
-            return Err(fail(
-                format!("マイク設定の取得に失敗しました: {e}"),
-                &ready_tx,
-            ))
-        }
+        Err(e) => return Err(fail(format!("ERR_MIC_INIT|{e}"), &ready_tx)),
     };
 
     // If the caller already gave up (init timeout), exit before capturing.
     if stop.load(Ordering::SeqCst) {
-        let msg = "録音は開始前に中断されました".to_string();
+        let msg = "ERR_INTERNAL|record aborted before start".to_string();
         return Err(fail(msg.clone(), &ready_tx));
     }
 
@@ -141,7 +133,7 @@ fn record_thread(
                 cpal::SampleFormat::F64 => build_stream::<f64>(
                     &device, &config, channels, max_samples, samples.clone(), level.clone(),
                 ),
-                other => Err(format!("未対応のサンプル形式です: {other:?}")),
+                other => Err(format!("ERR_MIC_INIT|unsupported sample format: {other:?}")),
             }
         };
         match build(sample_format) {
@@ -151,7 +143,7 @@ fn record_thread(
     };
 
     if let Err(e) = stream.play() {
-        return Err(fail(format!("録音の開始に失敗しました: {e}"), &ready_tx));
+        return Err(fail(format!("ERR_MIC_INIT|play: {e}"), &ready_tx));
     }
 
     let _ = ready_tx.send(Ok(()));
@@ -215,7 +207,7 @@ where
             },
             None,
         )
-        .map_err(|e| format!("録音ストリームの作成に失敗しました: {e}"))
+        .map_err(|e| format!("ERR_MIC_INIT|{e}"))
 }
 
 fn f32_to_i16(s: f32) -> i16 {
@@ -259,15 +251,15 @@ pub fn wav_bytes(samples: &[i16]) -> Result<Vec<u8>, String> {
     let mut cursor = std::io::Cursor::new(Vec::new());
     {
         let mut writer = hound::WavWriter::new(&mut cursor, spec)
-            .map_err(|e| format!("WAVの生成に失敗しました: {e}"))?;
+            .map_err(|e| format!("ERR_INTERNAL|wav: {e}"))?;
         for s in samples {
             writer
                 .write_sample(*s)
-                .map_err(|e| format!("WAVの書き込みに失敗しました: {e}"))?;
+                .map_err(|e| format!("ERR_INTERNAL|wav write: {e}"))?;
         }
         writer
             .finalize()
-            .map_err(|e| format!("WAVの生成に失敗しました: {e}"))?;
+            .map_err(|e| format!("ERR_INTERNAL|wav finalize: {e}"))?;
     }
     Ok(cursor.into_inner())
 }

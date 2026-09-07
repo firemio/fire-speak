@@ -199,12 +199,12 @@ async fn run_pipeline(
     // 1. stop recording, collect samples
     let samples = tokio::task::spawn_blocking(move || handle.stop_and_take())
         .await
-        .map_err(|e| format!("内部エラー(録音停止): {e}"))??;
+        .map_err(|e| format!("ERR_INTERNAL|record stop: {e}"))??;
     if is_canceled(&app, gen) {
         return Ok(());
     }
     if samples.is_empty() {
-        return Err("音声を認識できませんでした".to_string());
+        return Err("ERR_NO_SPEECH".to_string());
     }
     let wav = crate::audio::wav_bytes(&samples)?;
 
@@ -215,7 +215,7 @@ async fn run_pipeline(
     }
     let raw_text = raw_text.trim().to_string();
     if raw_text.is_empty() {
-        return Err("音声を認識できませんでした".to_string());
+        return Err("ERR_NO_SPEECH".to_string());
     }
 
     // 3. LLM polish (optional)
@@ -254,11 +254,11 @@ async fn run_pipeline(
             match crate::llm::polish(&p, &mode.instruction, &raw_text).await {
                 Ok(t) if !t.trim().is_empty() => final_text = t.trim().to_string(),
                 Ok(_) => {
-                    warning =
-                        Some("AI整形の結果が空だったため原文を使用しました".to_string());
+                    warning = Some("WARN_LLM_FALLBACK".to_string());
                 }
                 Err(e) => {
-                    warning = Some(format!("AI整形に失敗したため原文を使用しました ({e})"));
+                    eprintln!("llm polish failed, falling back to raw text: {e}");
+                    warning = Some("WARN_LLM_FALLBACK".to_string());
                 }
             }
         }
@@ -277,7 +277,7 @@ async fn run_pipeline(
             crate::paste::paste_text(&text_for_paste, &paste_mode, restore)
         })
         .await
-        .map_err(|e| format!("内部エラー(貼り付け): {e}"))?;
+        .map_err(|e| format!("ERR_INTERNAL|paste: {e}"))?;
 
     // 5. result + history (saved even if paste failed)
     let _ = app.emit(

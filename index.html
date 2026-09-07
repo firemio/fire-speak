@@ -17,38 +17,41 @@
         </div>
         <nav class="nav" id="nav">
           <button class="nav-item is-active" data-section="home">
-            <span class="nav-icon">🏠</span>ホーム
+            <span class="nav-icon">🏠</span><span data-i18n="nav.home">ホーム</span>
           </button>
           <button class="nav-item" data-section="stt">
-            <span class="nav-icon">🎙️</span>音声認識
+            <span class="nav-icon">🎙️</span><span data-i18n="nav.stt">音声認識</span>
           </button>
           <button class="nav-item" data-section="llm">
-            <span class="nav-icon">✨</span>AI整形
+            <span class="nav-icon">✨</span><span data-i18n="nav.llm">AI整形</span>
           </button>
           <button class="nav-item" data-section="modes">
-            <span class="nav-icon">🧩</span>モード
+            <span class="nav-icon">🧩</span><span data-i18n="nav.modes">モード</span>
           </button>
           <button class="nav-item" data-section="history">
-            <span class="nav-icon">🕘</span>履歴
+            <span class="nav-icon">🕘</span><span data-i18n="nav.history">履歴</span>
           </button>
           <button class="nav-item" data-section="general">
-            <span class="nav-icon">⚙️</span>一般
+            <span class="nav-icon">⚙️</span><span data-i18n="nav.general">一般</span>
           </button>
           <button class="nav-item" data-section="setup">
-            <span class="nav-icon">📦</span>セットアップ
+            <span class="nav-icon">📦</span><span data-i18n="nav.setup">セットアップ</span>
+          </button>
+          <button class="nav-item" data-section="update">
+            <span class="nav-icon">🔄</span><span data-i18n="nav.update">アップデート</span>
           </button>
         </nav>
         <div class="sidebar-footer">
-          <button class="btn btn-ghost btn-sm" id="btn-quit" title="アプリを終了">
+          <button class="btn btn-ghost btn-sm" id="btn-quit" data-i18n="sidebar.quit" data-i18n-title="sidebar.quitTitle" title="アプリを終了">
             終了
           </button>
-          <span class="version">v0.1.0</span>
+          <span class="version" id="app-version"></span>
         </div>
       </aside>
 
       <main class="content">
         <header class="topbar">
-          <h1 id="section-title">ホーム</h1>
+          <h1 id="section-title" data-i18n="nav.home">ホーム</h1>
           <div class="status-pill" id="status-pill" data-status="idle">
             <span class="status-dot"></span>
             <span class="status-label" id="status-label">待機中</span>
@@ -57,61 +60,69 @@
 
         <!-- ホーム -->
         <section class="section is-active" id="section-home">
+          <div class="update-banner" id="update-banner" hidden>
+            <span class="update-banner-icon">🔄</span>
+            <span class="update-banner-text" id="update-banner-text"></span>
+            <button class="btn btn-primary btn-sm" id="btn-banner-open" data-i18n="update.openDownload">ダウンロードページを開く</button>
+            <button class="icon-btn" id="btn-banner-close" data-i18n-title="common.close" title="閉じる">✕</button>
+          </div>
+
           <div class="hero-card">
             <div class="hero-left">
-              <div class="hero-title">音声入力の準備ができています</div>
+              <div class="hero-title" data-i18n="home.heroTitle">音声入力の準備ができています</div>
               <div class="hero-sub">
                 <span class="hotkey-chip" id="home-hotkey">Ctrl+Alt+Space</span>
-                を押すと録音を開始 / 停止します
+                <span data-i18n="home.heroSub">このホットキーを押すと録音を開始 / 停止します</span>
               </div>
             </div>
-            <button class="btn btn-primary" id="btn-record-test">
+            <button class="btn btn-primary" id="btn-record-test" data-i18n="home.recordTest">
               🎙️ 録音テスト
             </button>
           </div>
 
-          <h2 class="section-heading">アクティブモード</h2>
+          <h2 class="section-heading" data-i18n="home.activeMode">アクティブモード</h2>
           <div class="mode-grid" id="home-modes"></div>
 
-          <h2 class="section-heading">直近の履歴</h2>
+          <h2 class="section-heading" data-i18n="home.recent">直近の履歴</h2>
           <div class="recent-list" id="home-recent"></div>
         </section>
 
         <!-- 音声認識 -->
         <section class="section" id="section-stt">
-          <h2 class="section-heading">音声認識エンジン</h2>
+          <h2 class="section-heading" data-i18n="stt.engineHeading">音声認識エンジン</h2>
           <div class="segmented" id="stt-engine-seg">
-            <button data-engine="local">ローカル (whisper.cpp)</button>
-            <button data-engine="cloud">クラウド (OpenAI互換)</button>
+            <button data-engine="local" data-i18n="stt.engineLocal">ローカル (whisper.cpp)</button>
+            <button data-engine="cloud" data-i18n="stt.engineCloud">クラウド (OpenAI互換)</button>
           </div>
 
           <div id="stt-local-panel">
             <div class="card">
-              <div class="card-title">モデル選択</div>
+              <div class="card-title" data-i18n="stt.modelSelect">モデル選択</div>
               <div class="hint">
-                使用する Whisper モデルを選択します。未インストールのモデルは
-                <a href="#" id="link-goto-setup">セットアップ</a> からダウンロードできます。
+                <span data-i18n="stt.modelHintPre">使用する Whisper モデルを選択します。未インストールのモデルは</span>
+                <a href="#" id="link-goto-setup" data-i18n="stt.modelHintLink">セットアップ</a>
+                <span data-i18n="stt.modelHintPost">からダウンロードできます。</span>
               </div>
               <div class="model-select-list" id="stt-model-list"></div>
             </div>
 
             <details class="card details-card">
-              <summary>詳細設定</summary>
+              <summary data-i18n="common.advanced">詳細設定</summary>
               <div class="form-grid">
                 <label class="field">
-                  <span class="field-label">サーバポート</span>
+                  <span class="field-label" data-i18n="stt.serverPort">サーバポート</span>
                   <input type="number" id="in-local-port" min="1" max="65535" />
                 </label>
                 <label class="field">
-                  <span class="field-label">スレッド数</span>
+                  <span class="field-label" data-i18n="stt.threads">スレッド数</span>
                   <input type="number" id="in-local-threads" min="1" max="64" />
                 </label>
                 <label class="field field-wide">
-                  <span class="field-label">モデルパス上書き (空 = 既定)</span>
+                  <span class="field-label" data-i18n="stt.modelPathOverride">モデルパス上書き (空 = 既定)</span>
                   <input type="text" id="in-local-model-path" placeholder="C:\...\ggml-base.bin" spellcheck="false" />
                 </label>
                 <label class="field field-wide">
-                  <span class="field-label">whisper-server パス上書き (空 = 既定)</span>
+                  <span class="field-label" data-i18n="stt.serverPathOverride">whisper-server パス上書き (空 = 既定)</span>
                   <input type="text" id="in-local-server-path" placeholder="C:\...\whisper-server.exe" spellcheck="false" />
                 </label>
               </div>
@@ -122,18 +133,18 @@
             <div class="card">
               <div class="form-grid">
                 <label class="field field-wide">
-                  <span class="field-label">Base URL</span>
+                  <span class="field-label" data-i18n="stt.baseUrl">Base URL</span>
                   <input type="text" id="in-cloud-base-url" placeholder="https://api.openai.com/v1" spellcheck="false" />
                 </label>
                 <label class="field field-wide">
-                  <span class="field-label">APIキー</span>
+                  <span class="field-label" data-i18n="stt.apiKey">APIキー</span>
                   <span class="input-with-btn">
                     <input type="password" id="in-cloud-api-key" placeholder="sk-..." spellcheck="false" autocomplete="off" />
-                    <button class="btn btn-ghost btn-sm eye-btn" id="btn-cloud-key-eye" title="表示切替">👁</button>
+                    <button class="btn btn-ghost btn-sm eye-btn" id="btn-cloud-key-eye" data-i18n-title="common.showHide" title="表示切替">👁</button>
                   </span>
                 </label>
                 <label class="field">
-                  <span class="field-label">モデル</span>
+                  <span class="field-label" data-i18n="stt.model">モデル</span>
                   <input type="text" id="in-cloud-model" placeholder="whisper-1" spellcheck="false" />
                 </label>
               </div>
@@ -141,7 +152,7 @@
           </div>
 
           <div class="test-row">
-            <button class="btn" id="btn-test-stt">🔌 接続テスト</button>
+            <button class="btn" id="btn-test-stt" data-i18n="stt.testBtn">🔌 接続テスト</button>
             <span class="test-result" id="stt-test-result"></span>
           </div>
         </section>
@@ -149,10 +160,10 @@
         <!-- AI整形 -->
         <section class="section" id="section-llm">
           <div class="section-head-row">
-            <h2 class="section-heading">整形プロバイダ</h2>
-            <button class="btn btn-sm" id="btn-add-provider">＋ プロバイダを追加</button>
+            <h2 class="section-heading" data-i18n="llm.heading">整形プロバイダ</h2>
+            <button class="btn btn-sm" id="btn-add-provider" data-i18n="llm.add">＋ プロバイダを追加</button>
           </div>
-          <div class="hint">
+          <div class="hint" data-i18n="llm.hint">
             アクティブに設定したプロバイダが、モードの整形指示の実行に使われます。
           </div>
           <div id="provider-list" class="stack"></div>
@@ -161,10 +172,10 @@
         <!-- モード -->
         <section class="section" id="section-modes">
           <div class="section-head-row">
-            <h2 class="section-heading">モード管理</h2>
-            <button class="btn btn-sm" id="btn-add-mode">＋ モードを追加</button>
+            <h2 class="section-heading" data-i18n="modes.heading">モード管理</h2>
+            <button class="btn btn-sm" id="btn-add-mode" data-i18n="modes.add">＋ モードを追加</button>
           </div>
-          <div class="hint">
+          <div class="hint" data-i18n="modes.hint">
             モードごとの整形指示を編集できます。「AI整形を使う」をオフにすると文字起こし結果をそのまま使います。
           </div>
           <div id="mode-list" class="stack"></div>
@@ -173,60 +184,65 @@
         <!-- 履歴 -->
         <section class="section" id="section-history">
           <div class="section-head-row">
-            <h2 class="section-heading">履歴</h2>
-            <button class="btn btn-danger btn-sm" id="btn-clear-history">🗑 全消去</button>
+            <h2 class="section-heading" data-i18n="nav.history">履歴</h2>
+            <button class="btn btn-danger btn-sm" id="btn-clear-history" data-i18n="history.clear">🗑 全消去</button>
           </div>
           <div id="history-list" class="stack"></div>
         </section>
 
         <!-- 一般 -->
         <section class="section" id="section-general">
-          <h2 class="section-heading">一般設定</h2>
+          <h2 class="section-heading" data-i18n="general.heading">一般設定</h2>
           <div class="card">
             <div class="form-grid">
               <label class="field field-wide">
-                <span class="field-label">グローバルホットキー</span>
+                <span class="field-label" data-i18n="general.hotkey">グローバルホットキー</span>
                 <input
                   type="text"
                   id="in-hotkey"
                   class="hotkey-input"
                   readonly
+                  data-i18n-placeholder="general.hotkeyPlaceholder"
                   placeholder="クリックしてキーを押してください"
                 />
-                <span class="field-hint">クリックして、割り当てたいキーの組み合わせを押してください (例: Ctrl+Alt+Space)</span>
+                <span class="field-hint" data-i18n="general.hotkeyHint">クリックして、割り当てたいキーの組み合わせを押してください (例: Ctrl+Alt+Space)</span>
               </label>
               <label class="field">
-                <span class="field-label">認識言語</span>
+                <span class="field-label" data-i18n="general.uiLang">表示言語</span>
+                <select id="in-ui-lang"></select>
+              </label>
+              <label class="field">
+                <span class="field-label" data-i18n="general.language">認識言語</span>
                 <select id="in-language">
-                  <option value="auto">自動判定</option>
-                  <option value="ja">日本語</option>
-                  <option value="en">英語</option>
+                  <option value="auto" data-i18n="general.langAuto">自動判定</option>
+                  <option value="ja" data-i18n="general.langJa">日本語</option>
+                  <option value="en" data-i18n="general.langEn">英語</option>
                 </select>
               </label>
               <label class="field">
-                <span class="field-label">貼り付け方法</span>
+                <span class="field-label" data-i18n="general.pasteMode">貼り付け方法</span>
                 <select id="in-paste-mode">
-                  <option value="paste">自動貼り付け (Ctrl+V送信)</option>
-                  <option value="clipboard">クリップボードにコピーのみ</option>
+                  <option value="paste" data-i18n="general.pasteAuto">自動貼り付け (Ctrl+V送信)</option>
+                  <option value="clipboard" data-i18n="general.pasteClipboard">クリップボードにコピーのみ</option>
                 </select>
               </label>
               <label class="field">
-                <span class="field-label">履歴保存件数</span>
+                <span class="field-label" data-i18n="general.historyLimit">履歴保存件数</span>
                 <input type="number" id="in-history-limit" min="0" max="1000" />
               </label>
             </div>
             <div class="switch-rows">
               <label class="switch-row">
                 <span>
-                  <span class="switch-title">クリップボードを復元</span>
-                  <span class="switch-desc">貼り付け後に元のクリップボード内容を戻します</span>
+                  <span class="switch-title" data-i18n="general.restoreClipboard">クリップボードを復元</span>
+                  <span class="switch-desc" data-i18n="general.restoreClipboardDesc">貼り付け後に元のクリップボード内容を戻します</span>
                 </span>
                 <input type="checkbox" id="in-restore-clipboard" class="switch" />
               </label>
               <label class="switch-row">
                 <span>
-                  <span class="switch-title">Windows 起動時に自動起動</span>
-                  <span class="switch-desc">サインイン時に fire-speak を常駐開始します</span>
+                  <span class="switch-title" data-i18n="general.autostart">Windows 起動時に自動起動</span>
+                  <span class="switch-desc" data-i18n="general.autostartDesc">サインイン時に fire-speak を常駐開始します</span>
                 </span>
                 <input type="checkbox" id="in-autostart" class="switch" />
               </label>
@@ -236,8 +252,8 @@
 
         <!-- セットアップ -->
         <section class="section" id="section-setup">
-          <h2 class="section-heading">ローカル音声認識のセットアップ</h2>
-          <div class="hint">
+          <h2 class="section-heading" data-i18n="setup.heading">ローカル音声認識のセットアップ</h2>
+          <div class="hint" data-i18n="setup.hint">
             ローカルエンジンを使うには whisper-server 本体と、いずれかのモデルが必要です。
           </div>
 
@@ -255,12 +271,61 @@
             </div>
           </div>
 
-          <h2 class="section-heading">モデル</h2>
+          <h2 class="section-heading" data-i18n="setup.modelsHeading">モデル</h2>
           <div class="stack" id="setup-model-list"></div>
 
           <div class="test-row">
-            <button class="btn" id="btn-open-config">📂 設定フォルダを開く</button>
+            <button class="btn" id="btn-open-config" data-i18n="setup.openConfig">📂 設定フォルダを開く</button>
           </div>
+        </section>
+
+        <!-- アップデート -->
+        <section class="section" id="section-update">
+          <h2 class="section-heading" data-i18n="nav.update">アップデート</h2>
+          <div class="card">
+            <div class="update-version-row">
+              <span data-i18n="update.currentVersion">現在のバージョン</span>
+              <span class="hotkey-chip" id="update-current-version">—</span>
+            </div>
+            <div class="test-row update-check-row">
+              <button class="btn btn-primary" id="btn-check-update" data-i18n="update.check">更新を確認</button>
+              <span class="test-result" id="update-check-result"></span>
+            </div>
+            <div id="update-result" hidden>
+              <div class="update-result-title" id="update-result-title"></div>
+              <div id="update-notes-wrap" hidden>
+                <div class="field-label" data-i18n="update.notes">リリースノート</div>
+                <pre class="update-notes" id="update-notes"></pre>
+              </div>
+              <button class="btn" id="btn-open-download" data-i18n="update.openDownload" hidden>ダウンロードページを開く</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="switch-rows">
+              <label class="switch-row">
+                <span>
+                  <span class="switch-title" data-i18n="update.autoCheck">起動時に自動で更新を確認</span>
+                  <span class="switch-desc" data-i18n="update.autoCheckDesc">アプリ起動時に GitHub Releases を自動確認します</span>
+                </span>
+                <input type="checkbox" id="in-auto-check" class="switch" />
+              </label>
+            </div>
+          </div>
+
+          <details class="card details-card">
+            <summary data-i18n="common.advanced">詳細設定</summary>
+            <div class="form-grid">
+              <label class="field">
+                <span class="field-label" data-i18n="update.owner">GitHub オーナー</span>
+                <input type="text" id="in-update-owner" spellcheck="false" placeholder="firemio" />
+              </label>
+              <label class="field">
+                <span class="field-label" data-i18n="update.repo">リポジトリ名</span>
+                <input type="text" id="in-update-repo" spellcheck="false" placeholder="fire-speak" />
+              </label>
+            </div>
+          </details>
         </section>
       </main>
     </div>

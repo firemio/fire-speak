@@ -1111,3 +1111,64 @@ input.switch:focus-visible {
 ::-webkit-scrollbar-thumb:hover {
   background: #39415090;
 }
+
+/* ---------------------------------------------------------------------------
+   update section + home banner (v0.2)
+--------------------------------------------------------------------------- */
+
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--accent-soft);
+  border: 1px solid rgba(255, 107, 53, 0.4);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 18px;
+}
+
+.update-banner-icon {
+  font-size: 18px;
+}
+
+.update-banner-text {
+  flex: 1;
+  font-weight: 600;
+}
+
+.update-version-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  color: var(--text-dim);
+}
+
+.update-check-row {
+  margin-top: 0;
+}
+
+.update-result-title {
+  font-weight: 600;
+  margin: 12px 0 10px;
+}
+
+.update-result-title.is-new {
+  color: var(--accent);
+}
+
+.update-notes {
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  max-height: 260px;
+  overflow: auto;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 12px;
+  font-family: var(--font);
+  color: var(--text-dim);
+  margin: 6px 0 12px;
+}

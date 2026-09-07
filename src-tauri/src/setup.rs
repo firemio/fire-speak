@@ -18,8 +18,7 @@ pub const MODELS: &[(&str, u64)] = &[
 /// Preference order when the user did not pin a model path.
 const MODEL_PREFERENCE: &[&str] = &["large-v3-turbo", "medium", "small", "base", "tiny"];
 
-const SETUP_REQUIRED_MSG: &str =
-    "セットアップ画面からWhisperサーバとモデルをインストールしてください";
+const SETUP_REQUIRED_MSG: &str = "ERR_SETUP_REQUIRED";
 
 pub struct ManagedServer {
     pub child: Child,
@@ -52,7 +51,7 @@ pub struct ModelInfo {
 fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
-        .map_err(|e| format!("アプリデータフォルダを取得できませんでした: {e}"))
+        .map_err(|e| format!("ERR_FILE_IO|app data dir: {e}"))
 }
 
 pub fn bin_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -163,7 +162,7 @@ pub async fn ensure_server(app: AppHandle) -> Result<u16, String> {
         .clone();
     tokio::task::spawn_blocking(move || ensure_server_blocking(&app, &settings))
         .await
-        .map_err(|e| format!("内部エラー(サーバ起動): {e}"))?
+        .map_err(|e| format!("ERR_INTERNAL|server start: {e}"))?
 }
 
 fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, String> {
@@ -251,9 +250,7 @@ fn spawn_and_health_check(
     if tcp_ok(port, Duration::from_millis(300)) {
         std::thread::sleep(Duration::from_millis(400));
         if tcp_ok(port, Duration::from_millis(300)) {
-            return Err(format!(
-                "ポート{port}は既に使用されています。孤児のwhisper-server.exeが残っていないか確認するか、設定でポートを変更してください。"
-            ));
+            return Err(format!("ERR_PORT_IN_USE|{port}"));
         }
     }
 
@@ -279,7 +276,7 @@ fn spawn_and_health_check(
     }
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("Whisperサーバの起動に失敗しました: {e}"))?;
+        .map_err(|e| format!("ERR_SERVER_START|{e}"))?;
 
     // Bind the child to a kill-on-close Job Object so it dies with this
     // process even on crash / Task Manager kill.
@@ -296,9 +293,8 @@ fn spawn_and_health_check(
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         if let Ok(Some(status)) = child.try_wait() {
-            return Err(format!(
-                "Whisperサーバが起動直後に終了しました (exit: {status})。モデルファイルやポート設定を確認してください"
-            ));
+            eprintln!("whisper-server exited immediately (exit: {status})");
+            return Err("ERR_SERVER_DIED".to_string());
         }
         if tcp_ok(port, Duration::from_millis(400)) {
             break;
@@ -306,7 +302,7 @@ fn spawn_and_health_check(
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            return Err("Whisperサーバの起動がタイムアウトしました(20秒)".to_string());
+            return Err("ERR_SERVER_START|health check timeout (20s)".to_string());
         }
         std::thread::sleep(Duration::from_millis(500));
     }
@@ -319,9 +315,9 @@ fn assign_kill_on_close_job(child: &Child) -> Result<win32job::Job, String> {
     let mut info = win32job::ExtendedLimitInfo::new();
     info.limit_kill_on_job_close();
     let job = win32job::Job::create_with_limit_info(&info)
-        .map_err(|e| format!("ジョブオブジェクトの作成に失敗しました: {e}"))?;
+        .map_err(|e| format!("ERR_SERVER_START|job object: {e}"))?;
     job.assign_process(child.as_raw_handle() as isize)
-        .map_err(|e| format!("ジョブオブジェクトへの割り当てに失敗しました: {e}"))?;
+        .map_err(|e| format!("ERR_SERVER_START|job assign: {e}"))?;
     Ok(job)
 }
 
@@ -377,7 +373,7 @@ fn download_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .user_agent("fire-speak")
         .build()
-        .map_err(|e| format!("HTTPクライアントの初期化に失敗しました: {e}"))
+        .map_err(|e| format!("ERR_INTERNAL|http client: {e}"))
 }
 
 async fn stream_download(
@@ -392,10 +388,10 @@ async fn stream_download(
         .get(url)
         .send()
         .await
-        .map_err(|e| format!("ダウンロードに失敗しました: {e}"))?;
+        .map_err(|e| format!("ERR_DOWNLOAD_FAILED|{e}"))?;
     if !resp.status().is_success() {
         return Err(format!(
-            "ダウンロードに失敗しました (HTTP {})",
+            "ERR_DOWNLOAD_FAILED|HTTP {}",
             resp.status().as_u16()
         ));
     }
@@ -403,11 +399,11 @@ async fn stream_download(
     if let Some(parent) = dest.parent() {
         tokio::fs::create_dir_all(parent)
             .await
-            .map_err(|e| format!("フォルダを作成できませんでした: {e}"))?;
+            .map_err(|e| format!("ERR_FILE_IO|create dir: {e}"))?;
     }
     let mut file = tokio::fs::File::create(dest)
         .await
-        .map_err(|e| format!("ファイルを作成できませんでした: {e}"))?;
+        .map_err(|e| format!("ERR_FILE_IO|create file: {e}"))?;
     let mut stream = resp.bytes_stream();
     let mut downloaded: u64 = 0;
     let mut last_emit = Instant::now();
@@ -415,10 +411,10 @@ async fn stream_download(
     // Any mid-stream failure must not leave a partial file on disk.
     let write_result: Result<(), String> = async {
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| format!("ダウンロード中にエラーが発生しました: {e}"))?;
+            let chunk = chunk.map_err(|e| format!("ERR_DOWNLOAD_FAILED|{e}"))?;
             file.write_all(&chunk)
                 .await
-                .map_err(|e| format!("ファイルの書き込みに失敗しました: {e}"))?;
+                .map_err(|e| format!("ERR_FILE_IO|write: {e}"))?;
             downloaded += chunk.len() as u64;
             if last_emit.elapsed() >= Duration::from_millis(200) {
                 last_emit = Instant::now();
@@ -427,7 +423,7 @@ async fn stream_download(
         }
         file.flush()
             .await
-            .map_err(|e| format!("ファイルの書き込みに失敗しました: {e}"))
+            .map_err(|e| format!("ERR_FILE_IO|flush: {e}"))
     }
     .await;
     drop(file);
@@ -439,9 +435,7 @@ async fn stream_download(
     // If the server told us the size, a short read means a truncated download.
     if total > 0 && downloaded != total {
         let _ = tokio::fs::remove_file(dest).await;
-        return Err(
-            "ダウンロードが不完全です。ネットワークを確認して再試行してください。".to_string(),
-        );
+        return Err("ERR_DOWNLOAD_INCOMPLETE".to_string());
     }
     Ok((downloaded, total))
 }
@@ -462,12 +456,12 @@ async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
         .header("Accept", "application/vnd.github+json")
         .send()
         .await
-        .map_err(|e| format!("GitHubへの接続に失敗しました: {e}"))?
+        .map_err(|e| format!("ERR_DOWNLOAD_FAILED|{e}"))?
         .error_for_status()
-        .map_err(|e| format!("GitHub APIエラー: {e}"))?
+        .map_err(|e| format!("ERR_DOWNLOAD_FAILED|GitHub API: {e}"))?
         .json()
         .await
-        .map_err(|e| format!("GitHubリリース情報の解析に失敗しました: {e}"))?;
+        .map_err(|e| format!("ERR_DOWNLOAD_FAILED|parse release: {e}"))?;
 
     let empty = Vec::new();
     let assets = release["assets"].as_array().unwrap_or(&empty);
@@ -484,18 +478,18 @@ async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
                 n.contains("win") && n.contains("x64") && n.ends_with(".zip")
             })
         })
-        .ok_or_else(|| "Windows(x64)用のwhisper-serverアセットが見つかりませんでした".to_string())?;
+        .ok_or_else(|| "ERR_NO_SERVER_ASSET".to_string())?;
 
     let name = asset_name(picked);
     let url = picked["browser_download_url"]
         .as_str()
-        .ok_or_else(|| "ダウンロードURLを取得できませんでした".to_string())?
+        .ok_or_else(|| "ERR_NO_SERVER_ASSET".to_string())?
         .to_string();
 
     let bin = bin_dir(app)?;
     tokio::fs::create_dir_all(&bin)
         .await
-        .map_err(|e| format!("フォルダを作成できませんでした: {e}"))?;
+        .map_err(|e| format!("ERR_FILE_IO|create dir: {e}"))?;
     let zip_path = bin.join("_whisper-server-download.zip");
 
     let (downloaded, total) =
@@ -506,13 +500,13 @@ async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
     let zip2 = zip_path.clone();
     let extract_result = tokio::task::spawn_blocking(move || extract_zip(&zip2, &bin2))
         .await
-        .map_err(|e| format!("内部エラー(展開): {e}"))
+        .map_err(|e| format!("ERR_INTERNAL|extract: {e}"))
         .and_then(|r| r);
     let _ = tokio::fs::remove_file(&zip_path).await;
     extract_result?;
 
     if find_server_exe(&bin).is_none() {
-        return Err("展開後にwhisper-server(.exe)が見つかりませんでした".to_string());
+        return Err("ERR_NO_SERVER_ASSET".to_string());
     }
 
     emit_progress(
@@ -529,18 +523,18 @@ async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
 
 fn extract_zip(zip_path: &Path, dest: &Path) -> Result<(), String> {
     let file =
-        std::fs::File::open(zip_path).map_err(|e| format!("ZIPを開けませんでした: {e}"))?;
+        std::fs::File::open(zip_path).map_err(|e| format!("ERR_ZIP|open: {e}"))?;
     let mut archive =
-        zip::ZipArchive::new(file).map_err(|e| format!("ZIPの読み込みに失敗しました: {e}"))?;
+        zip::ZipArchive::new(file).map_err(|e| format!("ERR_ZIP|read: {e}"))?;
     archive
         .extract(dest)
-        .map_err(|e| format!("ZIPの展開に失敗しました: {e}"))
+        .map_err(|e| format!("ERR_ZIP|extract: {e}"))
 }
 
 /// Download a whisper.cpp GGML model from Hugging Face.
 pub async fn download_model(app: AppHandle, model: String) -> Result<(), String> {
     if !MODELS.iter().any(|(n, _)| *n == model) {
-        return Err(format!("不明なモデル名です: {model}"));
+        return Err(format!("ERR_INTERNAL|unknown model: {model}"));
     }
     let result = download_model_inner(&app, &model).await;
     if let Err(e) = &result {
@@ -572,16 +566,13 @@ async fn download_model_inner(app: &AppHandle, model: &str) -> Result<(), String
         let hi = expected_bytes * 12 / 10;
         if downloaded < lo || downloaded > hi {
             let _ = tokio::fs::remove_file(&part).await;
-            return Err(
-                "ダウンロードが不完全です。ネットワークを確認して再試行してください。"
-                    .to_string(),
-            );
+            return Err("ERR_DOWNLOAD_INCOMPLETE".to_string());
         }
     }
 
     tokio::fs::rename(&part, &dest)
         .await
-        .map_err(|e| format!("モデルファイルの保存に失敗しました: {e}"))?;
+        .map_err(|e| format!("ERR_FILE_IO|rename model: {e}"))?;
 
     emit_progress(
         app,

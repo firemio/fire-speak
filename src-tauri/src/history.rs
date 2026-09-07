@@ -33,11 +33,11 @@ fn save(app: &tauri::AppHandle, list: &[HistoryEntry]) -> Result<(), String> {
     let path = history_path(app)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
-            .map_err(|e| format!("履歴フォルダを作成できませんでした: {e}"))?;
+            .map_err(|e| format!("ERR_FILE_IO|create history dir: {e}"))?;
     }
     let text = serde_json::to_string_pretty(list)
-        .map_err(|e| format!("履歴のシリアライズに失敗しました: {e}"))?;
-    std::fs::write(&path, text).map_err(|e| format!("履歴の保存に失敗しました: {e}"))
+        .map_err(|e| format!("ERR_INTERNAL|serialize history: {e}"))?;
+    std::fs::write(&path, text).map_err(|e| format!("ERR_FILE_IO|write history: {e}"))
 }
 
 /// Prepend an entry (newest first), cap to `limit`, persist, and notify the UI.

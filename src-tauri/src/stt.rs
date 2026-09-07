@@ -8,7 +8,7 @@ fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(STT_TIMEOUT_SECS))
         .build()
-        .map_err(|e| format!("HTTPクライアントの初期化に失敗しました: {e}"))
+        .map_err(|e| format!("ERR_INTERNAL|http client: {e}"))
 }
 
 /// Transcribe a 16kHz mono WAV according to the configured engine.
@@ -33,7 +33,7 @@ pub async fn transcribe_local(
     let file_part = reqwest::multipart::Part::bytes(wav)
         .file_name("audio.wav")
         .mime_str("audio/wav")
-        .map_err(|e| format!("リクエストの作成に失敗しました: {e}"))?;
+        .map_err(|e| format!("ERR_INTERNAL|multipart: {e}"))?;
     let mut form = reqwest::multipart::Form::new()
         .part("file", file_part)
         .text("response_format", "json")
@@ -47,25 +47,26 @@ pub async fn transcribe_local(
         .multipart(form)
         .send()
         .await
-        .map_err(|e| format!("Whisperサーバへの接続に失敗しました: {e}"))?;
+        .map_err(|e| format!("ERR_STT_NETWORK|{e}"))?;
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
     if !status.is_success() {
-        return Err(format!(
-            "文字起こしに失敗しました (HTTP {}): {}",
+        eprintln!(
+            "local STT failed (HTTP {}): {}",
             status.as_u16(),
             truncate(&text, 200)
-        ));
+        );
+        return Err(format!("ERR_STT_HTTP|{}", status.as_u16()));
     }
     let v: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| format!("Whisperサーバの応答を解析できませんでした: {e}"))?;
+        .map_err(|e| format!("ERR_STT_NETWORK|invalid response: {e}"))?;
     Ok(v["text"].as_str().unwrap_or("").to_string())
 }
 
 pub async fn transcribe_cloud(settings: &Settings, wav: Vec<u8>) -> Result<String, String> {
     let cloud = &settings.stt.cloud;
     if cloud.api_key.trim().is_empty() {
-        return Err("クラウドSTTのAPIキーが設定されていません".to_string());
+        return Err("ERR_INTERNAL|cloud STT API key not set".to_string());
     }
     let url = format!(
         "{}/audio/transcriptions",
@@ -75,7 +76,7 @@ pub async fn transcribe_cloud(settings: &Settings, wav: Vec<u8>) -> Result<Strin
     let file_part = reqwest::multipart::Part::bytes(wav)
         .file_name("audio.wav")
         .mime_str("audio/wav")
-        .map_err(|e| format!("リクエストの作成に失敗しました: {e}"))?;
+        .map_err(|e| format!("ERR_INTERNAL|multipart: {e}"))?;
     let mut form = reqwest::multipart::Form::new()
         .part("file", file_part)
         .text("model", cloud.model.clone());
@@ -89,18 +90,19 @@ pub async fn transcribe_cloud(settings: &Settings, wav: Vec<u8>) -> Result<Strin
         .multipart(form)
         .send()
         .await
-        .map_err(|e| format!("クラウドSTT APIへの接続に失敗しました: {e}"))?;
+        .map_err(|e| format!("ERR_STT_NETWORK|{e}"))?;
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
     if !status.is_success() {
-        return Err(format!(
-            "クラウドSTTエラー (HTTP {}): {}",
+        eprintln!(
+            "cloud STT failed (HTTP {}): {}",
             status.as_u16(),
             truncate(&text, 200)
-        ));
+        );
+        return Err(format!("ERR_STT_HTTP|{}", status.as_u16()));
     }
     let v: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| format!("クラウドSTTの応答を解析できませんでした: {e}"))?;
+        .map_err(|e| format!("ERR_STT_NETWORK|invalid response: {e}"))?;
     Ok(v["text"].as_str().unwrap_or("").to_string())
 }
 

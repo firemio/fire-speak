@@ -8,6 +8,12 @@ pub struct Settings {
     pub hotkey: String,
     #[serde(default = "default_language")]
     pub language: String,
+    /// UI language code (one of the 12 supported codes) or "" = auto.
+    /// When empty, `load` resolves it from the OS locale in memory only.
+    #[serde(default)]
+    pub ui_lang: String,
+    #[serde(default)]
+    pub update: UpdateSettings,
     #[serde(default = "default_active_mode_id")]
     pub active_mode_id: String,
     #[serde(default = "default_paste_mode")]
@@ -31,6 +37,8 @@ impl Default for Settings {
         Self {
             hotkey: default_hotkey(),
             language: default_language(),
+            ui_lang: String::new(),
+            update: UpdateSettings::default(),
             active_mode_id: default_active_mode_id(),
             paste_mode: default_paste_mode(),
             restore_clipboard: true,
@@ -39,6 +47,26 @@ impl Default for Settings {
             stt: SttSettings::default(),
             llm: LlmSettings::default(),
             modes: default_modes(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UpdateSettings {
+    #[serde(default = "default_true")]
+    pub auto_check: bool,
+    #[serde(default = "default_update_owner")]
+    pub owner: String,
+    #[serde(default = "default_update_repo")]
+    pub repo: String,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        Self {
+            auto_check: true,
+            owner: default_update_owner(),
+            repo: default_update_repo(),
         }
     }
 }
@@ -190,6 +218,12 @@ fn default_active_provider_id() -> String {
 fn default_provider_kind() -> String {
     "openai".to_string()
 }
+fn default_update_owner() -> String {
+    "firemio".to_string()
+}
+fn default_update_repo() -> String {
+    "fire-speak".to_string()
+}
 
 fn default_providers() -> Vec<LlmProvider> {
     vec![
@@ -212,51 +246,16 @@ fn default_providers() -> Vec<LlmProvider> {
     ]
 }
 
+/// serde default for a settings file that is missing the `modes` field:
+/// keep the v0.1 behavior (Japanese defaults).
 fn default_modes() -> Vec<Mode> {
-    vec![
-        Mode {
-            id: "polish".to_string(),
-            name: "整形".to_string(),
-            instruction: "フィラー(「えー」「あの」「um」等)と言い直しを除去し、句読点・改行を整えて自然な文章にしてください。内容・意味は変えないでください。話者が使った言語のまま出力してください。".to_string(),
-            use_llm: true,
-        },
-        Mode {
-            id: "raw".to_string(),
-            name: "そのまま".to_string(),
-            instruction: String::new(),
-            use_llm: false,
-        },
-        Mode {
-            id: "to_en".to_string(),
-            name: "英語に翻訳".to_string(),
-            instruction: "内容を自然で流暢な英語に翻訳してください。フィラーは除去してください。".to_string(),
-            use_llm: true,
-        },
-        Mode {
-            id: "to_ja".to_string(),
-            name: "日本語に翻訳".to_string(),
-            instruction: "内容を自然な日本語に翻訳してください。フィラーは除去してください。".to_string(),
-            use_llm: true,
-        },
-        Mode {
-            id: "terminal".to_string(),
-            name: "ターミナルコマンド".to_string(),
-            instruction: "発話内容を Windows PowerShell で実行可能なコマンドに変換してください。コマンドのみを出力し、説明やコードフェンスは付けないでください。".to_string(),
-            use_llm: true,
-        },
-        Mode {
-            id: "business".to_string(),
-            name: "ビジネス文体".to_string(),
-            instruction: "内容を丁寧なビジネス日本語(です・ます調)に書き直してください。フィラーは除去し、簡潔で礼儀正しい文章にしてください。".to_string(),
-            use_llm: true,
-        },
-    ]
+    crate::locale::default_modes_for("ja")
 }
 
 pub fn config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_config_dir()
-        .map_err(|e| format!("設定フォルダを取得できませんでした: {e}"))
+        .map_err(|e| format!("ERR_FILE_IO|app config dir: {e}"))
 }
 
 fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -264,28 +263,46 @@ fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 /// Load settings from disk; creates the file with defaults on first run.
+///
+/// When `ui_lang` is empty, the UI language resolved from the OS locale is set
+/// IN MEMORY ONLY (never persisted). At first run the 6 default modes are
+/// generated in the resolved initial language.
 pub fn load(app: &tauri::AppHandle) -> Settings {
+    let resolved = crate::locale::resolve_ui_lang();
+
+    let first_run_defaults = |persist: bool, app: &tauri::AppHandle| -> Settings {
+        let mut s = Settings::default();
+        s.modes = crate::locale::default_modes_for(&resolved);
+        if persist {
+            // persisted with ui_lang: "" — the resolved code stays memory-only
+            let _ = save(app, &s);
+        }
+        s.ui_lang = resolved.clone();
+        s
+    };
+
     let path = match settings_path(app) {
         Ok(p) => p,
-        Err(_) => return Settings::default(),
+        Err(_) => return first_run_defaults(false, app),
     };
     if let Ok(text) = std::fs::read_to_string(&path) {
-        if let Ok(s) = serde_json::from_str::<Settings>(&text) {
+        if let Ok(mut s) = serde_json::from_str::<Settings>(&text) {
+            if s.ui_lang.trim().is_empty() {
+                s.ui_lang = resolved.clone();
+            }
             return s;
         }
     }
-    let s = Settings::default();
-    let _ = save(app, &s);
-    s
+    first_run_defaults(true, app)
 }
 
 pub fn save(app: &tauri::AppHandle, settings: &Settings) -> Result<(), String> {
     let path = settings_path(app)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
-            .map_err(|e| format!("設定フォルダを作成できませんでした: {e}"))?;
+            .map_err(|e| format!("ERR_SAVE_SETTINGS|create dir: {e}"))?;
     }
     let text = serde_json::to_string_pretty(settings)
-        .map_err(|e| format!("設定のシリアライズに失敗しました: {e}"))?;
-    std::fs::write(&path, text).map_err(|e| format!("設定の保存に失敗しました: {e}"))
+        .map_err(|e| format!("ERR_SAVE_SETTINGS|serialize: {e}"))?;
+    std::fs::write(&path, text).map_err(|e| format!("ERR_SAVE_SETTINGS|{e}"))
 }

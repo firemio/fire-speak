@@ -2,6 +2,8 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
+import { applyDom, getLang, LANGS, setLang, t, tMsg } from "./i18n";
 import type {
   AppStatus,
   DownloadProgressPayload,
@@ -13,6 +15,7 @@ import type {
   SetupStatus,
   StatusChangedPayload,
   SttEngine,
+  UpdateInfo,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -37,6 +40,11 @@ function errMsg(e: unknown): string {
   if (typeof e === "string") return e;
   if (e instanceof Error) return e.message;
   return String(e);
+}
+
+/** Localized error text: backend Err values are "KEY|p0|p1" message keys. */
+function errText(e: unknown): string {
+  return tMsg(errMsg(e));
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -70,7 +78,7 @@ function formatBytes(n: number): string {
 
 function formatTime(unixMs: number): string {
   const d = new Date(unixMs);
-  return d.toLocaleString("ja-JP", {
+  return d.toLocaleString(getLang(), {
     month: "numeric",
     day: "numeric",
     hour: "2-digit",
@@ -106,14 +114,18 @@ function recordSavedSnapshot(json: string): void {
 
 const activeDownloads = new Map<string, DownloadProgressPayload>();
 
-const STATUS_LABELS: Record<AppStatus, string> = {
-  idle: "待機中",
-  recording: "録音中",
-  transcribing: "文字起こし中…",
-  polishing: "AI整形中…",
-  done: "完了",
-  error: "エラー",
-};
+function statusLabel(status: AppStatus): string {
+  return t(`status.${status}`);
+}
+
+/** Last status payload, re-rendered when the UI language changes. */
+let lastStatusPayload: StatusChangedPayload = { status: "idle" };
+
+/** Update info shown in the home banner (kept for language-change re-render). */
+let bannerInfo: UpdateInfo | null = null;
+
+/** Result of the last manual/auto update check (update section). */
+let updateInfo: UpdateInfo | null = null;
 
 // ---------------------------------------------------------------------------
 // persistence
@@ -143,7 +155,7 @@ async function doSave(): Promise<void> {
   try {
     await persistSettings();
   } catch (e: unknown) {
-    toast(`保存に失敗しました: ${errMsg(e)}`, true);
+    toast(t("err.saveFailed", errText(e)), true);
   }
 }
 
@@ -160,15 +172,7 @@ function flushApiKeySave(): void {
 // navigation
 // ---------------------------------------------------------------------------
 
-const SECTION_TITLES: Record<string, string> = {
-  home: "ホーム",
-  stt: "音声認識",
-  llm: "AI整形",
-  modes: "モード",
-  history: "履歴",
-  general: "一般",
-  setup: "セットアップ",
-};
+const SECTION_NAMES = ["home", "stt", "llm", "modes", "history", "general", "setup", "update"];
 
 function showSection(name: string): void {
   for (const btn of document.querySelectorAll<HTMLButtonElement>(".nav-item")) {
@@ -177,7 +181,16 @@ function showSection(name: string): void {
   for (const sec of document.querySelectorAll<HTMLElement>(".section")) {
     sec.classList.toggle("is-active", sec.id === `section-${name}`);
   }
-  $("section-title").textContent = SECTION_TITLES[name] ?? name;
+  // Keep the data-i18n key in sync so applyDom() re-translates the title on
+  // language change.
+  const title = $("section-title");
+  if (SECTION_NAMES.includes(name)) {
+    title.dataset.i18n = `nav.${name}`;
+    title.textContent = t(`nav.${name}`);
+  } else {
+    delete title.dataset.i18n;
+    title.textContent = name;
+  }
   if (name === "home") {
     renderHome();
   } else if (name === "history") {
@@ -199,16 +212,18 @@ function setupNav(): void {
 // ---------------------------------------------------------------------------
 
 function setStatusPill(payload: StatusChangedPayload): void {
+  lastStatusPayload = payload;
   const pill = $("status-pill");
   pill.dataset.status = payload.status;
+  const message = payload.message !== undefined ? tMsg(payload.message) : undefined;
   const label =
-    payload.status === "error" && payload.message
-      ? `エラー: ${payload.message}`
-      : payload.message && payload.status !== "done"
-        ? `${STATUS_LABELS[payload.status]} — ${payload.message}`
-        : STATUS_LABELS[payload.status];
+    payload.status === "error" && message
+      ? t("status.errorWith", message)
+      : message && payload.status !== "done"
+        ? t("status.withMessage", statusLabel(payload.status), message)
+        : statusLabel(payload.status);
   $("status-label").textContent = label;
-  pill.title = payload.message ?? "";
+  pill.title = message ?? "";
 }
 
 // ---------------------------------------------------------------------------
@@ -234,7 +249,7 @@ function renderHomeModes(): void {
     const sub = el(
       "div",
       "mode-card-sub",
-      mode.use_llm ? mode.instruction || "AI整形" : "AI整形なし (そのまま入力)",
+      mode.use_llm ? mode.instruction || t("home.llmDefault") : t("home.noLlm"),
     );
     card.append(name, sub);
     if (mode.id === settings.active_mode_id) {
@@ -253,7 +268,7 @@ async function activateMode(modeId: string): Promise<void> {
   try {
     await invoke("set_active_mode", { modeId });
   } catch (e: unknown) {
-    toast(`モードの切替に失敗しました: ${errMsg(e)}`, true);
+    toast(t("err.modeSwitch", errText(e)), true);
   }
 }
 
@@ -264,9 +279,7 @@ function renderHomeRecent(): void {
   if (recent.length === 0) {
     const empty = el("div", "empty-state");
     empty.appendChild(el("span", "empty-icon", "🎤"));
-    empty.appendChild(
-      el("span", undefined, "まだ履歴がありません。ホットキーで音声入力を試してみましょう。"),
-    );
+    empty.appendChild(el("span", undefined, t("home.empty")));
     host.appendChild(empty);
     return;
   }
@@ -313,7 +326,7 @@ function renderSttModelList(): void {
   host.textContent = "";
   const models = setupStatus?.models ?? [];
   if (models.length === 0) {
-    host.appendChild(el("div", "hint", "モデル情報を取得中…"));
+    host.appendChild(el("div", "hint", t("stt.loadingModels")));
     return;
   }
   const currentPath = settings.stt.local.model_path;
@@ -338,8 +351,8 @@ function renderSttModelList(): void {
   };
 
   addOption(
-    "自動 (インストール済みの既定モデル)",
-    setupStatus?.model_installed ? "利用可能" : "モデル未インストール",
+    t("stt.autoModel"),
+    setupStatus?.model_installed ? t("stt.available") : t("stt.modelNotInstalled"),
     currentPath === "",
     false,
     () => {
@@ -356,7 +369,9 @@ function renderSttModelList(): void {
     const selected = managed !== null && currentPath === managed && currentPath !== "";
     addOption(
       m.name,
-      m.installed ? `${m.size_mb} MB ・ インストール済み` : `${m.size_mb} MB ・ 未インストール`,
+      m.installed
+        ? t("stt.modelInstalledMeta", m.size_mb)
+        : t("stt.modelNotInstalledMeta", m.size_mb),
       selected,
       !m.installed || managed === null,
       () => {
@@ -440,15 +455,15 @@ function wireSttSection(): void {
     const result = $("stt-test-result");
     testBtn.disabled = true;
     result.className = "test-result";
-    result.textContent = "テスト中…";
+    result.textContent = t("common.testing");
     try {
       await doSave();
       const msg = await invoke<string>("test_stt");
       result.classList.add("ok");
-      result.textContent = `✓ ${msg}`;
+      result.textContent = `✓ ${tMsg(msg)}`;
     } catch (e: unknown) {
       result.classList.add("err");
-      result.textContent = `✗ ${errMsg(e)}`;
+      result.textContent = `✗ ${errText(e)}`;
     } finally {
       testBtn.disabled = false;
     }
@@ -466,7 +481,7 @@ function renderProviderList(): void {
   if (settings.llm.providers.length === 0) {
     const empty = el("div", "empty-state");
     empty.appendChild(el("span", "empty-icon", "✨"));
-    empty.appendChild(el("span", undefined, "プロバイダがありません。「＋ プロバイダを追加」から作成してください。"));
+    empty.appendChild(el("span", undefined, t("llm.empty")));
     host.appendChild(empty);
     return;
   }
@@ -494,22 +509,22 @@ function buildProviderCard(provider: LlmProvider): HTMLElement {
     renderProviderList();
     scheduleSave();
   });
-  radioLabel.append(radio, el("span", undefined, "アクティブ"));
+  radioLabel.append(radio, el("span", undefined, t("common.active")));
 
   const nameInput = el("input", "name-input") as HTMLInputElement;
   nameInput.type = "text";
   nameInput.value = provider.name;
-  nameInput.placeholder = "プロバイダ名";
+  nameInput.placeholder = t("llm.namePlaceholder");
   nameInput.addEventListener("input", () => {
     provider.name = nameInput.value;
     scheduleSave();
   });
 
   const delBtn = el("button", "icon-btn danger", "🗑");
-  delBtn.title = "削除";
+  delBtn.title = t("common.delete");
   delBtn.addEventListener("click", () => {
     if (!settings) return;
-    if (!window.confirm(`プロバイダ「${provider.name}」を削除しますか?`)) return;
+    if (!window.confirm(t("llm.deleteConfirm", provider.name))) return;
     settings.llm.providers = settings.llm.providers.filter((p) => p.id !== provider.id);
     if (settings.llm.active_provider_id === provider.id) {
       settings.llm.active_provider_id = settings.llm.providers[0]?.id ?? "";
@@ -524,12 +539,12 @@ function buildProviderCard(provider: LlmProvider): HTMLElement {
   const grid = el("div", "form-grid");
 
   const kindField = el("label", "field");
-  kindField.appendChild(el("span", "field-label", "種別"));
+  kindField.appendChild(el("span", "field-label", t("llm.kind")));
   const kindSel = el("select") as HTMLSelectElement;
   for (const [value, label] of [
-    ["anthropic", "Anthropic (Claude)"],
-    ["openai", "OpenAI互換 (chat/completions)"],
-  ] as const) {
+    ["anthropic", t("llm.kindAnthropic")],
+    ["openai", t("llm.kindOpenai")],
+  ] as [string, string][]) {
     const opt = el("option", undefined, label) as HTMLOptionElement;
     opt.value = value;
     kindSel.appendChild(opt);
@@ -542,7 +557,7 @@ function buildProviderCard(provider: LlmProvider): HTMLElement {
   kindField.appendChild(kindSel);
 
   const modelField = el("label", "field");
-  modelField.appendChild(el("span", "field-label", "モデル"));
+  modelField.appendChild(el("span", "field-label", t("llm.model")));
   const modelInput = el("input") as HTMLInputElement;
   modelInput.type = "text";
   modelInput.spellcheck = false;
@@ -555,7 +570,7 @@ function buildProviderCard(provider: LlmProvider): HTMLElement {
   modelField.appendChild(modelInput);
 
   const urlField = el("label", "field field-wide");
-  urlField.appendChild(el("span", "field-label", "Base URL"));
+  urlField.appendChild(el("span", "field-label", t("llm.baseUrl")));
   const urlInput = el("input") as HTMLInputElement;
   urlInput.type = "text";
   urlInput.spellcheck = false;
@@ -568,7 +583,7 @@ function buildProviderCard(provider: LlmProvider): HTMLElement {
   urlField.appendChild(urlInput);
 
   const keyField = el("label", "field field-wide");
-  keyField.appendChild(el("span", "field-label", "APIキー"));
+  keyField.appendChild(el("span", "field-label", t("llm.apiKey")));
   const keyWrap = el("span", "input-with-btn");
   const keyInput = el("input") as HTMLInputElement;
   keyInput.type = "password";
@@ -583,7 +598,7 @@ function buildProviderCard(provider: LlmProvider): HTMLElement {
   keyInput.addEventListener("blur", flushApiKeySave);
   const eyeBtn = el("button", "btn btn-ghost btn-sm eye-btn", "👁") as HTMLButtonElement;
   eyeBtn.type = "button";
-  eyeBtn.title = "表示切替";
+  eyeBtn.title = t("common.showHide");
   eyeBtn.addEventListener("click", () => {
     keyInput.type = keyInput.type === "password" ? "text" : "password";
   });
@@ -594,20 +609,21 @@ function buildProviderCard(provider: LlmProvider): HTMLElement {
 
   // test row
   const testRow = el("div", "test-row inline-test");
-  const testBtn = el("button", "btn btn-sm", "🔌 テスト") as HTMLButtonElement;
+  const testBtn = el("button", "btn btn-sm", t("llm.testBtn")) as HTMLButtonElement;
   const testResult = el("span", "test-result");
   testBtn.addEventListener("click", async () => {
     testBtn.disabled = true;
     testResult.className = "test-result";
-    testResult.textContent = "テスト中…";
+    testResult.textContent = t("common.testing");
     try {
       await doSave();
+      // test_llm's Ok value is the model's raw reply — NOT a message key (SPEC).
       const reply = await invoke<string>("test_llm", { providerId: provider.id });
       testResult.classList.add("ok");
-      testResult.textContent = `✓ 応答: ${reply}`;
+      testResult.textContent = t("llm.reply", reply);
     } catch (e: unknown) {
       testResult.classList.add("err");
-      testResult.textContent = `✗ ${errMsg(e)}`;
+      testResult.textContent = `✗ ${errText(e)}`;
     } finally {
       testBtn.disabled = false;
     }
@@ -624,7 +640,7 @@ function wireLlmSection(): void {
     const id = `provider_${Date.now().toString(36)}`;
     settings.llm.providers.push({
       id,
-      name: "新しいプロバイダ",
+      name: t("llm.newProviderName"),
       kind: "openai",
       base_url: "https://api.openai.com/v1",
       api_key: "",
@@ -647,7 +663,7 @@ function renderModeList(): void {
   if (settings.modes.length === 0) {
     const empty = el("div", "empty-state");
     empty.appendChild(el("span", "empty-icon", "🧩"));
-    empty.appendChild(el("span", undefined, "モードがありません。「＋ モードを追加」から作成してください。"));
+    empty.appendChild(el("span", undefined, t("modes.empty")));
     host.appendChild(empty);
     return;
   }
@@ -666,7 +682,7 @@ function buildModeCard(mode: Mode): HTMLElement {
   const nameInput = el("input", "name-input") as HTMLInputElement;
   nameInput.type = "text";
   nameInput.value = mode.name;
-  nameInput.placeholder = "モード名";
+  nameInput.placeholder = t("modes.namePlaceholder");
   nameInput.addEventListener("input", () => {
     mode.name = nameInput.value;
     renderHomeModes();
@@ -677,17 +693,17 @@ function buildModeCard(mode: Mode): HTMLElement {
   const useLlm = el("input", "switch") as HTMLInputElement;
   useLlm.type = "checkbox";
   useLlm.checked = mode.use_llm;
-  useLlmLabel.append(el("span", undefined, "AI整形を使う"), useLlm);
+  useLlmLabel.append(el("span", undefined, t("modes.useLlm")), useLlm);
 
   const delBtn = el("button", "icon-btn danger", "🗑");
-  delBtn.title = "削除";
+  delBtn.title = t("common.delete");
   delBtn.addEventListener("click", () => {
     if (!settings) return;
     if (settings.modes.length <= 1) {
-      toast("最後のモードは削除できません", true);
+      toast(t("modes.lastModeError"), true);
       return;
     }
-    if (!window.confirm(`モード「${mode.name}」を削除しますか?`)) return;
+    if (!window.confirm(t("modes.deleteConfirm", mode.name))) return;
     settings.modes = settings.modes.filter((m) => m.id !== mode.id);
     if (settings.active_mode_id === mode.id) {
       settings.active_mode_id = settings.modes[0]?.id ?? "";
@@ -697,12 +713,12 @@ function buildModeCard(mode: Mode): HTMLElement {
     scheduleSave();
   });
 
-  if (isActive) head.appendChild(el("span", "badge accent", "アクティブ"));
+  if (isActive) head.appendChild(el("span", "badge accent", t("common.active")));
   head.append(nameInput, useLlmLabel, delBtn);
 
   const instr = el("textarea") as HTMLTextAreaElement;
   instr.value = mode.instruction;
-  instr.placeholder = "整形指示 (例: フィラーを除去し、自然な文章に整えてください)";
+  instr.placeholder = t("modes.instructionPlaceholder");
   instr.rows = 3;
   instr.disabled = !mode.use_llm;
   instr.addEventListener("input", () => {
@@ -726,7 +742,7 @@ function wireModesSection(): void {
     if (!settings) return;
     settings.modes.push({
       id: `mode_${Date.now().toString(36)}`,
-      name: "新しいモード",
+      name: t("modes.newModeName"),
       instruction: "",
       use_llm: true,
     });
@@ -752,14 +768,14 @@ function buildHistoryItem(entry: HistoryEntry, expandable: boolean): HTMLElement
   head.appendChild(el("span", "history-mode", modeNameFor(entry.mode_id)));
   const actions = el("div", "history-actions");
   const copyBtn = el("button", "icon-btn", "📋");
-  copyBtn.title = "コピー";
+  copyBtn.title = t("common.copy");
   copyBtn.addEventListener("click", async (e) => {
     e.stopPropagation();
     try {
       await invoke("copy_text", { text: entry.final_text });
-      toast("コピーしました");
+      toast(t("history.copied"));
     } catch (err: unknown) {
-      toast(`コピーに失敗しました: ${errMsg(err)}`, true);
+      toast(t("history.copyFailed", errText(err)), true);
     }
   });
   actions.appendChild(copyBtn);
@@ -779,7 +795,7 @@ function buildHistoryItem(entry: HistoryEntry, expandable: boolean): HTMLElement
         raw = null;
       } else {
         raw = el("div", "history-raw");
-        raw.appendChild(el("span", "history-raw-label", "文字起こし (生テキスト)"));
+        raw.appendChild(el("span", "history-raw-label", t("history.rawLabel")));
         raw.appendChild(document.createTextNode(entry.raw_text));
         item.appendChild(raw);
       }
@@ -794,7 +810,7 @@ function renderHistoryList(): void {
   if (historyEntries.length === 0) {
     const empty = el("div", "empty-state");
     empty.appendChild(el("span", "empty-icon", "🕘"));
-    empty.appendChild(el("span", undefined, "履歴はまだありません。"));
+    empty.appendChild(el("span", undefined, t("history.empty")));
     host.appendChild(empty);
     return;
   }
@@ -815,15 +831,15 @@ async function refreshHistory(): Promise<void> {
 
 function wireHistorySection(): void {
   $("btn-clear-history").addEventListener("click", async () => {
-    if (!window.confirm("履歴をすべて削除しますか? この操作は取り消せません。")) return;
+    if (!window.confirm(t("history.clearConfirm"))) return;
     try {
       await invoke("clear_history");
       historyEntries = [];
       renderHistoryList();
       renderHomeRecent();
-      toast("履歴を削除しました");
+      toast(t("history.cleared"));
     } catch (e: unknown) {
-      toast(`削除に失敗しました: ${errMsg(e)}`, true);
+      toast(t("history.clearFailed", errText(e)), true);
     }
   });
 }
@@ -835,6 +851,7 @@ function wireHistorySection(): void {
 function renderGeneralSection(): void {
   if (!settings) return;
   input("in-hotkey").value = settings.hotkey;
+  selectEl("in-ui-lang").value = settings.ui_lang;
   selectEl("in-language").value = settings.language;
   selectEl("in-paste-mode").value = settings.paste_mode;
   input("in-history-limit").value = String(settings.history_limit);
@@ -904,7 +921,7 @@ async function applyHotkey(combo: string): Promise<void> {
   try {
     await persistSettings();
   } catch (e: unknown) {
-    toast(errMsg(e), true);
+    toast(errText(e), true);
     if (settings) {
       settings.hotkey = prev;
       input("in-hotkey").value = prev;
@@ -921,7 +938,7 @@ function wireGeneralSection(): void {
   const hotkeyInput = input("in-hotkey");
   hotkeyInput.addEventListener("focus", () => {
     hotkeyInput.classList.add("capturing");
-    hotkeyInput.value = "キーを押してください…";
+    hotkeyInput.value = t("hotkey.press");
   });
   hotkeyInput.addEventListener("blur", () => {
     hotkeyInput.classList.remove("capturing");
@@ -941,22 +958,38 @@ function wireGeneralSection(): void {
     if (e.shiftKey) mods.push("Shift");
     if (e.metaKey) mods.push("Super");
     if (e.key === "Control" || e.key === "Alt" || e.key === "Shift" || e.key === "Meta") {
-      hotkeyInput.value = mods.length > 0 ? `${mods.join("+")}+…` : "キーを押してください…";
+      hotkeyInput.value = mods.length > 0 ? `${mods.join("+")}+…` : t("hotkey.press");
       return;
     }
     const key = normalizeHotkeyKey(e);
     if (key === null) {
-      hotkeyInput.value = "このキーは使用できません";
+      hotkeyInput.value = t("hotkey.invalid");
       return;
     }
     const isFKey = /^F([1-9]|1[0-9]|2[0-4])$/.test(key);
     if (mods.length === 0 && !isFKey) {
-      hotkeyInput.value = "修飾キー(Ctrl/Alt/Shift)と組み合わせてください";
+      hotkeyInput.value = t("hotkey.needModifier");
       return;
     }
     const combo = [...mods, key].join("+");
     void applyHotkey(combo);
     hotkeyInput.blur();
+  });
+
+  const uiLangSel = selectEl("in-ui-lang");
+  for (const lang of LANGS) {
+    const opt = el("option", undefined, lang.native) as HTMLOptionElement;
+    opt.value = lang.code;
+    uiLangSel.appendChild(opt);
+  }
+  uiLangSel.addEventListener("change", () => {
+    if (!settings) return;
+    settings.ui_lang = uiLangSel.value;
+    scheduleSave();
+    // Re-render immediately (no restart). Pending edits are safe: every edit
+    // mutates `settings` synchronously, and renderAll() rebuilds inputs from
+    // that same live object — only the (debounced) save is deferred.
+    applyLanguage(uiLangSel.value);
   });
 
   selectEl("in-language").addEventListener("change", () => {
@@ -1004,17 +1037,17 @@ function renderSetupSection(): void {
   const installBtn = $("btn-install-server") as HTMLButtonElement;
 
   if (!s) {
-    serverBadge.textContent = "確認中…";
+    serverBadge.textContent = t("setup.checking");
     serverBadge.className = "badge";
     serverPath.textContent = "—";
     installBtn.disabled = true;
     return;
   }
 
-  serverBadge.textContent = s.server_installed ? "インストール済み" : "未インストール";
+  serverBadge.textContent = s.server_installed ? t("common.installed") : t("common.notInstalled");
   serverBadge.className = `badge${s.server_installed ? " ok" : ""}`;
   serverPath.textContent = s.server_path || "—";
-  installBtn.textContent = s.server_installed ? "再インストール" : "インストール";
+  installBtn.textContent = s.server_installed ? t("setup.reinstall") : t("setup.install");
   installBtn.disabled = activeDownloads.has(downloadKey("server", "whisper-server"));
 
   renderSetupModels();
@@ -1025,7 +1058,7 @@ function renderSetupModels(): void {
   host.textContent = "";
   const models = setupStatus?.models ?? [];
   if (models.length === 0) {
-    host.appendChild(el("div", "hint", "モデル情報を取得中…"));
+    host.appendChild(el("div", "hint", t("stt.loadingModels")));
     return;
   }
   for (const m of models) {
@@ -1039,7 +1072,7 @@ function renderSetupModels(): void {
     const badge = el(
       "span",
       `badge${m.installed ? " ok" : ""}`,
-      m.installed ? "インストール済み" : "未インストール",
+      m.installed ? t("common.installed") : t("common.notInstalled"),
     );
     name.appendChild(badge);
     info.appendChild(name);
@@ -1052,7 +1085,7 @@ function renderSetupModels(): void {
     const dlBtn = el(
       "button",
       `btn btn-sm${m.installed ? "" : " btn-primary"}`,
-      m.installed ? "再ダウンロード" : "ダウンロード",
+      m.installed ? t("setup.redownload") : t("setup.download"),
     ) as HTMLButtonElement;
     const key = downloadKey("model", m.name);
     dlBtn.disabled = activeDownloads.has(key);
@@ -1121,7 +1154,7 @@ async function startServerDownload(): Promise<void> {
     activeDownloads.delete(key);
     wrap.hidden = true;
     ($("btn-install-server") as HTMLButtonElement).disabled = false;
-    if (stillPending) toast(`サーバのインストールに失敗しました: ${errMsg(e)}`, true);
+    if (stillPending) toast(t("setup.serverInstallFailed", errText(e)), true);
   }
 }
 
@@ -1143,7 +1176,7 @@ async function startModelDownload(name: string): Promise<void> {
     const stillPending = activeDownloads.has(key);
     activeDownloads.delete(key);
     renderSetupModels();
-    if (stillPending) toast(`モデルのダウンロードに失敗しました: ${errMsg(e)}`, true);
+    if (stillPending) toast(t("setup.modelDownloadFailed", name, errText(e)), true);
   }
 }
 
@@ -1154,15 +1187,13 @@ function onDownloadProgress(p: DownloadProgressPayload): void {
     if (p.error) {
       toast(
         p.kind === "server"
-          ? `サーバのインストールに失敗しました: ${p.error}`
-          : `モデル ${p.name} のダウンロードに失敗しました: ${p.error}`,
+          ? t("setup.serverInstallFailed", tMsg(p.error))
+          : t("setup.modelDownloadFailed", p.name, tMsg(p.error)),
         true,
       );
     } else {
       toast(
-        p.kind === "server"
-          ? "whisper-server をインストールしました"
-          : `モデル ${p.name} をダウンロードしました`,
+        p.kind === "server" ? t("setup.serverInstalled") : t("setup.modelDownloaded", p.name),
       );
     }
     if (p.kind === "server") {
@@ -1203,9 +1234,118 @@ function wireSetupSection(): void {
     try {
       await invoke("open_config_dir");
     } catch (e: unknown) {
-      toast(errMsg(e), true);
+      toast(errText(e), true);
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// update section
+// ---------------------------------------------------------------------------
+
+async function openUpdateUrl(url: string): Promise<void> {
+  try {
+    await invoke("open_url", { url });
+  } catch (e: unknown) {
+    toast(errText(e), true);
+  }
+}
+
+function renderUpdateSection(): void {
+  if (!settings) return;
+  input("in-auto-check").checked = settings.update.auto_check;
+  input("in-update-owner").value = settings.update.owner;
+  input("in-update-repo").value = settings.update.repo;
+  renderUpdateResult();
+}
+
+function renderUpdateResult(): void {
+  const panel = $("update-result");
+  if (!updateInfo) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  const title = $("update-result-title");
+  if (updateInfo.update_available) {
+    title.textContent = t("update.available", updateInfo.latest);
+    title.className = "update-result-title is-new";
+  } else {
+    title.textContent = t("update.upToDate", updateInfo.latest);
+    title.className = "update-result-title";
+  }
+  // Release notes are untrusted remote content — textContent only, never HTML.
+  $("update-notes").textContent = updateInfo.notes;
+  $("update-notes-wrap").hidden = updateInfo.notes.trim() === "";
+  ($("btn-open-download") as HTMLButtonElement).hidden = !updateInfo.update_available;
+}
+
+function showUpdateBanner(info: UpdateInfo): void {
+  bannerInfo = info;
+  $("update-banner-text").textContent = t("update.available", info.latest);
+  $("update-banner").hidden = false;
+}
+
+function wireUpdateSection(): void {
+  const checkBtn = $("btn-check-update") as HTMLButtonElement;
+  const checkResult = $("update-check-result");
+  checkBtn.addEventListener("click", async () => {
+    checkBtn.disabled = true;
+    checkResult.className = "test-result";
+    checkResult.textContent = t("update.checking");
+    try {
+      await doSave();
+      updateInfo = await invoke<UpdateInfo>("check_update");
+      checkResult.textContent = "";
+      renderUpdateResult();
+    } catch (e: unknown) {
+      checkResult.classList.add("err");
+      checkResult.textContent = `✗ ${errText(e)}`;
+    } finally {
+      checkBtn.disabled = false;
+    }
+  });
+
+  $("btn-open-download").addEventListener("click", () => {
+    if (updateInfo) void openUpdateUrl(updateInfo.url);
+  });
+
+  $("btn-banner-open").addEventListener("click", () => {
+    if (bannerInfo) void openUpdateUrl(bannerInfo.url);
+  });
+  $("btn-banner-close").addEventListener("click", () => {
+    $("update-banner").hidden = true;
+    bannerInfo = null;
+  });
+
+  input("in-auto-check").addEventListener("change", () => {
+    if (!settings) return;
+    settings.update.auto_check = input("in-auto-check").checked;
+    scheduleSave();
+  });
+  input("in-update-owner").addEventListener("input", () => {
+    if (!settings) return;
+    settings.update.owner = input("in-update-owner").value.trim();
+    scheduleSave();
+  });
+  input("in-update-repo").addEventListener("input", () => {
+    if (!settings) return;
+    settings.update.repo = input("in-update-repo").value.trim();
+    scheduleSave();
+  });
+}
+
+/** Silent auto-check at startup (SPEC): failures are ignored; a newer version
+ * shows a dismissible banner on the home section. */
+async function autoCheckUpdate(): Promise<void> {
+  try {
+    const info = await invoke<UpdateInfo>("check_update");
+    updateInfo = info;
+    renderUpdateResult();
+    if (info.update_available) showUpdateBanner(info);
+  } catch {
+    // silent by contract
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1220,6 +1360,22 @@ function renderAll(): void {
   renderModeList();
   renderGeneralSection();
   renderSetupSection();
+  renderUpdateSection();
+}
+
+/**
+ * Switch the UI language in place: re-translate static DOM, then re-render all
+ * dynamically built strings. Input values are re-read from the live `settings`
+ * object (which already holds any pending edits), so nothing is lost.
+ */
+function applyLanguage(code: string): void {
+  setLang(code);
+  applyDom();
+  setStatusPill(lastStatusPayload);
+  renderAll();
+  if (bannerInfo) {
+    $("update-banner-text").textContent = t("update.available", bannerInfo.latest);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1254,7 +1410,11 @@ async function setupListeners(): Promise<void> {
     }
     settings = event.payload;
     recordSavedSnapshot(incoming);
-    renderAll();
+    if (settings.ui_lang !== getLang()) {
+      applyLanguage(settings.ui_lang); // includes renderAll()
+    } else {
+      renderAll();
+    }
   });
 
   await listen<null>("history-updated", () => {
@@ -1274,21 +1434,22 @@ async function init(): Promise<void> {
   wireHistorySection();
   wireGeneralSection();
   wireSetupSection();
+  wireUpdateSection();
 
   $("btn-record-test").addEventListener("click", async () => {
     try {
       await invoke("toggle_recording");
     } catch (e: unknown) {
-      toast(errMsg(e), true);
+      toast(errText(e), true);
     }
   });
 
   $("btn-quit").addEventListener("click", async () => {
-    if (!window.confirm("fire-speak を終了しますか? 常駐が解除され、ホットキーも無効になります。")) return;
+    if (!window.confirm(t("quit.confirm"))) return;
     try {
       await invoke("quit_app");
     } catch (e: unknown) {
-      toast(errMsg(e), true);
+      toast(errText(e), true);
     }
   });
 
@@ -1297,8 +1458,19 @@ async function init(): Promise<void> {
   try {
     settings = await invoke<Settings>("get_settings");
     recordSavedSnapshot(snapshotKey(settings));
+    // ui_lang arrives already resolved to a concrete code by the backend.
+    setLang(settings.ui_lang);
   } catch (e: unknown) {
-    toast(`設定の読み込みに失敗しました: ${errMsg(e)}`, true);
+    toast(t("err.loadSettings", errText(e)), true);
+  }
+  applyDom();
+
+  try {
+    const version = await getVersion();
+    $("app-version").textContent = `v${version}`;
+    $("update-current-version").textContent = `v${version}`;
+  } catch {
+    // non-fatal: version chips stay empty
   }
 
   try {
@@ -1312,7 +1484,7 @@ async function init(): Promise<void> {
   // is taken by another app at startup).
   try {
     const startupError = await invoke<string | null>("get_startup_error");
-    if (startupError) toast(startupError, true);
+    if (startupError) toast(tMsg(startupError), true);
   } catch {
     // non-fatal
   }
@@ -1320,6 +1492,10 @@ async function init(): Promise<void> {
   renderAll();
   void refreshHistory();
   void refreshSetupStatus();
+
+  if (settings?.update.auto_check) {
+    void autoCheckUpdate();
+  }
 }
 
 window.addEventListener("DOMContentLoaded", () => {

@@ -24,7 +24,7 @@ fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(LLM_TIMEOUT_SECS))
         .build()
-        .map_err(|e| format!("HTTPクライアントの初期化に失敗しました: {e}"))
+        .map_err(|e| format!("ERR_INTERNAL|http client: {e}"))
 }
 
 async fn chat(
@@ -33,7 +33,7 @@ async fn chat(
     user: &str,
 ) -> Result<String, String> {
     if provider.api_key.trim().is_empty() {
-        return Err("LLMプロバイダのAPIキーが設定されていません".to_string());
+        return Err("ERR_INTERNAL|LLM API key not set".to_string());
     }
     match provider.kind.as_str() {
         "anthropic" => chat_anthropic(provider, system, user).await,
@@ -66,22 +66,23 @@ async fn chat_anthropic(
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("LLM APIへの接続に失敗しました: {e}"))?;
+        .map_err(|e| format!("ERR_LLM_NETWORK|{e}"))?;
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
     if !status.is_success() {
-        return Err(format!(
-            "LLM APIエラー (HTTP {}): {}",
+        eprintln!(
+            "anthropic LLM failed (HTTP {}): {}",
             status.as_u16(),
             truncate(&text, 300)
-        ));
+        );
+        return Err(format!("ERR_LLM_HTTP|{}", status.as_u16()));
     }
     let v: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| format!("LLM APIの応答を解析できませんでした: {e}"))?;
+        .map_err(|e| format!("ERR_LLM_NETWORK|invalid response: {e}"))?;
     v["content"][0]["text"]
         .as_str()
         .map(|s| s.to_string())
-        .ok_or_else(|| "LLM APIの応答にテキストが含まれていません".to_string())
+        .ok_or_else(|| "ERR_LLM_NETWORK|no text in response".to_string())
 }
 
 async fn chat_openai(
@@ -109,22 +110,23 @@ async fn chat_openai(
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("LLM APIへの接続に失敗しました: {e}"))?;
+        .map_err(|e| format!("ERR_LLM_NETWORK|{e}"))?;
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
     if !status.is_success() {
-        return Err(format!(
-            "LLM APIエラー (HTTP {}): {}",
+        eprintln!(
+            "openai LLM failed (HTTP {}): {}",
             status.as_u16(),
             truncate(&text, 300)
-        ));
+        );
+        return Err(format!("ERR_LLM_HTTP|{}", status.as_u16()));
     }
     let v: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| format!("LLM APIの応答を解析できませんでした: {e}"))?;
+        .map_err(|e| format!("ERR_LLM_NETWORK|invalid response: {e}"))?;
     v["choices"][0]["message"]["content"]
         .as_str()
         .map(|s| s.to_string())
-        .ok_or_else(|| "LLM APIの応答にテキストが含まれていません".to_string())
+        .ok_or_else(|| "ERR_LLM_NETWORK|no text in response".to_string())
 }
 
 fn truncate(s: &str, max: usize) -> String {

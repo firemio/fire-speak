@@ -2,10 +2,10 @@ use std::time::Duration;
 
 /// Copy `text` to the clipboard.
 pub fn copy_only(text: &str) -> Result<(), String> {
-    let mut cb = arboard::Clipboard::new()
-        .map_err(|e| format!("クリップボードを開けませんでした: {e}"))?;
+    let mut cb =
+        arboard::Clipboard::new().map_err(|e| format!("ERR_CLIPBOARD|open: {e}"))?;
     cb.set_text(text.to_string())
-        .map_err(|e| format!("クリップボードへのコピーに失敗しました: {e}"))
+        .map_err(|e| format!("ERR_CLIPBOARD|{e}"))
 }
 
 /// Paste `text` into the active application.
@@ -13,8 +13,8 @@ pub fn copy_only(text: &str) -> Result<(), String> {
 /// wait for physical modifiers to be released -> Ctrl+V -> optionally restore.
 /// paste_mode == "clipboard": copy only.
 pub fn paste_text(text: &str, paste_mode: &str, restore_clipboard: bool) -> Result<(), String> {
-    let mut cb = arboard::Clipboard::new()
-        .map_err(|e| format!("クリップボードを開けませんでした: {e}"))?;
+    let mut cb =
+        arboard::Clipboard::new().map_err(|e| format!("ERR_CLIPBOARD|open: {e}"))?;
     let old_text = cb.get_text().ok();
     let old_image = if old_text.is_none() {
         cb.get_image().ok()
@@ -22,7 +22,7 @@ pub fn paste_text(text: &str, paste_mode: &str, restore_clipboard: bool) -> Resu
         None
     };
     cb.set_text(text.to_string())
-        .map_err(|e| format!("クリップボードへのコピーに失敗しました: {e}"))?;
+        .map_err(|e| format!("ERR_CLIPBOARD|{e}"))?;
 
     if paste_mode == "paste" {
         std::thread::sleep(Duration::from_millis(60));
@@ -74,9 +74,9 @@ fn wait_for_modifier_release() {}
 
 fn send_ctrl_v() -> Result<(), String> {
     use enigo::{Direction, Enigo, Key, Keyboard, Settings as EnigoSettings};
-    let err = |e: enigo::InputError| format!("キー送信に失敗しました: {e}");
+    let err = |e: enigo::InputError| format!("ERR_PASTE|{e}");
     let mut enigo = Enigo::new(&EnigoSettings::default())
-        .map_err(|e| format!("キー送信の初期化に失敗しました: {e}"))?;
+        .map_err(|e| format!("ERR_PASTE|init: {e}"))?;
     enigo.key(Key::Control, Direction::Press).map_err(err)?;
     let r = enigo.key(Key::Unicode('v'), Direction::Click).map_err(err);
     // always release Ctrl even if 'v' failed

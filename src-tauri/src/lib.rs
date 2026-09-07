@@ -1,11 +1,13 @@
 mod audio;
 mod history;
 mod llm;
+mod locale;
 mod paste;
 mod pipeline;
 mod settings;
 mod setup;
 mod stt;
+mod update;
 
 use settings::Settings;
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -65,17 +67,18 @@ fn show_main_window(app: &AppHandle) {
 fn register_hotkey(app: &AppHandle, hotkey: &str, previous: Option<&str>) -> Result<(), String> {
     let shortcut: Shortcut = hotkey
         .parse()
-        .map_err(|_| format!("ホットキー「{hotkey}」を解釈できません"))?;
+        .map_err(|_| format!("ERR_HOTKEY_PARSE|{hotkey}"))?;
     let gs = app.global_shortcut();
     let _ = gs.unregister_all();
     if let Err(e) = gs.register(shortcut) {
+        eprintln!("hotkey register failed for {hotkey}: {e}");
         // best effort: restore the previous hotkey so the user keeps a working one
         if let Some(prev) = previous {
             if let Ok(prev_shortcut) = prev.parse::<Shortcut>() {
                 let _ = gs.register(prev_shortcut);
             }
         }
-        return Err(format!("ホットキーの登録に失敗しました: {e}"));
+        return Err(format!("ERR_HOTKEY_REGISTER|{hotkey}"));
     }
     Ok(())
 }
@@ -91,10 +94,16 @@ fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
     } else {
         autolaunch.disable()
     };
-    result.map_err(|e| format!("自動起動の設定に失敗しました: {e}"))
+    result.map_err(|e| format!("ERR_INTERNAL|autostart: {e}"))
 }
 
 fn build_tray_menu(app: &AppHandle, settings: &Settings) -> tauri::Result<Menu<Wry>> {
+    let lang = if settings.ui_lang.trim().is_empty() {
+        locale::resolve_ui_lang()
+    } else {
+        settings.ui_lang.clone()
+    };
+    let (open_settings_label, quit_label) = locale::tray_labels(&lang);
     let mut builder = MenuBuilder::new(app);
     for mode in &settings.modes {
         let item = CheckMenuItem::with_id(
@@ -111,14 +120,14 @@ fn build_tray_menu(app: &AppHandle, settings: &Settings) -> tauri::Result<Menu<W
     builder = builder.item(&MenuItem::with_id(
         app,
         "open-settings",
-        "設定を開く",
+        open_settings_label,
         true,
         None::<&str>,
     )?);
     builder = builder.item(&MenuItem::with_id(
         app,
         "quit",
-        "終了",
+        quit_label,
         true,
         None::<&str>,
     )?);
@@ -181,7 +190,7 @@ fn do_set_active_mode(app: &AppHandle, mode_id: String) -> Result<(), String> {
     let new_settings = {
         let mut guard = state.settings.lock().unwrap();
         if !guard.modes.iter().any(|m| m.id == mode_id) {
-            return Err("指定されたモードが見つかりません".to_string());
+            return Err(format!("ERR_INTERNAL|mode not found: {mode_id}"));
         }
         guard.active_mode_id = mode_id;
         guard.clone()
@@ -276,7 +285,7 @@ async fn clear_history(app: AppHandle) -> Result<(), String> {
 async fn copy_text(text: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || paste::copy_only(&text))
         .await
-        .map_err(|e| format!("内部エラー: {e}"))?
+        .map_err(|e| format!("ERR_INTERNAL|{e}"))?
 }
 
 #[tauri::command]
@@ -286,10 +295,10 @@ async fn test_stt(app: AppHandle) -> Result<String, String> {
         // half a second of silence to verify credentials & endpoint
         let wav = audio::wav_bytes(&vec![0i16; 8000])?;
         stt::transcribe_cloud(&settings, wav).await?;
-        Ok("クラウドSTT APIに接続できました".to_string())
+        Ok("OK_STT".to_string())
     } else {
         setup::ensure_server(app.clone()).await?;
-        Ok("ローカルWhisperサーバは正常に動作しています".to_string())
+        Ok("OK_STT".to_string())
     }
 }
 
@@ -305,7 +314,8 @@ async fn test_llm(app: AppHandle, provider_id: String) -> Result<String, String>
             .find(|p| p.id == provider_id)
             .cloned()
     };
-    let provider = provider.ok_or_else(|| "指定されたプロバイダが見つかりません".to_string())?;
+    let provider =
+        provider.ok_or_else(|| format!("ERR_INTERNAL|provider not found: {provider_id}"))?;
     llm::test(&provider).await
 }
 
@@ -328,11 +338,31 @@ async fn download_model(app: AppHandle, model: String) -> Result<(), String> {
 #[tauri::command]
 fn open_config_dir(app: AppHandle) -> Result<(), String> {
     let dir = settings::config_dir(&app)?;
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("設定フォルダを作成できませんでした: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("ERR_FILE_IO|create config dir: {e}"))?;
     tauri_plugin_opener::OpenerExt::opener(&app)
         .open_path(dir.to_string_lossy().to_string(), None::<&str>)
-        .map_err(|e| format!("フォルダを開けませんでした: {e}"))
+        .map_err(|e| format!("ERR_OPEN_FOLDER|{e}"))
+}
+
+#[tauri::command]
+async fn check_update(app: AppHandle) -> Result<update::UpdateInfo, String> {
+    let (owner, repo) = {
+        let state = app.state::<AppState>();
+        let guard = state.settings.lock().unwrap();
+        (guard.update.owner.clone(), guard.update.repo.clone())
+    };
+    let current = app.package_info().version.to_string();
+    update::check(&owner, &repo, &current).await
+}
+
+#[tauri::command]
+async fn open_url(app: AppHandle, url: String) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err(format!("ERR_INTERNAL|only https:// URLs can be opened: {url}"));
+    }
+    tauri_plugin_opener::OpenerExt::opener(&app)
+        .open_url(url, None::<&str>)
+        .map_err(|e| format!("ERR_INTERNAL|open url: {e}"))
 }
 
 #[tauri::command]
@@ -378,7 +408,7 @@ pub fn run() {
                 // non-fatal; the webview has no listener yet, so stash the
                 // error for the frontend to drain via get_startup_error
                 eprintln!("hotkey registration failed: {e}");
-                let msg = format!("グローバルホットキーを登録できませんでした: {e}");
+                let msg = format!("ERR_STARTUP_HOTKEY|{e}");
                 *handle.state::<AppState>().startup_error.lock().unwrap() = Some(msg);
             }
             if let Err(e) = apply_autostart(&handle, loaded.autostart) {
@@ -419,7 +449,9 @@ pub fn run() {
             download_whisper_server,
             download_model,
             open_config_dir,
-            quit_app
+            quit_app,
+            check_update,
+            open_url
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
