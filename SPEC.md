@@ -367,3 +367,29 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 
 - windows-sys の features に `Win32_UI_WindowsAndMessaging` `Win32_Foundation` 等フックに必要なものを追加。
 - 貼り付け前の修飾キー解放待ち(paste.rs)は従来通り(RAltを押したまま確定した場合は物理解放を待つ)。
+
+## v0.3.1 修正仕様(レビュー確定所見の修正 — この節が上の記述と矛盾する場合はこちらが優先)
+
+### フック状態機械の対称化 (hook.rs)
+
+- `KEY_DOWN` を廃止し、**`SWALLOWED_VK`(AtomicU32, 0=なし)を唯一の押下ラッチ**とする:
+  - keydown: `vk == SWALLOWED_VK` なら**無条件でswallow**(タイプマチックリピート。watched/suspend状態に関わらず)。それ以外で `vk == watched && !suspended && !injected && AltGrシーケンスでない` なら `SWALLOWED_VK=vk` → pressed をディスパッチ → swallow。どちらでもなければ素通し。
+  - keyup: `vk == SWALLOWED_VK` なら `SWALLOWED_VK=0` → **released を suspend 状態に関わらず必ずディスパッチ** → swallow。それ以外は素通し(素通しdownのupは素通し=対称)。
+- **ディスパッチは単一スレッド**: install時に `mpsc::channel<bool>` + 常駐ディスパッチャスレッドを作り、コールバックは `send(pressed)` のみ(O(1)、順序保証。イベント毎の thread::spawn を廃止)。
+- **AltGrパススルー**: 非injectedの LCtrl(0xA2) down/up で **scanCode == 0x21D**(AltGr偽Ctrl)を観測したら直近タイムスタンプを記録。RAlt イベントが同一 time で来たら AltGr 由来としてラッチ・ディスパッチ・swallowを一切せず素通し。
+
+### AltGr配列対策 (locale.rs / settings.rs / lib.rs)
+
+- `locale::layout_uses_altgr() -> bool`: `VkKeyScanExW` で 0x20..0x100 の文字を現在のHKLで走査し、修飾バイトに CTRL|ALT(0x06) を要求する文字が1つでもあれば true。
+- 初回起動時の既定 hotkey: AltGr配列なら `"Ctrl+Alt+Space"`、それ以外は `"RAlt"`(settings::load の first_run で決定)。
+- `register_hotkey`: `RAlt` 指定かつ AltGr配列 → `ERR_HOTKEY_REGISTER|RAlt` (UIにトースト表示され、旧ホットキー維持・非永続化の既存フローに乗る)。
+
+### その他バックエンド
+
+- `set_hotkey_suspended(true)`: 現在のホットキーが**コンボ**ならプラグインを unregister_all(キャプチャ欄にキーが届くように)。`false` で再登録(失敗は eprintln のみ)。特殊トークンはフック側の素通しで対応済み。
+- `stop_and_process` の recorder-None 分岐(マイク初期化中に確定された等): silentにidleへ戻さず **`ERR_NO_SPEECH` のエラーフロー**(overlayに2.5秒表示→idle)。
+
+### フロントエンド
+
+- キャプチャ欄: **押下中の修飾キー e.code を Set で追跡**し、bare-tap確定は「そのkeyupまでSetのサイズが1のまま」の場合のみ(両Shift同時押し等の誤検出防止)。`e.key === "AltGraph"` は修飾キーとして扱い AltRight→RAlt にマップ(拒否メッセージを出さない。AltGr配列ではバックエンドが ERR_HOTKEY_REGISTER で拒否し既存ロールバックが働く)。
+- overlay: 録音中に settings-changed を受けてもビジュアライザのバー状態をリセットしない(キャプション/モードチップのみ更新)。
