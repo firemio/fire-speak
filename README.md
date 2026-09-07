@@ -1,8 +1,16 @@
 # fire-speak 🔥
 
+[![Latest release](https://img.shields.io/github/v/release/firemio/fire-speak?label=Download&color=ff6b35)](https://github.com/firemio/fire-speak/releases/latest)
+
 Genspark Speakly 代替の常駐型AI音声入力アプリ（Windows 11 / Tauri v2）。
 
 **ホットキー → 話す → 文字起こし → AI整形 → アクティブなアプリに自動貼り付け。**
+
+## 📥 ダウンロード
+
+**[最新版インストーラをダウンロード](https://github.com/firemio/fire-speak/releases/latest)** — Assets の `fire-speak_X.Y.Z_x64-setup.exe` を実行するだけ。
+
+ソースからビルドする場合は[開発・起動](#開発起動)へ。
 
 ## 特徴
 
