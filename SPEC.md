@@ -25,6 +25,8 @@ serde は全フィールド `#[serde(default = ...)]` で欠損に耐えるこ�
 {
   "hotkey": "Ctrl+Alt+Space",
   "language": "auto",
+  "ui_lang": "",
+  "update": { "auto_check": true, "owner": "firemio", "repo": "fire-speak" },
   "active_mode_id": "polish",
   "paste_mode": "paste",
   "restore_clipboard": true,
@@ -49,6 +51,8 @@ serde は全フィールド `#[serde(default = ...)]` で欠損に耐えるこ�
 ```
 
 - `language`: `"auto" | "ja" | "en" | …` (whisperの言語ヒント。auto時はパラメータ送らない/`auto`)
+- `ui_lang`: UI表示言語コード(下記12種)または `""` = 自動。`""` のとき settings::load 後にOSロケールから解決した値を**メモリ上だけ**セット(永続化しない)。ユーザーが選択したら実コードを保存
+- `update`: アップデート確認設定。`owner`/`repo` はGitHubリポジトリ
 - `paste_mode`: `"paste"`(クリップボード経由でCtrl+V自動送信) | `"clipboard"`(コピーのみ)
 - `stt.engine`: `"local" | "cloud"`
 - `stt.local.server_path` / `model_path`: 空文字 = 管理ディレクトリの既定を使う
@@ -211,3 +215,107 @@ tauri本体は `features = ["tray-icon", "image-png"]` を有効化。
 - 全コマンドは `Result<T, String>` でエラーを日本語メッセージ化。panicさせない(`unwrap`は初期化時のみ可)。
 - 録音デバイスなし・サーバ起動失敗・API 4xx/5xx はすべてoverlayにエラー表示で回復(アプリは落ちない)。
 - `cargo build` と `npm run build`(tsc) が警告はあってもエラー0で通ること。
+
+---
+
+# v0.2 追加仕様: 多言語UI (i18n) + アップデート確認
+
+## 対応言語 (12)
+
+| code | 表示名(セレクタはこの原語表記) |
+|---|---|
+| ja | 日本語 |
+| en | English |
+| zh-CN | 简体中文 |
+| zh-TW | 繁體中文 |
+| ko | 한국어 |
+| es | Español |
+| fr | Français |
+| de | Deutsch |
+| pt-BR | Português (Brasil) |
+| ru | Русский |
+| vi | Tiếng Việt |
+| id | Bahasa Indonesia |
+
+OSロケール解決(Rust `sys-locale`): 完全一致 → `zh-Hant*`/`zh-TW`/`zh-HK`→`zh-TW`、`zh*`→`zh-CN`、それ以外は先頭2文字一致(`ja-JP`→`ja`)、該当なし→`en`。
+
+## i18n アーキテクチャ
+
+- ロケール辞書: `src/locales/{code}.json`(フラットな `"key": "文字列"` マップ。プレースホルダは `{0}`, `{1}`)。**ja.json がマスター**(全キーの源泉)、全ロケールは ja と完全同一のキー集合を持つこと。
+- `src/i18n.ts`: 12ロケールを静的import。`setLang(code)`, `t(key, ...params)`, `tMsg(raw)` をexport。main.ts / overlay.ts 双方から使用。
+- 静的HTML(index.html / overlay.html)のテキストは `data-i18n="key"` 属性(placeholder/titleは `data-i18n-placeholder` 等)とし、起動時と言語変更時に一括適用。`<html lang>` も更新。
+- 言語変更(設定「一般」のセレクタ)は保存後 **その場で再描画**(再起動不要)。overlay は settings-changed で追随。トレイはRust側で再構築。
+- デフォルトモード(初回起動時生成)の name / instruction は初回解決言語で生成(バックエンドが12言語分を内蔵)。既存ユーザーのモードは変更しない。
+
+## バックエンド発の文言 = メッセージキー方式
+
+status-changed の `message`、コマンドの `Err(String)`、`get_startup_error` の値は、**生の文章ではなく下記の閉じたキー集合**を返す。パラメータは `|` 区切りで付加(例: `"ERR_PORT_IN_USE|8178"`)。フロントの `tMsg(raw)` が先頭キーを辞書(`msg.` プレフィクス、例 `msg.ERR_PORT_IN_USE`)で引き、`{0}`,`{1}` にパラメータを埋める。辞書に無い文字列はそのまま表示(フォールバック)。
+
+キー一覧(これ以外を発明しない。合わないものは ERR_INTERNAL|{detail} に寄せる):
+
+```
+ERR_NO_SPEECH                  音声を認識できなかった
+ERR_SETUP_REQUIRED             ローカルSTT未セットアップ
+ERR_PORT_IN_USE|{port}
+ERR_HOTKEY_PARSE|{combo}
+ERR_HOTKEY_REGISTER|{combo}    他アプリが使用中等で登録失敗
+ERR_STARTUP_HOTKEY|{detail}    起動時ホットキー登録失敗(detailは上記キーの訳出済みでなく生キー連結でよい)
+ERR_NO_MIC                     入力デバイスなし
+ERR_MIC_INIT|{detail}
+ERR_STT_HTTP|{status}
+ERR_STT_NETWORK|{detail}
+ERR_LLM_HTTP|{status}
+ERR_LLM_NETWORK|{detail}
+WARN_LLM_FALLBACK              LLM失敗→生テキストで続行
+ERR_DOWNLOAD_FAILED|{detail}
+ERR_DOWNLOAD_INCOMPLETE
+ERR_SERVER_START|{detail}
+ERR_SERVER_DIED                whisper-server即死
+ERR_ZIP|{detail}
+ERR_NO_SERVER_ASSET            リリースにwin-x64アセットなし/展開後exeなし
+ERR_SAVE_SETTINGS|{detail}
+ERR_CLIPBOARD|{detail}
+ERR_PASTE|{detail}
+ERR_FILE_IO|{detail}
+ERR_OPEN_FOLDER|{detail}
+ERR_UPDATE_CHECK|{detail}
+ERR_INTERNAL|{detail}
+OK_STT                         STTテスト成功
+```
+
+例外(キー化しない): `test_llm` のOk値(モデルの生応答)、履歴/転写テキスト、`get_status` のstatus値。
+
+トレイのラベル(「設定を開く」「終了」相当)はRust内蔵の12言語テーブルで `ui_lang` に追随。モード名はユーザーデータなのでそのまま。
+
+## アップデート確認
+
+GitHub Releases の最新版と現行バージョンを比較する方式(自動更新・署名なし。ダウンロードはブラウザで開く)。
+
+### 新コマンド
+
+| コマンド | 引数 | 戻り値 |
+|---|---|---|
+| `check_update` | — | `UpdateInfo`。ネットワーク失敗等は `Err("ERR_UPDATE_CHECK\|{detail}")` |
+| `open_url` | `{ url: string }` | `()` — 既定ブラウザで開く。`https://` 以外は Err |
+
+```ts
+type UpdateInfo = {
+  current: string;          // 例 "0.2.0" (tauriのapp version)
+  latest: string;           // 例 "0.3.1" (タグ先頭のv除去)
+  update_available: boolean; // semver的比較 latest > current
+  url: string;              // setup.exeアセットのbrowser_download_url、無ければreleaseのhtml_url
+  notes: string;            // リリースノート(本文、最大4000文字に切詰め)
+};
+```
+
+- 実装: `GET https://api.github.com/repos/{owner}/{repo}/releases/latest`(User-Agent必須、タイムアウト15秒)。タグ `vX.Y.Z` / `X.Y.Z` を数値比較。
+- フロント: サイドバーに「アップデート」セクション新設 — 現行バージョン(@tauri-apps/api/app getVersion)、「更新を確認」ボタン、結果表示(新版あり: バージョン+ノート+「ダウンロードページを開く」)、auto_checkトグル、owner/repo入力(詳細折りたたみ)。
+- 自動チェック: main初期化時に `update.auto_check` なら silent 実行(失敗は無視)。新版ありならホーム上部にバナー(バージョン+開くボタン+閉じる)。
+- バージョンは tauri.conf.json / package.json の `version`(単一ソースはtauri.conf.json、表示はgetVersion)。
+
+## ファイル所有権 (v0.2作業)
+
+- バックエンド: `src-tauri/src/**`, `src-tauri/Cargo.toml`
+- フロントエンド(コア): `src/**`(locales含む), `index.html`, `overlay.html`
+- 翻訳担当(言語別): `src/locales/{自分のcode}.json` **のみ**
+- 変更禁止: `src-tauri/tauri.conf.json`, `src-tauri/capabilities/default.json`, `package.json`(バージョンは統合者が管理)
