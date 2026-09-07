@@ -70,6 +70,12 @@ fn show_main_window(app: &AppHandle) {
 fn register_hotkey(app: &AppHandle, hotkey: &str, previous: Option<&str>) -> Result<(), String> {
     if let Some(vk) = hook::token_to_vk(hotkey) {
         // Special token -> keyboard hook path.
+        // RAlt on an AltGr layout would swallow the key used to type
+        // characters — refuse BEFORE changing any state (the existing
+        // validate-before-persist flow keeps the old hotkey working).
+        if hotkey == "RAlt" && locale::layout_uses_altgr() {
+            return Err("ERR_HOTKEY_REGISTER|RAlt".to_string());
+        }
         if !hook::is_installed() {
             return Err(format!("ERR_HOTKEY_REGISTER|{hotkey}"));
         }
@@ -273,10 +279,39 @@ async fn cancel_recording(app: AppHandle) -> Result<(), String> {
 
 /// While suspended, both hotkey paths (keyboard hook + plugin handler) are
 /// inert and the hook stops swallowing keys, so the settings capture field
-/// can see them. The UI record button is unaffected.
+/// can see them. When the current hotkey is a plugin combo, the combo is
+/// unregistered for the duration of the suspension (a registered global
+/// shortcut never reaches the webview at all) and re-registered on
+/// unsuspend. The UI record button is unaffected.
 #[tauri::command]
-async fn set_hotkey_suspended(suspended: bool) -> Result<(), String> {
-    pipeline::set_hotkey_suspended(suspended);
+async fn set_hotkey_suspended(app: AppHandle, suspended: bool) -> Result<(), String> {
+    let hotkey = app.state::<AppState>().settings.lock().unwrap().hotkey.clone();
+    let is_combo = hook::token_to_vk(&hotkey).is_none();
+    if suspended {
+        pipeline::set_hotkey_suspended(true);
+        if is_combo {
+            let _ = app.global_shortcut().unregister_all();
+        }
+    } else {
+        if is_combo {
+            // Re-register the current combo. apply_settings may already have
+            // registered a new hotkey during the suspension, so skip if it is
+            // already active; failure is eprintln-only to keep the suspend
+            // state consistent.
+            match hotkey.parse::<Shortcut>() {
+                Ok(shortcut) => {
+                    let gs = app.global_shortcut();
+                    if !gs.is_registered(shortcut) {
+                        if let Err(e) = gs.register(shortcut) {
+                            eprintln!("hotkey re-register after unsuspend failed for {hotkey}: {e}");
+                        }
+                    }
+                }
+                Err(_) => eprintln!("hotkey re-register after unsuspend: unparsable {hotkey}"),
+            }
+        }
+        pipeline::set_hotkey_suspended(false);
+    }
     Ok(())
 }
 

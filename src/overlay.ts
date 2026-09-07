@@ -85,13 +85,14 @@ function resetBars(): void {
 // status
 // ---------------------------------------------------------------------------
 
-function applyStatus(payload: StatusChangedPayload): void {
-  lastStatusPayload = payload;
-  currentStatus = payload.status;
-  hud.dataset.status = payload.status;
+/**
+ * Update the caption text only — never touches bar heights or animation state
+ * (SPEC v0.3.1 F3). Used for settings-changed / language changes arriving
+ * mid-recording, where a full applyStatus would collapse the visualizer.
+ */
+function renderCaption(payload: StatusChangedPayload): void {
   switch (payload.status) {
     case "recording":
-      resetBars();
       // Hold mode (the default while settings are not yet loaded) records only
       // while the hotkey is held — releasing it finishes.
       statusText.textContent =
@@ -115,9 +116,18 @@ function applyStatus(payload: StatusChangedPayload): void {
       break;
     case "idle":
       statusText.textContent = t("overlay.idle");
-      resetBars();
       break;
   }
+}
+
+function applyStatus(payload: StatusChangedPayload): void {
+  lastStatusPayload = payload;
+  currentStatus = payload.status;
+  hud.dataset.status = payload.status;
+  if (payload.status === "recording" || payload.status === "idle") {
+    resetBars();
+  }
+  renderCaption(payload);
   // clear CSS animation heights when leaving processing states
   if (payload.status !== "transcribing" && payload.status !== "polishing") {
     for (const bar of bars) bar.style.removeProperty("animation");
@@ -149,7 +159,9 @@ async function syncLang(uiLang: string): Promise<void> {
   if (code !== getLang()) {
     setLang(code);
     applyDom();
-    applyStatus(lastStatusPayload);
+    // Re-translate the caption only — a full applyStatus would reset the
+    // visualizer bars mid-recording (SPEC v0.3.1 F3).
+    renderCaption(lastStatusPayload);
   }
 }
 
@@ -184,7 +196,9 @@ async function init(): Promise<void> {
     void syncLang(settings.ui_lang);
     updateModeChip();
     // hotkey_mode may have changed: refresh the recording caption in place.
-    if (currentStatus === "recording") applyStatus(lastStatusPayload);
+    // Caption only — never the full applyStatus path, which would reset the
+    // level bars mid-recording (SPEC v0.3.1 F3).
+    if (currentStatus === "recording") renderCaption(lastStatusPayload);
   });
 
   try {

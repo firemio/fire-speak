@@ -280,6 +280,12 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
     let first_run_defaults = |persist: bool, app: &tauri::AppHandle| -> Settings {
         let mut s = Settings::default();
         s.modes = crate::locale::default_modes_for(&crate::locale::resolve_ui_lang());
+        // AltGr layouts (e.g. many European keyboards) use RAlt to type
+        // characters, so RAlt cannot be the hotkey there. The static serde
+        // default stays "RAlt"; only first-run creation consults the layout.
+        if crate::locale::layout_uses_altgr() {
+            s.hotkey = "Ctrl+Alt+Space".to_string();
+        }
         if persist {
             let _ = save(app, &s);
         }

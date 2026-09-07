@@ -252,6 +252,9 @@ pub fn stop_and_process(app: &AppHandle) {
     };
     let handle = state.recorder.lock().unwrap().take();
     let Some(handle) = handle else {
+        // No recorder (e.g. confirmed while the mic was still initializing):
+        // surface it as ERR_NO_SPEECH instead of silently going idle —
+        // status-changed{error}, 2.5s overlay display, then idle.
         {
             let mut status = state.status.lock().unwrap();
             if state.generation.load(Ordering::SeqCst) != gen {
@@ -259,8 +262,7 @@ pub fn stop_and_process(app: &AppHandle) {
             }
             *status = Status::Idle;
         }
-        emit_status(app, "idle", None);
-        hide_overlay(app);
+        error_flow(app, "ERR_NO_SPEECH".to_string());
         return;
     };
     emit_status(app, "transcribing", None);

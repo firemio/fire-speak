@@ -7,10 +7,23 @@
 //! a single atomic store.
 //!
 //! The hook callback runs on the pump thread and delays EVERY keystroke in
-//! the system while it executes, so it does only atomic loads/stores plus the
-//! dispatch-thread spawn — no locks, no I/O.
+//! the system while it executes, so it does only atomic loads/stores plus a
+//! non-blocking channel send to the single long-lived dispatcher thread —
+//! no locks, no I/O, no per-event thread spawns (ordering is guaranteed by
+//! the channel).
+//!
+//! State machine (SPEC v0.3.1): `SWALLOWED_VK` is the ONLY press latch.
+//! - keydown of the latched VK: swallow unconditionally (typematic repeat,
+//!   regardless of watched/suspend state).
+//! - keydown of the watched VK while not suspended, not injected, and not an
+//!   AltGr-generated sequence: latch, dispatch pressed, swallow.
+//! - keyup of the latched VK: clear the latch, dispatch released
+//!   UNCONDITIONALLY (pipeline::hotkey_released handles suspension safely),
+//!   swallow. Every other event passes through — a passed-through down gets a
+//!   passed-through up (symmetry).
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::OnceLock;
 use tauri::AppHandle;
 use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
@@ -19,18 +32,28 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
+const VK_LCONTROL: u32 = 0xA2;
+const VK_RMENU: u32 = 0xA5;
+/// Scan code of the fake LCtrl the keyboard driver synthesizes as part of an
+/// AltGr press/release sequence.
+const SC_ALTGR_FAKE_CTRL: u32 = 0x21D;
+
 /// Virtual key currently watched by the hook; 0 = hook path disabled
 /// (a plugin combo is active instead).
 static WATCHED_VK: AtomicU32 = AtomicU32::new(0);
 /// Whether SetWindowsHookExW succeeded (set once by the pump thread).
 static INSTALLED: AtomicBool = AtomicBool::new(false);
-/// Physical down-state of the watched key (auto-repeat suppression: only the
-/// up->down transition dispatches).
-static KEY_DOWN: AtomicBool = AtomicBool::new(false);
-/// VK whose keydown we swallowed; its matching keyup must be swallowed too,
-/// even if the watched key or the suspend flag changed in between. 0 = none.
+/// The ONLY press latch: VK whose keydown we swallowed; its typematic repeats
+/// and its matching keyup are swallowed too, even if the watched key or the
+/// suspend flag changed in between. 0 = none.
 static SWALLOWED_VK: AtomicU32 = AtomicU32::new(0);
+/// KBDLLHOOKSTRUCT.time of the most recent NON-injected AltGr fake-LCtrl
+/// event (scanCode 0x21D). An RAlt event carrying the same timestamp is part
+/// of an AltGr sequence and must pass through untouched.
+static ALTGR_TIME: AtomicU32 = AtomicU32::new(0);
 static APP: OnceLock<AppHandle> = OnceLock::new();
+/// Sender into the single long-lived dispatcher thread (true = pressed).
+static SENDER: OnceLock<Sender<bool>> = OnceLock::new();
 
 /// Map a special hotkey token to its virtual-key code.
 pub fn token_to_vk(token: &str) -> Option<u32> {
@@ -54,12 +77,30 @@ pub fn set_watched_vk(vk: u32) {
     WATCHED_VK.store(vk, Ordering::SeqCst);
 }
 
-/// Install the hook once on a dedicated message-pump thread. Returns whether
-/// the hook is installed (idempotent; safe to call again).
+/// Install the hook once on a dedicated message-pump thread and start the
+/// single dispatcher thread. Returns whether the hook is installed
+/// (idempotent; safe to call again).
 pub fn install(app: AppHandle) -> bool {
     if APP.set(app).is_err() {
         return is_installed(); // already installed (or install failed) earlier
     }
+
+    // Single long-lived dispatcher: receives press/release events in order
+    // and runs the pipeline entry points off the hook thread.
+    let (dtx, drx) = std::sync::mpsc::channel::<bool>();
+    let _ = SENDER.set(dtx);
+    std::thread::spawn(move || {
+        while let Ok(pressed) = drx.recv() {
+            if let Some(app) = APP.get() {
+                if pressed {
+                    crate::pipeline::hotkey_pressed(app);
+                } else {
+                    crate::pipeline::hotkey_released(app);
+                }
+            }
+        }
+    });
+
     let (tx, rx) = std::sync::mpsc::channel::<bool>();
     std::thread::spawn(move || unsafe {
         let hook =
@@ -78,17 +119,10 @@ pub fn install(app: AppHandle) -> bool {
         .unwrap_or(false)
 }
 
-/// Run pipeline::hotkey_pressed/hotkey_released off the hook thread.
+/// Queue a press/release for the dispatcher thread (O(1), order-preserving).
 fn dispatch(pressed: bool) {
-    if let Some(app) = APP.get() {
-        let app = app.clone();
-        std::thread::spawn(move || {
-            if pressed {
-                crate::pipeline::hotkey_pressed(&app);
-            } else {
-                crate::pipeline::hotkey_released(&app);
-            }
-        });
+    if let Some(tx) = SENDER.get() {
+        let _ = tx.send(pressed);
     }
 }
 
@@ -98,37 +132,43 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
         // Ignore synthetic input (enigo's Ctrl+V etc.).
         if kb.flags & LLKHF_INJECTED == 0 {
             let vk = kb.vkCode;
-            let watched = WATCHED_VK.load(Ordering::SeqCst);
+            // AltGr detection: the driver emits a fake LCtrl (scanCode 0x21D)
+            // with the SAME timestamp as the RAlt event of the sequence.
+            if vk == VK_LCONTROL && kb.scanCode == SC_ALTGR_FAKE_CTRL {
+                ALTGR_TIME.store(kb.time, Ordering::SeqCst);
+            }
+            let altgr_ralt =
+                vk == VK_RMENU && kb.time == ALTGR_TIME.load(Ordering::SeqCst);
             match wparam as u32 {
                 WM_KEYDOWN | WM_SYSKEYDOWN => {
+                    if SWALLOWED_VK.load(Ordering::SeqCst) == vk {
+                        // Typematic repeat of the latched key: swallow
+                        // unconditionally (regardless of watched/suspend).
+                        return 1;
+                    }
+                    let watched = WATCHED_VK.load(Ordering::SeqCst);
                     if watched != 0
                         && vk == watched
                         && !crate::pipeline::hotkey_suspended()
+                        && !altgr_ralt
                     {
-                        if !KEY_DOWN.swap(true, Ordering::SeqCst) {
-                            dispatch(true); // up->down transition only
-                        }
                         SWALLOWED_VK.store(vk, Ordering::SeqCst);
-                        return 1; // swallow (also swallows auto-repeats)
+                        dispatch(true);
+                        return 1; // swallow
                     }
-                    // suspended or not watched: pass through, no dispatch
+                    // otherwise: pass through, no dispatch
                 }
                 WM_KEYUP | WM_SYSKEYUP => {
-                    // A keyup matching a swallowed keydown is swallowed even
-                    // if the watch/suspend state changed since the down.
-                    let swallow = SWALLOWED_VK.load(Ordering::SeqCst) == vk;
-                    if swallow {
+                    if SWALLOWED_VK.load(Ordering::SeqCst) == vk {
                         SWALLOWED_VK.store(0, Ordering::SeqCst);
+                        // Released is dispatched UNCONDITIONALLY — even while
+                        // suspended (pipeline::hotkey_released handles the
+                        // suspended case safely) — so HOTKEY_HELD never goes
+                        // stale and a hold-mode recording always ends.
+                        dispatch(false);
+                        return 1; // swallow (matches the swallowed down)
                     }
-                    if watched != 0 && vk == watched {
-                        KEY_DOWN.store(false, Ordering::SeqCst);
-                        if !crate::pipeline::hotkey_suspended() {
-                            dispatch(false);
-                        }
-                    }
-                    if swallow {
-                        return 1;
-                    }
+                    // pass through (its down was passed through too)
                 }
                 _ => {}
             }

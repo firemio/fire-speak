@@ -952,11 +952,17 @@ function wireGeneralSection(): void {
   /** e.code of a lone modifier currently held down in the capture field; its
    * keyup (with no other key in between) confirms a bare-modifier hotkey. */
   let pendingModCode: string | null = null;
+  /** e.codes of all modifiers currently held down in the capture field
+   * (SPEC v0.3.1 F1). A bare-modifier tap confirms only if, from its keydown
+   * to its keyup, this set never contained more than that single code — so
+   * holding both Shifts is never misdetected as a tap. */
+  const heldModCodes = new Set<string>();
 
   hotkeyInput.addEventListener("focus", () => {
     hotkeyInput.classList.add("capturing");
     hotkeyInput.value = t("hotkey.press");
     pendingModCode = null;
+    heldModCodes.clear();
     // Suspend the global hotkey path while capturing so pressing the current
     // hotkey doesn't start a recording (fire-and-forget; failures ignored).
     void invoke("set_hotkey_suspended", { suspended: true }).catch(() => {});
@@ -964,6 +970,7 @@ function wireGeneralSection(): void {
   hotkeyInput.addEventListener("blur", () => {
     hotkeyInput.classList.remove("capturing");
     pendingModCode = null;
+    heldModCodes.clear();
     if (settings) hotkeyInput.value = displayHotkey(settings.hotkey);
     void invoke("set_hotkey_suspended", { suspended: false }).catch(() => {});
   });
@@ -973,6 +980,7 @@ function wireGeneralSection(): void {
     if (!settings) return;
     if (e.key === "Escape") {
       pendingModCode = null;
+      heldModCodes.clear();
       hotkeyInput.blur();
       return;
     }
@@ -981,11 +989,23 @@ function wireGeneralSection(): void {
     if (e.altKey) mods.push("Alt");
     if (e.shiftKey) mods.push("Shift");
     if (e.metaKey) mods.push("Super");
-    if (e.key === "Control" || e.key === "Alt" || e.key === "Shift" || e.key === "Meta") {
+    // AltGraph (e.code AltRight) is a modifier too (SPEC v0.3.1 F2): it maps
+    // to RAlt for bare-tap detection and must not hit the "invalid key"
+    // rejection. On AltGr layouts the backend rejects RAlt
+    // (ERR_HOTKEY_REGISTER|RAlt) and the applyHotkey rollback handles it.
+    if (
+      e.key === "Control" ||
+      e.key === "Alt" ||
+      e.key === "Shift" ||
+      e.key === "Meta" ||
+      e.key === "AltGraph"
+    ) {
+      heldModCodes.add(e.code);
       const token = MOD_CODE_TOKEN[e.code];
-      if (token !== undefined && mods.length === 1) {
+      if (token !== undefined && heldModCodes.size === 1) {
         // A lone modifier went down: pending bare-modifier tap. If its keyup
-        // arrives with no other key in between, it becomes the hotkey.
+        // arrives while it stayed the only held modifier, it becomes the
+        // hotkey.
         pendingModCode = e.code;
         hotkeyInput.value = `${displayHotkey(token)}…`;
       } else {
@@ -1015,11 +1035,14 @@ function wireGeneralSection(): void {
   hotkeyInput.addEventListener("keyup", (e) => {
     e.preventDefault();
     e.stopPropagation();
+    heldModCodes.delete(e.code);
     if (!settings) return;
     const token = MOD_CODE_TOKEN[e.code];
     if (pendingModCode !== null && e.code === pendingModCode && token !== undefined) {
-      // Bare-modifier tap confirmed: keyup with no other key in between.
-      // applyHotkey validates via the backend and rolls back on Err.
+      // Bare-modifier tap confirmed: from its keydown to this keyup the held
+      // set never contained more than this single code (any other keydown
+      // cleared pendingModCode). applyHotkey validates via the backend and
+      // rolls back on Err.
       pendingModCode = null;
       void applyHotkey(token);
       hotkeyInput.blur();

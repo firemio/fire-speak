@@ -14,6 +14,22 @@ pub fn resolve_ui_lang() -> String {
     map_locale(&sys_locale::get_locale().unwrap_or_default())
 }
 
+/// Whether the current keyboard layout uses AltGr (Ctrl+Alt) to produce any
+/// character. Scans the characters 0x20..0x100 with `VkKeyScanExW` against
+/// the current thread's layout: if any mapping requires both CTRL and ALT
+/// modifiers (high-byte bits 0x06), the layout uses AltGr (SPEC v0.3.1).
+pub fn layout_uses_altgr() -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyboardLayout, VkKeyScanExW};
+    let hkl = unsafe { GetKeyboardLayout(0) };
+    for ch in 0x20u16..0x100 {
+        let result = unsafe { VkKeyScanExW(ch, hkl) };
+        if result != -1 && (result as u16 >> 8) & 0x06 == 0x06 {
+            return true;
+        }
+    }
+    false
+}
+
 /// Resolve a persisted `ui_lang` setting to a concrete code:
 /// a valid stored code wins; `""` (auto) or an unknown code falls back to the
 /// OS locale.
