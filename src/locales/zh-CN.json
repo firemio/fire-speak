@@ -7,10 +7,8 @@
   "nav.general": "通用",
   "nav.setup": "安装配置",
   "nav.update": "更新",
-
   "sidebar.quit": "退出",
   "sidebar.quitTitle": "退出应用",
-
   "status.idle": "空闲",
   "status.recording": "录音中",
   "status.transcribing": "转写中…",
@@ -19,7 +17,6 @@
   "status.error": "错误",
   "status.errorWith": "错误：{0}",
   "status.withMessage": "{0} — {1}",
-
   "common.active": "已启用",
   "common.advanced": "高级设置",
   "common.close": "关闭",
@@ -29,7 +26,6 @@
   "common.notInstalled": "未安装",
   "common.showHide": "显示 / 隐藏",
   "common.testing": "测试中…",
-
   "home.heroTitle": "语音输入已就绪",
   "home.heroSub": "按下此快捷键即可开始 / 停止录音",
   "home.recordTest": "🎙️ 录音测试",
@@ -38,7 +34,6 @@
   "home.empty": "暂无历史记录。按快捷键试试语音输入吧。",
   "home.llmDefault": "AI 润色",
   "home.noLlm": "不使用 AI 润色（按原文输入）",
-
   "stt.engineHeading": "语音识别引擎",
   "stt.engineLocal": "本地（whisper.cpp）",
   "stt.engineCloud": "云端（OpenAI 兼容）",
@@ -60,7 +55,6 @@
   "stt.modelInstalledMeta": "{0} MB ・ 已安装",
   "stt.modelNotInstalledMeta": "{0} MB ・ 未安装",
   "stt.loadingModels": "正在获取模型信息…",
-
   "llm.heading": "润色服务商",
   "llm.add": "＋ 添加服务商",
   "llm.hint": "设为启用的服务商将用于执行各模式的润色指令。",
@@ -76,7 +70,6 @@
   "llm.testBtn": "🔌 测试",
   "llm.reply": "✓ 响应：{0}",
   "llm.newProviderName": "新服务商",
-
   "modes.heading": "模式管理",
   "modes.add": "＋ 添加模式",
   "modes.hint": "可编辑各模式的润色指令。关闭“使用 AI 润色”后，将直接使用转写结果。",
@@ -87,7 +80,6 @@
   "modes.namePlaceholder": "模式名称",
   "modes.instructionPlaceholder": "润色指令（例：去除口头语，整理为自然流畅的文字）",
   "modes.newModeName": "新模式",
-
   "history.clear": "🗑 全部清除",
   "history.empty": "暂无历史记录。",
   "history.copied": "已复制",
@@ -96,13 +88,12 @@
   "history.clearConfirm": "确定删除全部历史记录吗？此操作无法撤销。",
   "history.cleared": "历史记录已删除",
   "history.clearFailed": "删除失败：{0}",
-
   "general.heading": "通用设置",
   "general.hotkey": "全局快捷键",
   "general.hotkeyPlaceholder": "点击后按下按键",
   "general.hotkeyHint": "点击后按下要设置的组合键（例：Ctrl+Alt+Space）",
   "general.language": "识别语言",
-  "general.langAuto": "自动检测",
+  "general.langAuto": "自动（跟随系统语言）",
   "general.langJa": "日语",
   "general.langEn": "英语",
   "general.uiLang": "界面语言",
@@ -114,11 +105,9 @@
   "general.restoreClipboardDesc": "粘贴后恢复剪贴板原有内容",
   "general.autostart": "开机自动启动",
   "general.autostartDesc": "登录 Windows 时在后台启动 fire-speak",
-
   "hotkey.press": "请按下按键…",
   "hotkey.invalid": "此按键不可用",
   "hotkey.needModifier": "请与修饰键（Ctrl/Alt/Shift）组合使用",
-
   "setup.heading": "本地语音识别安装配置",
   "setup.hint": "使用本地引擎需要 whisper-server 程序及至少一个模型。",
   "setup.checking": "检查中…",
@@ -132,7 +121,6 @@
   "setup.modelDownloadFailed": "模型 {0} 下载失败：{1}",
   "setup.serverInstalled": "whisper-server 安装完成",
   "setup.modelDownloaded": "模型 {0} 下载完成",
-
   "update.currentVersion": "当前版本",
   "update.check": "检查更新",
   "update.checking": "检查中…",
@@ -144,12 +132,10 @@
   "update.autoCheckDesc": "应用启动时自动检查 GitHub Releases",
   "update.owner": "GitHub 所有者",
   "update.repo": "仓库名称",
-
   "err.saveFailed": "保存失败：{0}",
   "err.modeSwitch": "切换模式失败：{0}",
   "err.loadSettings": "加载设置失败：{0}",
   "quit.confirm": "确定退出 fire-speak 吗？退出后将停止后台常驻，快捷键也将失效。",
-
   "overlay.recording": "请开始说话…（按快捷键结束）",
   "overlay.transcribing": "转写中…",
   "overlay.polishing": "AI 润色中…",
@@ -158,7 +144,6 @@
   "overlay.error": "发生错误",
   "overlay.idle": "空闲",
   "overlay.cancel": "取消",
-
   "msg.ERR_NO_SPEECH": "未识别到语音",
   "msg.ERR_SETUP_REQUIRED": "请在“安装配置”页面安装 Whisper 服务器和模型",
   "msg.ERR_PORT_IN_USE": "端口 {0} 已被其他应用占用",

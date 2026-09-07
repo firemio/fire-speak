@@ -7,10 +7,8 @@
   "nav.general": "일반",
   "nav.setup": "설치",
   "nav.update": "업데이트",
-
   "sidebar.quit": "종료",
   "sidebar.quitTitle": "앱 종료",
-
   "status.idle": "대기 중",
   "status.recording": "녹음 중",
   "status.transcribing": "받아쓰는 중…",
@@ -19,7 +17,6 @@
   "status.error": "오류",
   "status.errorWith": "오류: {0}",
   "status.withMessage": "{0} — {1}",
-
   "common.active": "활성",
   "common.advanced": "고급 설정",
   "common.close": "닫기",
@@ -29,7 +26,6 @@
   "common.notInstalled": "설치 안 됨",
   "common.showHide": "표시 전환",
   "common.testing": "테스트 중…",
-
   "home.heroTitle": "음성 입력 준비 완료",
   "home.heroSub": "이 단축키를 누르면 녹음을 시작 / 중지합니다",
   "home.recordTest": "🎙️ 녹음 테스트",
@@ -38,7 +34,6 @@
   "home.empty": "아직 기록이 없습니다. 단축키로 음성 입력을 시작해 보세요.",
   "home.llmDefault": "AI 다듬기",
   "home.noLlm": "AI 다듬기 없음 (그대로 입력)",
-
   "stt.engineHeading": "음성 인식 엔진",
   "stt.engineLocal": "로컬 (whisper.cpp)",
   "stt.engineCloud": "클라우드 (OpenAI 호환)",
@@ -60,7 +55,6 @@
   "stt.modelInstalledMeta": "{0} MB ・ 설치됨",
   "stt.modelNotInstalledMeta": "{0} MB ・ 설치 안 됨",
   "stt.loadingModels": "모델 정보를 불러오는 중…",
-
   "llm.heading": "다듬기 프로바이더",
   "llm.add": "＋ 프로바이더 추가",
   "llm.hint": "활성으로 설정한 프로바이더가 각 모드의 다듬기 지시를 실행하는 데 사용됩니다.",
@@ -76,7 +70,6 @@
   "llm.testBtn": "🔌 테스트",
   "llm.reply": "✓ 응답: {0}",
   "llm.newProviderName": "새 프로바이더",
-
   "modes.heading": "모드 관리",
   "modes.add": "＋ 모드 추가",
   "modes.hint": "모드별 다듬기 지시를 편집할 수 있습니다. \"AI 다듬기 사용\"을 끄면 받아쓴 결과를 그대로 사용합니다.",
@@ -87,7 +80,6 @@
   "modes.namePlaceholder": "모드 이름",
   "modes.instructionPlaceholder": "다듬기 지시 (예: 군더더기 표현을 제거하고 자연스러운 문장으로 다듬어 주세요)",
   "modes.newModeName": "새 모드",
-
   "history.clear": "🗑 전체 삭제",
   "history.empty": "아직 기록이 없습니다.",
   "history.copied": "복사했습니다",
@@ -96,13 +88,12 @@
   "history.clearConfirm": "기록을 모두 삭제할까요? 이 작업은 되돌릴 수 없습니다.",
   "history.cleared": "기록을 삭제했습니다",
   "history.clearFailed": "삭제에 실패했습니다: {0}",
-
   "general.heading": "일반 설정",
   "general.hotkey": "전역 단축키",
   "general.hotkeyPlaceholder": "클릭한 뒤 키를 누르세요",
   "general.hotkeyHint": "클릭한 뒤 지정할 키 조합을 누르세요 (예: Ctrl+Alt+Space)",
   "general.language": "인식 언어",
-  "general.langAuto": "자동 감지",
+  "general.langAuto": "자동 (시스템 언어)",
   "general.langJa": "일본어",
   "general.langEn": "영어",
   "general.uiLang": "표시 언어",
@@ -114,11 +105,9 @@
   "general.restoreClipboardDesc": "붙여넣기 후 이전 클립보드 내용을 되돌립니다",
   "general.autostart": "Windows 시작 시 자동 실행",
   "general.autostartDesc": "로그인 시 fire-speak를 백그라운드로 실행합니다",
-
   "hotkey.press": "키를 누르세요…",
   "hotkey.invalid": "이 키는 사용할 수 없습니다",
   "hotkey.needModifier": "보조 키(Ctrl/Alt/Shift)와 함께 사용하세요",
-
   "setup.heading": "로컬 음성 인식 설치",
   "setup.hint": "로컬 엔진을 사용하려면 whisper-server 본체와 모델이 하나 이상 필요합니다.",
   "setup.checking": "확인 중…",
@@ -132,7 +121,6 @@
   "setup.modelDownloadFailed": "모델 {0} 다운로드에 실패했습니다: {1}",
   "setup.serverInstalled": "whisper-server를 설치했습니다",
   "setup.modelDownloaded": "모델 {0}을(를) 다운로드했습니다",
-
   "update.currentVersion": "현재 버전",
   "update.check": "업데이트 확인",
   "update.checking": "확인 중…",
@@ -144,12 +132,10 @@
   "update.autoCheckDesc": "앱 시작 시 GitHub Releases를 자동으로 확인합니다",
   "update.owner": "GitHub 소유자",
   "update.repo": "리포지토리 이름",
-
   "err.saveFailed": "저장에 실패했습니다: {0}",
   "err.modeSwitch": "모드 전환에 실패했습니다: {0}",
   "err.loadSettings": "설정을 불러오지 못했습니다: {0}",
   "quit.confirm": "fire-speak를 종료할까요? 상주가 해제되고 단축키도 비활성화됩니다.",
-
   "overlay.recording": "말씀하세요… (단축키로 완료)",
   "overlay.transcribing": "받아쓰는 중…",
   "overlay.polishing": "AI 다듬는 중…",
@@ -158,7 +144,6 @@
   "overlay.error": "오류가 발생했습니다",
   "overlay.idle": "대기 중",
   "overlay.cancel": "취소",
-
   "msg.ERR_NO_SPEECH": "음성을 인식하지 못했습니다",
   "msg.ERR_SETUP_REQUIRED": "설치 화면에서 Whisper 서버와 모델을 설치하세요",
   "msg.ERR_PORT_IN_USE": "포트 {0}은(는) 다른 앱이 사용 중입니다",

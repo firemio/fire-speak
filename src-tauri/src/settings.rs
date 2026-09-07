@@ -264,20 +264,18 @@ fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 /// Load settings from disk; creates the file with defaults on first run.
 ///
-/// When `ui_lang` is empty, the UI language resolved from the OS locale is set
-/// IN MEMORY ONLY (never persisted). At first run the 6 default modes are
+/// `ui_lang` keeps its persisted value — `""` means "auto (follow OS locale)"
+/// and stays `""` through every save until the user explicitly picks a
+/// language. Resolution to a concrete code happens at point of use
+/// (`locale::resolve_ui_lang_setting`). At first run the 6 default modes are
 /// generated in the resolved initial language.
 pub fn load(app: &tauri::AppHandle) -> Settings {
-    let resolved = crate::locale::resolve_ui_lang();
-
     let first_run_defaults = |persist: bool, app: &tauri::AppHandle| -> Settings {
         let mut s = Settings::default();
-        s.modes = crate::locale::default_modes_for(&resolved);
+        s.modes = crate::locale::default_modes_for(&crate::locale::resolve_ui_lang());
         if persist {
-            // persisted with ui_lang: "" — the resolved code stays memory-only
             let _ = save(app, &s);
         }
-        s.ui_lang = resolved.clone();
         s
     };
 
@@ -286,10 +284,7 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
         Err(_) => return first_run_defaults(false, app),
     };
     if let Ok(text) = std::fs::read_to_string(&path) {
-        if let Ok(mut s) = serde_json::from_str::<Settings>(&text) {
-            if s.ui_lang.trim().is_empty() {
-                s.ui_lang = resolved.clone();
-            }
+        if let Ok(s) = serde_json::from_str::<Settings>(&text) {
             return s;
         }
     }

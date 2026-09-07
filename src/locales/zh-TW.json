@@ -7,10 +7,8 @@
   "nav.general": "一般",
   "nav.setup": "安裝設定",
   "nav.update": "更新",
-
   "sidebar.quit": "結束",
   "sidebar.quitTitle": "結束應用程式",
-
   "status.idle": "待命中",
   "status.recording": "錄音中",
   "status.transcribing": "轉錄中…",
@@ -19,7 +17,6 @@
   "status.error": "錯誤",
   "status.errorWith": "錯誤：{0}",
   "status.withMessage": "{0} — {1}",
-
   "common.active": "使用中",
   "common.advanced": "進階設定",
   "common.close": "關閉",
@@ -29,7 +26,6 @@
   "common.notInstalled": "未安裝",
   "common.showHide": "顯示 / 隱藏",
   "common.testing": "測試中…",
-
   "home.heroTitle": "語音輸入已準備就緒",
   "home.heroSub": "按下此快捷鍵即可開始 / 停止錄音",
   "home.recordTest": "🎙️ 錄音測試",
@@ -38,7 +34,6 @@
   "home.empty": "尚無歷史記錄。按快捷鍵試試語音輸入吧。",
   "home.llmDefault": "AI 潤飾",
   "home.noLlm": "不使用 AI 潤飾（直接輸入）",
-
   "stt.engineHeading": "語音辨識引擎",
   "stt.engineLocal": "本機（whisper.cpp）",
   "stt.engineCloud": "雲端（OpenAI 相容）",
@@ -60,7 +55,6 @@
   "stt.modelInstalledMeta": "{0} MB ・ 已安裝",
   "stt.modelNotInstalledMeta": "{0} MB ・ 未安裝",
   "stt.loadingModels": "正在取得模型資訊…",
-
   "llm.heading": "潤飾服務供應商",
   "llm.add": "＋ 新增供應商",
   "llm.hint": "設為使用中的供應商將用於執行各模式的潤飾指示。",
@@ -76,7 +70,6 @@
   "llm.testBtn": "🔌 測試",
   "llm.reply": "✓ 回應：{0}",
   "llm.newProviderName": "新供應商",
-
   "modes.heading": "模式管理",
   "modes.add": "＋ 新增模式",
   "modes.hint": "可編輯各模式的潤飾指示。關閉「使用 AI 潤飾」時將直接使用轉錄結果。",
@@ -87,7 +80,6 @@
   "modes.namePlaceholder": "模式名稱",
   "modes.instructionPlaceholder": "潤飾指示（例：移除贅詞並整理成通順的文句）",
   "modes.newModeName": "新模式",
-
   "history.clear": "🗑 全部清除",
   "history.empty": "尚無歷史記錄。",
   "history.copied": "已複製",
@@ -96,13 +88,12 @@
   "history.clearConfirm": "確定要刪除所有歷史記錄嗎？此操作無法復原。",
   "history.cleared": "已清除歷史記錄",
   "history.clearFailed": "刪除失敗：{0}",
-
   "general.heading": "一般設定",
   "general.hotkey": "全域快捷鍵",
   "general.hotkeyPlaceholder": "點選後按下按鍵",
   "general.hotkeyHint": "點選後按下想指定的按鍵組合（例：Ctrl+Alt+Space）",
   "general.language": "辨識語言",
-  "general.langAuto": "自動偵測",
+  "general.langAuto": "自動（跟隨系統語言）",
   "general.langJa": "日文",
   "general.langEn": "英文",
   "general.uiLang": "介面語言",
@@ -114,11 +105,9 @@
   "general.restoreClipboardDesc": "貼上後還原原本的剪貼簿內容",
   "general.autostart": "隨 Windows 啟動",
   "general.autostartDesc": "登入時在背景啟動 fire-speak",
-
   "hotkey.press": "請按下按鍵…",
   "hotkey.invalid": "無法使用此按鍵",
   "hotkey.needModifier": "請搭配修飾鍵（Ctrl/Alt/Shift）使用",
-
   "setup.heading": "本機語音辨識安裝設定",
   "setup.hint": "使用本機引擎需要 whisper-server 主程式及至少一個模型。",
   "setup.checking": "檢查中…",
@@ -132,7 +121,6 @@
   "setup.modelDownloadFailed": "模型 {0} 下載失敗：{1}",
   "setup.serverInstalled": "已安裝 whisper-server",
   "setup.modelDownloaded": "已下載模型 {0}",
-
   "update.currentVersion": "目前版本",
   "update.check": "檢查更新",
   "update.checking": "檢查中…",
@@ -144,12 +132,10 @@
   "update.autoCheckDesc": "應用程式啟動時自動檢查 GitHub Releases",
   "update.owner": "GitHub 擁有者",
   "update.repo": "儲存庫名稱",
-
   "err.saveFailed": "儲存失敗：{0}",
   "err.modeSwitch": "切換模式失敗：{0}",
   "err.loadSettings": "載入設定失敗：{0}",
   "quit.confirm": "確定要結束 fire-speak 嗎？常駐程式將關閉，快捷鍵也會失效。",
-
   "overlay.recording": "請開始說話…（按快捷鍵完成）",
   "overlay.transcribing": "轉錄中…",
   "overlay.polishing": "AI 潤飾中…",
@@ -158,7 +144,6 @@
   "overlay.error": "發生錯誤",
   "overlay.idle": "待命中",
   "overlay.cancel": "取消",
-
   "msg.ERR_NO_SPEECH": "未辨識到語音",
   "msg.ERR_SETUP_REQUIRED": "請在安裝設定頁面安裝 Whisper 伺服器與模型",
   "msg.ERR_PORT_IN_USE": "連接埠 {0} 已被其他應用程式占用",

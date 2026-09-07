@@ -297,6 +297,7 @@ GitHub Releases の最新版と現行バージョンを比較する方式(自動
 |---|---|---|
 | `check_update` | — | `UpdateInfo`。ネットワーク失敗等は `Err("ERR_UPDATE_CHECK\|{detail}")` |
 | `open_url` | `{ url: string }` | `()` — 既定ブラウザで開く。`https://` 以外は Err |
+| `get_ui_lang` | — | `string` — 解決済みUI言語コード。`ui_lang` 設定が12種のいずれかならそれ、`""`(自動)/不明値ならOSロケール解決。**get_settings の ui_lang は永続値のまま**(`""` = 自動)で、解決はこのコマンドで行う。セレクタは先頭に「自動」(`""`)の選択肢を持つ |
 
 ```ts
 type UpdateInfo = {

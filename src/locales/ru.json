@@ -7,10 +7,8 @@
   "nav.general": "Общие",
   "nav.setup": "Установка",
   "nav.update": "Обновления",
-
   "sidebar.quit": "Выход",
   "sidebar.quitTitle": "Закрыть приложение",
-
   "status.idle": "Ожидание",
   "status.recording": "Запись",
   "status.transcribing": "Расшифровка…",
@@ -19,7 +17,6 @@
   "status.error": "Ошибка",
   "status.errorWith": "Ошибка: {0}",
   "status.withMessage": "{0} — {1}",
-
   "common.active": "Активен",
   "common.advanced": "Дополнительные настройки",
   "common.close": "Закрыть",
@@ -29,7 +26,6 @@
   "common.notInstalled": "Не установлено",
   "common.showHide": "Показать / скрыть",
   "common.testing": "Проверка…",
-
   "home.heroTitle": "Голосовой ввод готов к работе",
   "home.heroSub": "Нажмите эту горячую клавишу, чтобы начать / остановить запись",
   "home.recordTest": "🎙️ Тест записи",
@@ -38,7 +34,6 @@
   "home.empty": "Истории пока нет. Попробуйте надиктовать текст горячей клавишей.",
   "home.llmDefault": "AI-обработка",
   "home.noLlm": "Без AI-обработки (вставка как есть)",
-
   "stt.engineHeading": "Движок распознавания речи",
   "stt.engineLocal": "Локальный (whisper.cpp)",
   "stt.engineCloud": "Облачный (OpenAI-совместимый)",
@@ -60,7 +55,6 @@
   "stt.modelInstalledMeta": "{0} МБ ・ установлена",
   "stt.modelNotInstalledMeta": "{0} МБ ・ не установлена",
   "stt.loadingModels": "Загрузка сведений о моделях…",
-
   "llm.heading": "Провайдеры обработки",
   "llm.add": "＋ Добавить провайдера",
   "llm.hint": "Активный провайдер выполняет инструкцию обработки каждого режима.",
@@ -76,7 +70,6 @@
   "llm.testBtn": "🔌 Проверить",
   "llm.reply": "✓ Ответ: {0}",
   "llm.newProviderName": "Новый провайдер",
-
   "modes.heading": "Управление режимами",
   "modes.add": "＋ Добавить режим",
   "modes.hint": "Здесь можно изменить инструкцию обработки каждого режима. Отключите «Использовать AI-обработку», чтобы вставлять расшифровку как есть.",
@@ -87,7 +80,6 @@
   "modes.namePlaceholder": "Название режима",
   "modes.instructionPlaceholder": "Инструкция обработки (например: убрать слова-паразиты и привести текст к естественному виду)",
   "modes.newModeName": "Новый режим",
-
   "history.clear": "🗑 Очистить всё",
   "history.empty": "Истории пока нет.",
   "history.copied": "Скопировано",
@@ -96,13 +88,12 @@
   "history.clearConfirm": "Удалить всю историю? Это действие нельзя отменить.",
   "history.cleared": "История очищена",
   "history.clearFailed": "Не удалось удалить: {0}",
-
   "general.heading": "Общие настройки",
   "general.hotkey": "Глобальная горячая клавиша",
   "general.hotkeyPlaceholder": "Нажмите сюда, затем клавиши",
   "general.hotkeyHint": "Нажмите сюда, затем нужное сочетание клавиш (например Ctrl+Alt+Space)",
   "general.language": "Язык распознавания",
-  "general.langAuto": "Автоопределение",
+  "general.langAuto": "Автоматически (язык системы)",
   "general.langJa": "Японский",
   "general.langEn": "Английский",
   "general.uiLang": "Язык интерфейса",
@@ -114,11 +105,9 @@
   "general.restoreClipboardDesc": "После вставки возвращает прежнее содержимое буфера обмена",
   "general.autostart": "Запускать вместе с Windows",
   "general.autostartDesc": "Запускает fire-speak в фоне при входе в систему",
-
   "hotkey.press": "Нажмите клавиши…",
   "hotkey.invalid": "Эту клавишу использовать нельзя",
   "hotkey.needModifier": "Добавьте клавишу-модификатор (Ctrl/Alt/Shift)",
-
   "setup.heading": "Установка локального распознавания речи",
   "setup.hint": "Для локального движка нужны whisper-server и хотя бы одна модель.",
   "setup.checking": "Проверка…",
@@ -132,7 +121,6 @@
   "setup.modelDownloadFailed": "Не удалось скачать модель {0}: {1}",
   "setup.serverInstalled": "whisper-server установлен",
   "setup.modelDownloaded": "Модель {0} скачана",
-
   "update.currentVersion": "Текущая версия",
   "update.check": "Проверить обновления",
   "update.checking": "Проверка…",
@@ -144,12 +132,10 @@
   "update.autoCheckDesc": "Автоматически проверяет GitHub Releases при запуске приложения",
   "update.owner": "Владелец на GitHub",
   "update.repo": "Название репозитория",
-
   "err.saveFailed": "Не удалось сохранить: {0}",
   "err.modeSwitch": "Не удалось переключить режим: {0}",
   "err.loadSettings": "Не удалось загрузить настройки: {0}",
   "quit.confirm": "Выйти из fire-speak? Значок в трее и глобальная горячая клавиша будут отключены.",
-
   "overlay.recording": "Говорите… (горячая клавиша — завершить)",
   "overlay.transcribing": "Расшифровка…",
   "overlay.polishing": "AI-обработка…",
@@ -158,7 +144,6 @@
   "overlay.error": "Произошла ошибка",
   "overlay.idle": "Ожидание",
   "overlay.cancel": "Отмена",
-
   "msg.ERR_NO_SPEECH": "Речь не распознана",
   "msg.ERR_SETUP_REQUIRED": "Установите сервер Whisper и модель в разделе «Установка»",
   "msg.ERR_PORT_IN_USE": "Порт {0} занят другим приложением",

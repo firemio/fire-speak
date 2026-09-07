@@ -7,10 +7,8 @@
   "nav.general": "Umum",
   "nav.setup": "Penyiapan",
   "nav.update": "Pembaruan",
-
   "sidebar.quit": "Keluar",
   "sidebar.quitTitle": "Keluar dari aplikasi",
-
   "status.idle": "Siaga",
   "status.recording": "Merekam",
   "status.transcribing": "Mentranskripsi…",
@@ -19,7 +17,6 @@
   "status.error": "Kesalahan",
   "status.errorWith": "Kesalahan: {0}",
   "status.withMessage": "{0} — {1}",
-
   "common.active": "Aktif",
   "common.advanced": "Pengaturan lanjutan",
   "common.close": "Tutup",
@@ -29,7 +26,6 @@
   "common.notInstalled": "Belum terpasang",
   "common.showHide": "Tampil / sembunyi",
   "common.testing": "Menguji…",
-
   "home.heroTitle": "Siap untuk input suara",
   "home.heroSub": "Tekan hotkey ini untuk mulai / berhenti merekam",
   "home.recordTest": "🎙️ Tes rekaman",
@@ -38,7 +34,6 @@
   "home.empty": "Belum ada riwayat. Coba dikte dengan hotkey.",
   "home.llmDefault": "Format AI",
   "home.noLlm": "Tanpa format AI (dimasukkan apa adanya)",
-
   "stt.engineHeading": "Mesin pengenalan suara",
   "stt.engineLocal": "Lokal (whisper.cpp)",
   "stt.engineCloud": "Cloud (kompatibel OpenAI)",
@@ -60,7 +55,6 @@
   "stt.modelInstalledMeta": "{0} MB ・ terpasang",
   "stt.modelNotInstalledMeta": "{0} MB ・ belum terpasang",
   "stt.loadingModels": "Memuat info model…",
-
   "llm.heading": "Penyedia format",
   "llm.add": "＋ Tambah penyedia",
   "llm.hint": "Penyedia yang aktif digunakan untuk menjalankan instruksi format setiap mode.",
@@ -76,7 +70,6 @@
   "llm.testBtn": "🔌 Tes",
   "llm.reply": "✓ Balasan: {0}",
   "llm.newProviderName": "Penyedia baru",
-
   "modes.heading": "Manajemen mode",
   "modes.add": "＋ Tambah mode",
   "modes.hint": "Edit instruksi format setiap mode. Matikan \"Gunakan format AI\" untuk memasukkan hasil transkripsi apa adanya.",
@@ -87,7 +80,6 @@
   "modes.namePlaceholder": "Nama mode",
   "modes.instructionPlaceholder": "Instruksi format (mis. hapus kata pengisi dan rapikan menjadi kalimat alami)",
   "modes.newModeName": "Mode baru",
-
   "history.clear": "🗑 Hapus semua",
   "history.empty": "Belum ada riwayat.",
   "history.copied": "Tersalin",
@@ -96,13 +88,12 @@
   "history.clearConfirm": "Hapus semua riwayat? Tindakan ini tidak dapat dibatalkan.",
   "history.cleared": "Riwayat dihapus",
   "history.clearFailed": "Gagal menghapus: {0}",
-
   "general.heading": "Pengaturan umum",
   "general.hotkey": "Hotkey global",
   "general.hotkeyPlaceholder": "Klik, lalu tekan tombol",
   "general.hotkeyHint": "Klik, lalu tekan kombinasi tombol yang ingin ditetapkan (mis. Ctrl+Alt+Space)",
   "general.language": "Bahasa pengenalan",
-  "general.langAuto": "Deteksi otomatis",
+  "general.langAuto": "Otomatis (bahasa sistem)",
   "general.langJa": "Jepang",
   "general.langEn": "Inggris",
   "general.uiLang": "Bahasa tampilan",
@@ -114,11 +105,9 @@
   "general.restoreClipboardDesc": "Mengembalikan isi clipboard sebelumnya setelah menempel",
   "general.autostart": "Jalankan saat Windows dimulai",
   "general.autostartDesc": "Menjalankan fire-speak di latar belakang saat sign-in",
-
   "hotkey.press": "Tekan tombol…",
   "hotkey.invalid": "Tombol ini tidak dapat digunakan",
   "hotkey.needModifier": "Kombinasikan dengan tombol pengubah (Ctrl/Alt/Shift)",
-
   "setup.heading": "Penyiapan pengenalan suara lokal",
   "setup.hint": "Mesin lokal memerlukan biner whisper-server dan minimal satu model.",
   "setup.checking": "Memeriksa…",
@@ -132,7 +121,6 @@
   "setup.modelDownloadFailed": "Unduhan model {0} gagal: {1}",
   "setup.serverInstalled": "whisper-server berhasil dipasang",
   "setup.modelDownloaded": "Model {0} berhasil diunduh",
-
   "update.currentVersion": "Versi saat ini",
   "update.check": "Periksa pembaruan",
   "update.checking": "Memeriksa…",
@@ -144,12 +132,10 @@
   "update.autoCheckDesc": "Memeriksa GitHub Releases secara otomatis saat aplikasi dimulai",
   "update.owner": "Pemilik GitHub",
   "update.repo": "Nama repositori",
-
   "err.saveFailed": "Gagal menyimpan: {0}",
   "err.modeSwitch": "Gagal mengganti mode: {0}",
   "err.loadSettings": "Gagal memuat pengaturan: {0}",
   "quit.confirm": "Keluar dari fire-speak? Ikon tray dan hotkey global akan dinonaktifkan.",
-
   "overlay.recording": "Silakan bicara… (tekan hotkey untuk selesai)",
   "overlay.transcribing": "Mentranskripsi…",
   "overlay.polishing": "Memformat dengan AI…",
@@ -158,7 +144,6 @@
   "overlay.error": "Terjadi kesalahan",
   "overlay.idle": "Siaga",
   "overlay.cancel": "Batal",
-
   "msg.ERR_NO_SPEECH": "Tidak ada suara yang dikenali",
   "msg.ERR_SETUP_REQUIRED": "Pasang server Whisper dan model dari bagian Penyiapan",
   "msg.ERR_PORT_IN_USE": "Port {0} sedang digunakan aplikasi lain",

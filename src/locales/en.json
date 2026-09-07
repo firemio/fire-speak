@@ -7,10 +7,8 @@
   "nav.general": "General",
   "nav.setup": "Setup",
   "nav.update": "Updates",
-
   "sidebar.quit": "Quit",
   "sidebar.quitTitle": "Quit the app",
-
   "status.idle": "Idle",
   "status.recording": "Recording",
   "status.transcribing": "Transcribing…",
@@ -19,7 +17,6 @@
   "status.error": "Error",
   "status.errorWith": "Error: {0}",
   "status.withMessage": "{0} — {1}",
-
   "common.active": "Active",
   "common.advanced": "Advanced settings",
   "common.close": "Close",
@@ -29,7 +26,6 @@
   "common.notInstalled": "Not installed",
   "common.showHide": "Show / hide",
   "common.testing": "Testing…",
-
   "home.heroTitle": "Ready for voice input",
   "home.heroSub": "Press this hotkey to start / stop recording",
   "home.recordTest": "🎙️ Test recording",
@@ -38,7 +34,6 @@
   "home.empty": "No history yet. Try dictating with the hotkey.",
   "home.llmDefault": "AI formatting",
   "home.noLlm": "No AI formatting (inserted as-is)",
-
   "stt.engineHeading": "Speech recognition engine",
   "stt.engineLocal": "Local (whisper.cpp)",
   "stt.engineCloud": "Cloud (OpenAI-compatible)",
@@ -60,7 +55,6 @@
   "stt.modelInstalledMeta": "{0} MB ・ installed",
   "stt.modelNotInstalledMeta": "{0} MB ・ not installed",
   "stt.loadingModels": "Loading model info…",
-
   "llm.heading": "Formatting providers",
   "llm.add": "＋ Add provider",
   "llm.hint": "The active provider is used to run each mode's formatting instruction.",
@@ -76,7 +70,6 @@
   "llm.testBtn": "🔌 Test",
   "llm.reply": "✓ Reply: {0}",
   "llm.newProviderName": "New provider",
-
   "modes.heading": "Mode management",
   "modes.add": "＋ Add mode",
   "modes.hint": "Edit each mode's formatting instruction. Turn off \"Use AI formatting\" to insert the raw transcription as-is.",
@@ -87,7 +80,6 @@
   "modes.namePlaceholder": "Mode name",
   "modes.instructionPlaceholder": "Formatting instruction (e.g. remove filler words and polish into natural text)",
   "modes.newModeName": "New mode",
-
   "history.clear": "🗑 Clear all",
   "history.empty": "No history yet.",
   "history.copied": "Copied",
@@ -96,13 +88,12 @@
   "history.clearConfirm": "Delete all history? This cannot be undone.",
   "history.cleared": "History cleared",
   "history.clearFailed": "Delete failed: {0}",
-
   "general.heading": "General settings",
   "general.hotkey": "Global hotkey",
   "general.hotkeyPlaceholder": "Click, then press keys",
   "general.hotkeyHint": "Click, then press the key combination you want to assign (e.g. Ctrl+Alt+Space)",
   "general.language": "Recognition language",
-  "general.langAuto": "Auto-detect",
+  "general.langAuto": "Auto (system language)",
   "general.langJa": "Japanese",
   "general.langEn": "English",
   "general.uiLang": "Display language",
@@ -114,11 +105,9 @@
   "general.restoreClipboardDesc": "Restores the previous clipboard contents after pasting",
   "general.autostart": "Start with Windows",
   "general.autostartDesc": "Launches fire-speak in the background at sign-in",
-
   "hotkey.press": "Press keys…",
   "hotkey.invalid": "This key cannot be used",
   "hotkey.needModifier": "Combine with a modifier key (Ctrl/Alt/Shift)",
-
   "setup.heading": "Local speech recognition setup",
   "setup.hint": "The local engine requires the whisper-server binary and at least one model.",
   "setup.checking": "Checking…",
@@ -132,7 +121,6 @@
   "setup.modelDownloadFailed": "Download of model {0} failed: {1}",
   "setup.serverInstalled": "whisper-server installed",
   "setup.modelDownloaded": "Model {0} downloaded",
-
   "update.currentVersion": "Current version",
   "update.check": "Check for updates",
   "update.checking": "Checking…",
@@ -144,12 +132,10 @@
   "update.autoCheckDesc": "Automatically checks GitHub Releases when the app starts",
   "update.owner": "GitHub owner",
   "update.repo": "Repository name",
-
   "err.saveFailed": "Failed to save: {0}",
   "err.modeSwitch": "Failed to switch mode: {0}",
   "err.loadSettings": "Failed to load settings: {0}",
   "quit.confirm": "Quit fire-speak? The tray icon and global hotkey will be disabled.",
-
   "overlay.recording": "Speak now… (press the hotkey to finish)",
   "overlay.transcribing": "Transcribing…",
   "overlay.polishing": "AI formatting…",
@@ -158,7 +144,6 @@
   "overlay.error": "An error occurred",
   "overlay.idle": "Idle",
   "overlay.cancel": "Cancel",
-
   "msg.ERR_NO_SPEECH": "No speech was recognized",
   "msg.ERR_SETUP_REQUIRED": "Install the Whisper server and a model from the Setup section",
   "msg.ERR_PORT_IN_USE": "Port {0} is in use by another application",

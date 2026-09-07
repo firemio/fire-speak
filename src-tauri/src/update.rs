@@ -91,8 +91,11 @@ pub async fn check(owner: &str, repo: &str, current: &str) -> Result<UpdateInfo,
 /// Parse "X.Y.Z" into numeric components; non-digit suffixes in a component
 /// are ignored ("1.2.3-beta" -> [1, 2, 3]). Unparsable components become 0.
 fn parse_ver(s: &str) -> Vec<u64> {
-    s.trim()
-        .split('.')
+    // Compare only the numeric base: a prerelease/build suffix ("-beta.1",
+    // "+build") must not contribute extra components that outrank the release.
+    let s = s.trim();
+    let base = s.split(['-', '+']).next().unwrap_or(s);
+    base.split('.')
         .map(|part| {
             part.chars()
                 .take_while(|c| c.is_ascii_digit())

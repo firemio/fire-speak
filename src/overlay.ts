@@ -128,6 +128,26 @@ function updateModeChip(): void {
   modeChip.textContent = mode?.name ?? "";
 }
 
+/**
+ * Apply a ui_lang SETTING value ("" = auto → ask the backend for the
+ * OS-resolved code); re-translate the HUD when the language changed.
+ */
+async function syncLang(uiLang: string): Promise<void> {
+  let code = uiLang;
+  if (!code) {
+    try {
+      code = await invoke<string>("get_ui_lang");
+    } catch {
+      code = getLang();
+    }
+  }
+  if (code !== getLang()) {
+    setLang(code);
+    applyDom();
+    applyStatus(lastStatusPayload);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // init
 // ---------------------------------------------------------------------------
@@ -154,19 +174,15 @@ async function init(): Promise<void> {
 
   await listen<Settings>("settings-changed", (event) => {
     settings = event.payload;
-    // Follow live UI-language changes made in the settings window.
-    if (settings.ui_lang !== getLang()) {
-      setLang(settings.ui_lang);
-      applyDom();
-      applyStatus(lastStatusPayload);
-    }
+    // Follow live UI-language changes made in the settings window
+    // ("" = auto → resolve via the backend).
+    void syncLang(settings.ui_lang);
     updateModeChip();
   });
 
   try {
     settings = await invoke<Settings>("get_settings");
-    // ui_lang arrives already resolved to a concrete code by the backend.
-    setLang(settings.ui_lang);
+    await syncLang(settings.ui_lang);
     updateModeChip();
   } catch {
     // non-fatal: chip stays hidden, language stays at default

@@ -17,6 +17,8 @@ Genspark Speakly 代替の常駐型AI音声入力アプリ（Windows 11 / Tauri 
 - **録音HUD**: フォーカスを奪わない波形オーバーレイ
 - **履歴**: 直近の入力を保存・コピー可能
 - LLM障害時は生テキストで続行（貼り付けが止まらない）
+- **多言語UI（12言語）**: 日本語 / English / 简体中文 / 繁體中文 / 한국어 / Español / Français / Deutsch / Português (Brasil) / Русский / Tiếng Việt / Bahasa Indonesia。初回はOS言語を自動検出、「一般」タブで即時切替（トレイ・HUD・エラー文言まで追随）
+- **アップデート確認**: 起動時の自動チェック+手動チェック。GitHub Releases の新版を検知するとホームに通知し、ダウンロードページを開ける（「アップデート」タブで自動チェックON/OFF・参照リポジトリ変更可）
 
 ## 開発・起動
 
@@ -42,6 +44,14 @@ npm run tauri build
 5. どこかテキスト入力欄にカーソルを置いて `Ctrl+Alt+Space` → 話す → もう一度押す → 貼り付き完了
 
 APIキーなし・完全ローカルでも「そのまま」モード（整形なし）で動作します。
+
+## アップデートの配布方法（開発者向け）
+
+アップデート確認は GitHub Releases の最新リリースを見ます。新版を配る手順:
+
+1. `tauri.conf.json` と `package.json` の `version` を上げてビルド: `npm run tauri build`
+2. GitHubリポジトリ（既定: `firemio/fire-speak`。設定で変更可）にタグ `vX.Y.Z` でリリースを作成
+3. `fire-speak_X.Y.Z_x64-setup.exe` をリリースにアップロード（`-setup.exe` で終わるアセットがダウンロードボタンの飛び先になる）
 
 ## 設定の保存先
 

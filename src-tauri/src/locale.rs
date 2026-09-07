@@ -14,6 +14,17 @@ pub fn resolve_ui_lang() -> String {
     map_locale(&sys_locale::get_locale().unwrap_or_default())
 }
 
+/// Resolve a persisted `ui_lang` setting to a concrete code:
+/// a valid stored code wins; `""` (auto) or an unknown code falls back to the
+/// OS locale.
+pub fn resolve_ui_lang_setting(stored: &str) -> String {
+    let stored = stored.trim();
+    if SUPPORTED.iter().any(|c| *c == stored) {
+        return stored.to_string();
+    }
+    resolve_ui_lang()
+}
+
 /// Map a raw OS locale string (e.g. "ja-JP", "zh_Hant_TW") to a supported code.
 /// Rules (SPEC): exact match -> zh-Hant*/zh-TW/zh-HK => zh-TW, zh* => zh-CN,
 /// otherwise first-2-letter match, otherwise "en".

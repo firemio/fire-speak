@@ -7,10 +7,8 @@
   "nav.general": "Général",
   "nav.setup": "Installation",
   "nav.update": "Mises à jour",
-
   "sidebar.quit": "Quitter",
   "sidebar.quitTitle": "Quitter l'application",
-
   "status.idle": "En attente",
   "status.recording": "Enregistrement",
   "status.transcribing": "Transcription…",
@@ -19,7 +17,6 @@
   "status.error": "Erreur",
   "status.errorWith": "Erreur : {0}",
   "status.withMessage": "{0} — {1}",
-
   "common.active": "Actif",
   "common.advanced": "Paramètres avancés",
   "common.close": "Fermer",
@@ -29,7 +26,6 @@
   "common.notInstalled": "Non installé",
   "common.showHide": "Afficher / masquer",
   "common.testing": "Test en cours…",
-
   "home.heroTitle": "Prêt pour la dictée vocale",
   "home.heroSub": "Appuyez sur ce raccourci pour démarrer / arrêter l'enregistrement",
   "home.recordTest": "🎙️ Test d'enregistrement",
@@ -38,7 +34,6 @@
   "home.empty": "Aucun historique pour l'instant. Essayez la dictée avec le raccourci.",
   "home.llmDefault": "Mise en forme IA",
   "home.noLlm": "Sans mise en forme IA (insertion telle quelle)",
-
   "stt.engineHeading": "Moteur de reconnaissance vocale",
   "stt.engineLocal": "Local (whisper.cpp)",
   "stt.engineCloud": "Cloud (compatible OpenAI)",
@@ -60,7 +55,6 @@
   "stt.modelInstalledMeta": "{0} Mo ・ installé",
   "stt.modelNotInstalledMeta": "{0} Mo ・ non installé",
   "stt.loadingModels": "Chargement des modèles…",
-
   "llm.heading": "Fournisseurs de mise en forme",
   "llm.add": "＋ Ajouter un fournisseur",
   "llm.hint": "Le fournisseur actif exécute l'instruction de mise en forme de chaque mode.",
@@ -76,7 +70,6 @@
   "llm.testBtn": "🔌 Tester",
   "llm.reply": "✓ Réponse : {0}",
   "llm.newProviderName": "Nouveau fournisseur",
-
   "modes.heading": "Gestion des modes",
   "modes.add": "＋ Ajouter un mode",
   "modes.hint": "Modifiez l'instruction de mise en forme de chaque mode. Désactivez « Utiliser la mise en forme IA » pour insérer la transcription brute telle quelle.",
@@ -87,7 +80,6 @@
   "modes.namePlaceholder": "Nom du mode",
   "modes.instructionPlaceholder": "Instruction de mise en forme (ex. : supprimer les hésitations et produire un texte naturel)",
   "modes.newModeName": "Nouveau mode",
-
   "history.clear": "🗑 Tout effacer",
   "history.empty": "Aucun historique pour l'instant.",
   "history.copied": "Copié",
@@ -96,13 +88,12 @@
   "history.clearConfirm": "Supprimer tout l'historique ? Cette action est irréversible.",
   "history.cleared": "Historique effacé",
   "history.clearFailed": "Échec de la suppression : {0}",
-
   "general.heading": "Paramètres généraux",
   "general.hotkey": "Raccourci global",
   "general.hotkeyPlaceholder": "Cliquez, puis appuyez sur les touches",
   "general.hotkeyHint": "Cliquez, puis appuyez sur la combinaison de touches à assigner (ex. : Ctrl+Alt+Space)",
   "general.language": "Langue de reconnaissance",
-  "general.langAuto": "Détection automatique",
+  "general.langAuto": "Automatique (langue du système)",
   "general.langJa": "Japonais",
   "general.langEn": "Anglais",
   "general.uiLang": "Langue de l'interface",
@@ -114,11 +105,9 @@
   "general.restoreClipboardDesc": "Rétablit le contenu précédent du presse-papiers après le collage",
   "general.autostart": "Lancer au démarrage de Windows",
   "general.autostartDesc": "Lance fire-speak en arrière-plan à l'ouverture de session",
-
   "hotkey.press": "Appuyez sur les touches…",
   "hotkey.invalid": "Cette touche ne peut pas être utilisée",
   "hotkey.needModifier": "Combinez avec une touche modificatrice (Ctrl/Alt/Shift)",
-
   "setup.heading": "Installation de la reconnaissance vocale locale",
   "setup.hint": "Le moteur local nécessite le binaire whisper-server et au moins un modèle.",
   "setup.checking": "Vérification…",
@@ -132,7 +121,6 @@
   "setup.modelDownloadFailed": "Échec du téléchargement du modèle {0} : {1}",
   "setup.serverInstalled": "whisper-server installé",
   "setup.modelDownloaded": "Modèle {0} téléchargé",
-
   "update.currentVersion": "Version actuelle",
   "update.check": "Rechercher les mises à jour",
   "update.checking": "Vérification…",
@@ -144,12 +132,10 @@
   "update.autoCheckDesc": "Vérifie automatiquement GitHub Releases au lancement de l'application",
   "update.owner": "Propriétaire GitHub",
   "update.repo": "Nom du dépôt",
-
   "err.saveFailed": "Échec de l'enregistrement : {0}",
   "err.modeSwitch": "Échec du changement de mode : {0}",
   "err.loadSettings": "Échec du chargement des paramètres : {0}",
   "quit.confirm": "Quitter fire-speak ? L'icône de la barre des tâches et le raccourci global seront désactivés.",
-
   "overlay.recording": "Parlez… (raccourci pour terminer)",
   "overlay.transcribing": "Transcription…",
   "overlay.polishing": "Mise en forme IA…",
@@ -158,7 +144,6 @@
   "overlay.error": "Une erreur est survenue",
   "overlay.idle": "En attente",
   "overlay.cancel": "Annuler",
-
   "msg.ERR_NO_SPEECH": "Aucune parole reconnue",
   "msg.ERR_SETUP_REQUIRED": "Installez le serveur Whisper et un modèle depuis la section Installation",
   "msg.ERR_PORT_IN_USE": "Le port {0} est utilisé par une autre application",

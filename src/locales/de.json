@@ -7,10 +7,8 @@
   "nav.general": "Allgemein",
   "nav.setup": "Einrichtung",
   "nav.update": "Updates",
-
   "sidebar.quit": "Beenden",
   "sidebar.quitTitle": "App beenden",
-
   "status.idle": "Bereit",
   "status.recording": "Aufnahme",
   "status.transcribing": "Transkribieren…",
@@ -19,7 +17,6 @@
   "status.error": "Fehler",
   "status.errorWith": "Fehler: {0}",
   "status.withMessage": "{0} — {1}",
-
   "common.active": "Aktiv",
   "common.advanced": "Erweiterte Einstellungen",
   "common.close": "Schließen",
@@ -29,7 +26,6 @@
   "common.notInstalled": "Nicht installiert",
   "common.showHide": "Ein-/Ausblenden",
   "common.testing": "Test läuft…",
-
   "home.heroTitle": "Bereit für die Spracheingabe",
   "home.heroSub": "Diese Tastenkombination startet / stoppt die Aufnahme",
   "home.recordTest": "🎙️ Testaufnahme",
@@ -38,7 +34,6 @@
   "home.empty": "Noch kein Verlauf. Probieren Sie die Spracheingabe mit der Tastenkombination aus.",
   "home.llmDefault": "KI-Formatierung",
   "home.noLlm": "Ohne KI-Formatierung (unverändert eingefügt)",
-
   "stt.engineHeading": "Spracherkennungs-Engine",
   "stt.engineLocal": "Lokal (whisper.cpp)",
   "stt.engineCloud": "Cloud (OpenAI-kompatibel)",
@@ -60,7 +55,6 @@
   "stt.modelInstalledMeta": "{0} MB ・ installiert",
   "stt.modelNotInstalledMeta": "{0} MB ・ nicht installiert",
   "stt.loadingModels": "Modellinformationen werden geladen…",
-
   "llm.heading": "Formatierungs-Provider",
   "llm.add": "＋ Provider hinzufügen",
   "llm.hint": "Der aktive Provider führt die Formatierungsanweisung des jeweiligen Modus aus.",
@@ -76,7 +70,6 @@
   "llm.testBtn": "🔌 Testen",
   "llm.reply": "✓ Antwort: {0}",
   "llm.newProviderName": "Neuer Provider",
-
   "modes.heading": "Modusverwaltung",
   "modes.add": "＋ Modus hinzufügen",
   "modes.hint": "Bearbeiten Sie die Formatierungsanweisung jedes Modus. Deaktivieren Sie „KI-Formatierung verwenden“, um die Transkription unverändert zu übernehmen.",
@@ -87,7 +80,6 @@
   "modes.namePlaceholder": "Modusname",
   "modes.instructionPlaceholder": "Formatierungsanweisung (z. B. Füllwörter entfernen und zu natürlichem Text glätten)",
   "modes.newModeName": "Neuer Modus",
-
   "history.clear": "🗑 Alle löschen",
   "history.empty": "Noch kein Verlauf vorhanden.",
   "history.copied": "Kopiert",
@@ -96,13 +88,12 @@
   "history.clearConfirm": "Gesamten Verlauf löschen? Dies kann nicht rückgängig gemacht werden.",
   "history.cleared": "Verlauf gelöscht",
   "history.clearFailed": "Löschen fehlgeschlagen: {0}",
-
   "general.heading": "Allgemeine Einstellungen",
   "general.hotkey": "Globale Tastenkombination",
   "general.hotkeyPlaceholder": "Klicken und Tasten drücken",
   "general.hotkeyHint": "Klicken Sie und drücken Sie dann die gewünschte Tastenkombination (z. B. Ctrl+Alt+Space)",
   "general.language": "Erkennungssprache",
-  "general.langAuto": "Automatisch erkennen",
+  "general.langAuto": "Automatisch (Systemsprache)",
   "general.langJa": "Japanisch",
   "general.langEn": "Englisch",
   "general.uiLang": "Anzeigesprache",
@@ -114,11 +105,9 @@
   "general.restoreClipboardDesc": "Stellt nach dem Einfügen den vorherigen Inhalt der Zwischenablage wieder her",
   "general.autostart": "Mit Windows starten",
   "general.autostartDesc": "Startet fire-speak bei der Anmeldung im Hintergrund",
-
   "hotkey.press": "Tasten drücken…",
   "hotkey.invalid": "Diese Taste kann nicht verwendet werden",
   "hotkey.needModifier": "Mit einer Zusatztaste kombinieren (Ctrl/Alt/Shift)",
-
   "setup.heading": "Einrichtung der lokalen Spracherkennung",
   "setup.hint": "Die lokale Engine benötigt die whisper-server-Programmdatei und mindestens ein Modell.",
   "setup.checking": "Wird geprüft…",
@@ -132,7 +121,6 @@
   "setup.modelDownloadFailed": "Download des Modells {0} fehlgeschlagen: {1}",
   "setup.serverInstalled": "whisper-server installiert",
   "setup.modelDownloaded": "Modell {0} heruntergeladen",
-
   "update.currentVersion": "Aktuelle Version",
   "update.check": "Nach Updates suchen",
   "update.checking": "Wird geprüft…",
@@ -144,12 +132,10 @@
   "update.autoCheckDesc": "Prüft beim App-Start automatisch die GitHub Releases",
   "update.owner": "GitHub-Besitzer",
   "update.repo": "Repository-Name",
-
   "err.saveFailed": "Speichern fehlgeschlagen: {0}",
   "err.modeSwitch": "Moduswechsel fehlgeschlagen: {0}",
   "err.loadSettings": "Einstellungen konnten nicht geladen werden: {0}",
   "quit.confirm": "fire-speak beenden? Das Tray-Symbol und die globale Tastenkombination werden deaktiviert.",
-
   "overlay.recording": "Jetzt sprechen… (Tastenkombination zum Beenden)",
   "overlay.transcribing": "Transkribieren…",
   "overlay.polishing": "KI-Formatierung…",
@@ -158,7 +144,6 @@
   "overlay.error": "Ein Fehler ist aufgetreten",
   "overlay.idle": "Bereit",
   "overlay.cancel": "Abbrechen",
-
   "msg.ERR_NO_SPEECH": "Keine Sprache erkannt",
   "msg.ERR_SETUP_REQUIRED": "Installieren Sie den Whisper-Server und ein Modell im Bereich „Einrichtung“",
   "msg.ERR_PORT_IN_USE": "Port {0} wird von einer anderen Anwendung verwendet",

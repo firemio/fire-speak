@@ -977,6 +977,10 @@ function wireGeneralSection(): void {
   });
 
   const uiLangSel = selectEl("in-ui-lang");
+  const autoOpt = el("option", undefined, t("general.langAuto")) as HTMLOptionElement;
+  autoOpt.value = "";
+  autoOpt.dataset.i18n = "general.langAuto";
+  uiLangSel.appendChild(autoOpt);
   for (const lang of LANGS) {
     const opt = el("option", undefined, lang.native) as HTMLOptionElement;
     opt.value = lang.code;
@@ -984,12 +988,12 @@ function wireGeneralSection(): void {
   }
   uiLangSel.addEventListener("change", () => {
     if (!settings) return;
-    settings.ui_lang = uiLangSel.value;
+    settings.ui_lang = uiLangSel.value; // "" = auto (follow OS locale)
     scheduleSave();
     // Re-render immediately (no restart). Pending edits are safe: every edit
     // mutates `settings` synchronously, and renderAll() rebuilds inputs from
     // that same live object — only the (debounced) save is deferred.
-    applyLanguage(uiLangSel.value);
+    void applyLanguageSetting(uiLangSel.value);
   });
 
   selectEl("in-language").addEventListener("change", () => {
@@ -1373,8 +1377,35 @@ function applyLanguage(code: string): void {
   applyDom();
   setStatusPill(lastStatusPayload);
   renderAll();
+  renderHistoryList();
+  // Persistent one-shot result lines cannot be re-translated (they hold
+  // free-form past results) — clear them instead of showing stale language.
+  for (const id of ["stt-test-result", "update-check-result"]) {
+    const node = document.getElementById(id);
+    if (node) node.textContent = "";
+  }
   if (bannerInfo) {
     $("update-banner-text").textContent = t("update.available", bannerInfo.latest);
+  }
+}
+
+/**
+ * Resolve a ui_lang SETTING value ("" = auto → ask the backend for the OS
+ * locale) and apply it. Falls back to the current language on failure.
+ */
+async function applyLanguageSetting(value: string): Promise<void> {
+  let code = value;
+  if (!code) {
+    try {
+      code = await invoke<string>("get_ui_lang");
+    } catch {
+      code = getLang();
+    }
+  }
+  if (code !== getLang()) {
+    applyLanguage(code);
+  } else {
+    renderAll();
   }
 }
 
@@ -1410,11 +1441,8 @@ async function setupListeners(): Promise<void> {
     }
     settings = event.payload;
     recordSavedSnapshot(incoming);
-    if (settings.ui_lang !== getLang()) {
-      applyLanguage(settings.ui_lang); // includes renderAll()
-    } else {
-      renderAll();
-    }
+    // "" = auto: resolve via backend, then re-render either way.
+    void applyLanguageSetting(settings.ui_lang);
   });
 
   await listen<null>("history-updated", () => {
@@ -1458,8 +1486,16 @@ async function init(): Promise<void> {
   try {
     settings = await invoke<Settings>("get_settings");
     recordSavedSnapshot(snapshotKey(settings));
-    // ui_lang arrives already resolved to a concrete code by the backend.
-    setLang(settings.ui_lang);
+    // ui_lang "" means auto — ask the backend for the OS-resolved code.
+    let lang = settings.ui_lang;
+    if (!lang) {
+      try {
+        lang = await invoke<string>("get_ui_lang");
+      } catch {
+        lang = "en";
+      }
+    }
+    setLang(lang);
   } catch (e: unknown) {
     toast(t("err.loadSettings", errText(e)), true);
   }

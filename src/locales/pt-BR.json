@@ -7,10 +7,8 @@
   "nav.general": "Geral",
   "nav.setup": "Instalação",
   "nav.update": "Atualizações",
-
   "sidebar.quit": "Sair",
   "sidebar.quitTitle": "Sair do aplicativo",
-
   "status.idle": "Em espera",
   "status.recording": "Gravando",
   "status.transcribing": "Transcrevendo…",
@@ -19,7 +17,6 @@
   "status.error": "Erro",
   "status.errorWith": "Erro: {0}",
   "status.withMessage": "{0} — {1}",
-
   "common.active": "Ativo",
   "common.advanced": "Configurações avançadas",
   "common.close": "Fechar",
@@ -29,7 +26,6 @@
   "common.notInstalled": "Não instalado",
   "common.showHide": "Mostrar / ocultar",
   "common.testing": "Testando…",
-
   "home.heroTitle": "Pronto para ditado por voz",
   "home.heroSub": "Pressione este atalho para iniciar / parar a gravação",
   "home.recordTest": "🎙️ Testar gravação",
@@ -38,7 +34,6 @@
   "home.empty": "Ainda não há histórico. Experimente ditar usando o atalho.",
   "home.llmDefault": "Formatação por IA",
   "home.noLlm": "Sem formatação por IA (inserido como está)",
-
   "stt.engineHeading": "Motor de reconhecimento de voz",
   "stt.engineLocal": "Local (whisper.cpp)",
   "stt.engineCloud": "Nuvem (compatível com OpenAI)",
@@ -60,7 +55,6 @@
   "stt.modelInstalledMeta": "{0} MB ・ instalado",
   "stt.modelNotInstalledMeta": "{0} MB ・ não instalado",
   "stt.loadingModels": "Carregando informações dos modelos…",
-
   "llm.heading": "Provedores de formatação",
   "llm.add": "＋ Adicionar provedor",
   "llm.hint": "O provedor ativo é usado para executar a instrução de formatação de cada modo.",
@@ -76,7 +70,6 @@
   "llm.testBtn": "🔌 Testar",
   "llm.reply": "✓ Resposta: {0}",
   "llm.newProviderName": "Novo provedor",
-
   "modes.heading": "Gerenciamento de modos",
   "modes.add": "＋ Adicionar modo",
   "modes.hint": "Edite a instrução de formatação de cada modo. Desative \"Usar formatação por IA\" para inserir a transcrição bruta como está.",
@@ -87,7 +80,6 @@
   "modes.namePlaceholder": "Nome do modo",
   "modes.instructionPlaceholder": "Instrução de formatação (ex.: remova hesitações e transforme em texto natural)",
   "modes.newModeName": "Novo modo",
-
   "history.clear": "🗑 Limpar tudo",
   "history.empty": "Ainda não há histórico.",
   "history.copied": "Copiado",
@@ -96,13 +88,12 @@
   "history.clearConfirm": "Excluir todo o histórico? Esta ação não pode ser desfeita.",
   "history.cleared": "Histórico excluído",
   "history.clearFailed": "Falha ao excluir: {0}",
-
   "general.heading": "Configurações gerais",
   "general.hotkey": "Atalho global",
   "general.hotkeyPlaceholder": "Clique e pressione as teclas",
   "general.hotkeyHint": "Clique e pressione a combinação de teclas desejada (ex.: Ctrl+Alt+Space)",
   "general.language": "Idioma de reconhecimento",
-  "general.langAuto": "Detecção automática",
+  "general.langAuto": "Automático (idioma do sistema)",
   "general.langJa": "Japonês",
   "general.langEn": "Inglês",
   "general.uiLang": "Idioma da interface",
@@ -114,11 +105,9 @@
   "general.restoreClipboardDesc": "Restaura o conteúdo anterior da área de transferência após colar",
   "general.autostart": "Iniciar com o Windows",
   "general.autostartDesc": "Inicia o fire-speak em segundo plano ao fazer login",
-
   "hotkey.press": "Pressione as teclas…",
   "hotkey.invalid": "Esta tecla não pode ser usada",
   "hotkey.needModifier": "Combine com uma tecla modificadora (Ctrl/Alt/Shift)",
-
   "setup.heading": "Instalação do reconhecimento de voz local",
   "setup.hint": "O motor local requer o binário whisper-server e pelo menos um modelo.",
   "setup.checking": "Verificando…",
@@ -132,7 +121,6 @@
   "setup.modelDownloadFailed": "Falha ao baixar o modelo {0}: {1}",
   "setup.serverInstalled": "whisper-server instalado",
   "setup.modelDownloaded": "Modelo {0} baixado",
-
   "update.currentVersion": "Versão atual",
   "update.check": "Verificar atualizações",
   "update.checking": "Verificando…",
@@ -144,12 +132,10 @@
   "update.autoCheckDesc": "Verifica automaticamente o GitHub Releases quando o aplicativo inicia",
   "update.owner": "Proprietário no GitHub",
   "update.repo": "Nome do repositório",
-
   "err.saveFailed": "Falha ao salvar: {0}",
   "err.modeSwitch": "Falha ao trocar de modo: {0}",
   "err.loadSettings": "Falha ao carregar as configurações: {0}",
   "quit.confirm": "Sair do fire-speak? O ícone da bandeja e o atalho global serão desativados.",
-
   "overlay.recording": "Fale agora… (pressione o atalho para concluir)",
   "overlay.transcribing": "Transcrevendo…",
   "overlay.polishing": "Formatando com IA…",
@@ -158,7 +144,6 @@
   "overlay.error": "Ocorreu um erro",
   "overlay.idle": "Em espera",
   "overlay.cancel": "Cancelar",
-
   "msg.ERR_NO_SPEECH": "Nenhuma fala foi reconhecida",
   "msg.ERR_SETUP_REQUIRED": "Instale o servidor Whisper e um modelo na seção Instalação",
   "msg.ERR_PORT_IN_USE": "A porta {0} está em uso por outro aplicativo",

@@ -7,10 +7,8 @@
   "nav.general": "General",
   "nav.setup": "Configuración",
   "nav.update": "Actualizaciones",
-
   "sidebar.quit": "Salir",
   "sidebar.quitTitle": "Salir de la aplicación",
-
   "status.idle": "En espera",
   "status.recording": "Grabando",
   "status.transcribing": "Transcribiendo…",
@@ -19,7 +17,6 @@
   "status.error": "Error",
   "status.errorWith": "Error: {0}",
   "status.withMessage": "{0} — {1}",
-
   "common.active": "Activo",
   "common.advanced": "Configuración avanzada",
   "common.close": "Cerrar",
@@ -29,7 +26,6 @@
   "common.notInstalled": "No instalado",
   "common.showHide": "Mostrar / ocultar",
   "common.testing": "Probando…",
-
   "home.heroTitle": "Listo para el dictado por voz",
   "home.heroSub": "Presiona esta tecla rápida para iniciar / detener la grabación",
   "home.recordTest": "🎙️ Probar grabación",
@@ -38,7 +34,6 @@
   "home.empty": "Aún no hay historial. Prueba a dictar con la tecla rápida.",
   "home.llmDefault": "Formato con IA",
   "home.noLlm": "Sin formato con IA (se inserta tal cual)",
-
   "stt.engineHeading": "Motor de reconocimiento de voz",
   "stt.engineLocal": "Local (whisper.cpp)",
   "stt.engineCloud": "Nube (compatible con OpenAI)",
@@ -60,7 +55,6 @@
   "stt.modelInstalledMeta": "{0} MB ・ instalado",
   "stt.modelNotInstalledMeta": "{0} MB ・ no instalado",
   "stt.loadingModels": "Cargando información de modelos…",
-
   "llm.heading": "Proveedores de formato",
   "llm.add": "＋ Agregar proveedor",
   "llm.hint": "El proveedor activo se usa para ejecutar la instrucción de formato de cada modo.",
@@ -76,7 +70,6 @@
   "llm.testBtn": "🔌 Probar",
   "llm.reply": "✓ Respuesta: {0}",
   "llm.newProviderName": "Nuevo proveedor",
-
   "modes.heading": "Gestión de modos",
   "modes.add": "＋ Agregar modo",
   "modes.hint": "Edita la instrucción de formato de cada modo. Desactiva \"Usar formato con IA\" para insertar la transcripción sin cambios.",
@@ -87,7 +80,6 @@
   "modes.namePlaceholder": "Nombre del modo",
   "modes.instructionPlaceholder": "Instrucción de formato (p. ej., elimina las muletillas y redacta un texto natural)",
   "modes.newModeName": "Nuevo modo",
-
   "history.clear": "🗑 Borrar todo",
   "history.empty": "Aún no hay historial.",
   "history.copied": "Copiado",
@@ -96,13 +88,12 @@
   "history.clearConfirm": "¿Eliminar todo el historial? Esta acción no se puede deshacer.",
   "history.cleared": "Historial eliminado",
   "history.clearFailed": "Error al eliminar: {0}",
-
   "general.heading": "Configuración general",
   "general.hotkey": "Tecla rápida global",
   "general.hotkeyPlaceholder": "Haz clic y presiona las teclas",
   "general.hotkeyHint": "Haz clic y presiona la combinación de teclas que quieras asignar (p. ej., Ctrl+Alt+Space)",
   "general.language": "Idioma de reconocimiento",
-  "general.langAuto": "Detección automática",
+  "general.langAuto": "Automático (idioma del sistema)",
   "general.langJa": "Japonés",
   "general.langEn": "Inglés",
   "general.uiLang": "Idioma de la interfaz",
@@ -114,11 +105,9 @@
   "general.restoreClipboardDesc": "Restaura el contenido anterior del portapapeles después de pegar",
   "general.autostart": "Iniciar con Windows",
   "general.autostartDesc": "Inicia fire-speak en segundo plano al iniciar sesión",
-
   "hotkey.press": "Presiona las teclas…",
   "hotkey.invalid": "Esta tecla no se puede usar",
   "hotkey.needModifier": "Combínala con una tecla modificadora (Ctrl/Alt/Shift)",
-
   "setup.heading": "Configuración del reconocimiento de voz local",
   "setup.hint": "El motor local requiere el binario whisper-server y al menos un modelo.",
   "setup.checking": "Comprobando…",
@@ -132,7 +121,6 @@
   "setup.modelDownloadFailed": "Error al descargar el modelo {0}: {1}",
   "setup.serverInstalled": "whisper-server instalado",
   "setup.modelDownloaded": "Modelo {0} descargado",
-
   "update.currentVersion": "Versión actual",
   "update.check": "Buscar actualizaciones",
   "update.checking": "Comprobando…",
@@ -144,12 +132,10 @@
   "update.autoCheckDesc": "Comprueba automáticamente GitHub Releases al iniciar la aplicación",
   "update.owner": "Propietario de GitHub",
   "update.repo": "Nombre del repositorio",
-
   "err.saveFailed": "Error al guardar: {0}",
   "err.modeSwitch": "Error al cambiar de modo: {0}",
   "err.loadSettings": "Error al cargar la configuración: {0}",
   "quit.confirm": "¿Salir de fire-speak? Se desactivarán el icono de la bandeja y la tecla rápida global.",
-
   "overlay.recording": "Habla ahora… (presiona la tecla rápida para terminar)",
   "overlay.transcribing": "Transcribiendo…",
   "overlay.polishing": "Aplicando formato con IA…",
@@ -158,7 +144,6 @@
   "overlay.error": "Ocurrió un error",
   "overlay.idle": "En espera",
   "overlay.cancel": "Cancelar",
-
   "msg.ERR_NO_SPEECH": "No se reconoció ninguna voz",
   "msg.ERR_SETUP_REQUIRED": "Instala el servidor de Whisper y un modelo desde la sección Configuración",
   "msg.ERR_PORT_IN_USE": "El puerto {0} está en uso por otra aplicación",

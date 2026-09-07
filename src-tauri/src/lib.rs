@@ -98,11 +98,7 @@ fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
 }
 
 fn build_tray_menu(app: &AppHandle, settings: &Settings) -> tauri::Result<Menu<Wry>> {
-    let lang = if settings.ui_lang.trim().is_empty() {
-        locale::resolve_ui_lang()
-    } else {
-        settings.ui_lang.clone()
-    };
+    let lang = locale::resolve_ui_lang_setting(&settings.ui_lang);
     let (open_settings_label, quit_label) = locale::tray_labels(&lang);
     let mut builder = MenuBuilder::new(app);
     for mode in &settings.modes {
@@ -264,6 +260,14 @@ fn get_status(state: State<'_, AppState>) -> Result<String, String> {
 #[tauri::command]
 fn get_startup_error(state: State<'_, AppState>) -> Result<Option<String>, String> {
     Ok(state.startup_error.lock().unwrap().take())
+}
+
+/// Concrete UI language code: the stored ui_lang if set, else the OS locale.
+/// The persisted setting itself may be "" (= auto / follow the OS).
+#[tauri::command]
+fn get_ui_lang(state: State<'_, AppState>) -> Result<String, String> {
+    let stored = state.settings.lock().unwrap().ui_lang.clone();
+    Ok(locale::resolve_ui_lang_setting(&stored))
 }
 
 #[tauri::command]
@@ -439,6 +443,7 @@ pub fn run() {
             cancel_recording,
             get_status,
             get_startup_error,
+            get_ui_lang,
             set_active_mode,
             get_history,
             clear_history,

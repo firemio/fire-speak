@@ -7,10 +7,8 @@
   "nav.general": "一般",
   "nav.setup": "セットアップ",
   "nav.update": "アップデート",
-
   "sidebar.quit": "終了",
   "sidebar.quitTitle": "アプリを終了",
-
   "status.idle": "待機中",
   "status.recording": "録音中",
   "status.transcribing": "文字起こし中…",
@@ -19,7 +17,6 @@
   "status.error": "エラー",
   "status.errorWith": "エラー: {0}",
   "status.withMessage": "{0} — {1}",
-
   "common.active": "アクティブ",
   "common.advanced": "詳細設定",
   "common.close": "閉じる",
@@ -29,7 +26,6 @@
   "common.notInstalled": "未インストール",
   "common.showHide": "表示切替",
   "common.testing": "テスト中…",
-
   "home.heroTitle": "音声入力の準備ができています",
   "home.heroSub": "このホットキーを押すと録音を開始 / 停止します",
   "home.recordTest": "🎙️ 録音テスト",
@@ -38,7 +34,6 @@
   "home.empty": "まだ履歴がありません。ホットキーで音声入力を試してみましょう。",
   "home.llmDefault": "AI整形",
   "home.noLlm": "AI整形なし (そのまま入力)",
-
   "stt.engineHeading": "音声認識エンジン",
   "stt.engineLocal": "ローカル (whisper.cpp)",
   "stt.engineCloud": "クラウド (OpenAI互換)",
@@ -60,7 +55,6 @@
   "stt.modelInstalledMeta": "{0} MB ・ インストール済み",
   "stt.modelNotInstalledMeta": "{0} MB ・ 未インストール",
   "stt.loadingModels": "モデル情報を取得中…",
-
   "llm.heading": "整形プロバイダ",
   "llm.add": "＋ プロバイダを追加",
   "llm.hint": "アクティブに設定したプロバイダが、モードの整形指示の実行に使われます。",
@@ -76,7 +70,6 @@
   "llm.testBtn": "🔌 テスト",
   "llm.reply": "✓ 応答: {0}",
   "llm.newProviderName": "新しいプロバイダ",
-
   "modes.heading": "モード管理",
   "modes.add": "＋ モードを追加",
   "modes.hint": "モードごとの整形指示を編集できます。「AI整形を使う」をオフにすると文字起こし結果をそのまま使います。",
@@ -87,7 +80,6 @@
   "modes.namePlaceholder": "モード名",
   "modes.instructionPlaceholder": "整形指示 (例: フィラーを除去し、自然な文章に整えてください)",
   "modes.newModeName": "新しいモード",
-
   "history.clear": "🗑 全消去",
   "history.empty": "履歴はまだありません。",
   "history.copied": "コピーしました",
@@ -96,13 +88,12 @@
   "history.clearConfirm": "履歴をすべて削除しますか? この操作は取り消せません。",
   "history.cleared": "履歴を削除しました",
   "history.clearFailed": "削除に失敗しました: {0}",
-
   "general.heading": "一般設定",
   "general.hotkey": "グローバルホットキー",
   "general.hotkeyPlaceholder": "クリックしてキーを押してください",
   "general.hotkeyHint": "クリックして、割り当てたいキーの組み合わせを押してください (例: Ctrl+Alt+Space)",
   "general.language": "認識言語",
-  "general.langAuto": "自動判定",
+  "general.langAuto": "自動（OSの言語）",
   "general.langJa": "日本語",
   "general.langEn": "英語",
   "general.uiLang": "表示言語",
@@ -114,11 +105,9 @@
   "general.restoreClipboardDesc": "貼り付け後に元のクリップボード内容を戻します",
   "general.autostart": "Windows 起動時に自動起動",
   "general.autostartDesc": "サインイン時に fire-speak を常駐開始します",
-
   "hotkey.press": "キーを押してください…",
   "hotkey.invalid": "このキーは使用できません",
   "hotkey.needModifier": "修飾キー(Ctrl/Alt/Shift)と組み合わせてください",
-
   "setup.heading": "ローカル音声認識のセットアップ",
   "setup.hint": "ローカルエンジンを使うには whisper-server 本体と、いずれかのモデルが必要です。",
   "setup.checking": "確認中…",
@@ -132,7 +121,6 @@
   "setup.modelDownloadFailed": "モデル {0} のダウンロードに失敗しました: {1}",
   "setup.serverInstalled": "whisper-server をインストールしました",
   "setup.modelDownloaded": "モデル {0} をダウンロードしました",
-
   "update.currentVersion": "現在のバージョン",
   "update.check": "更新を確認",
   "update.checking": "確認中…",
@@ -144,12 +132,10 @@
   "update.autoCheckDesc": "アプリ起動時に GitHub Releases を自動確認します",
   "update.owner": "GitHub オーナー",
   "update.repo": "リポジトリ名",
-
   "err.saveFailed": "保存に失敗しました: {0}",
   "err.modeSwitch": "モードの切替に失敗しました: {0}",
   "err.loadSettings": "設定の読み込みに失敗しました: {0}",
   "quit.confirm": "fire-speak を終了しますか? 常駐が解除され、ホットキーも無効になります。",
-
   "overlay.recording": "話してください… (ホットキーで確定)",
   "overlay.transcribing": "文字起こし中…",
   "overlay.polishing": "AI整形中…",
@@ -158,7 +144,6 @@
   "overlay.error": "エラーが発生しました",
   "overlay.idle": "待機中",
   "overlay.cancel": "キャンセル",
-
   "msg.ERR_NO_SPEECH": "音声を認識できませんでした",
   "msg.ERR_SETUP_REQUIRED": "セットアップ画面からWhisperサーバとモデルをインストールしてください",
   "msg.ERR_PORT_IN_USE": "ポート {0} は他のアプリが使用中です",

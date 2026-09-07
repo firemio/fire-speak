@@ -7,10 +7,8 @@
   "nav.general": "Chung",
   "nav.setup": "Cài đặt",
   "nav.update": "Cập nhật",
-
   "sidebar.quit": "Thoát",
   "sidebar.quitTitle": "Thoát ứng dụng",
-
   "status.idle": "Chờ",
   "status.recording": "Đang ghi âm",
   "status.transcribing": "Đang chuyển thành văn bản…",
@@ -19,7 +17,6 @@
   "status.error": "Lỗi",
   "status.errorWith": "Lỗi: {0}",
   "status.withMessage": "{0} — {1}",
-
   "common.active": "Đang dùng",
   "common.advanced": "Cài đặt nâng cao",
   "common.close": "Đóng",
@@ -29,7 +26,6 @@
   "common.notInstalled": "Chưa cài",
   "common.showHide": "Hiện / ẩn",
   "common.testing": "Đang kiểm tra…",
-
   "home.heroTitle": "Sẵn sàng nhập liệu bằng giọng nói",
   "home.heroSub": "Nhấn phím tắt này để bắt đầu / dừng ghi âm",
   "home.recordTest": "🎙️ Thử ghi âm",
@@ -38,7 +34,6 @@
   "home.empty": "Chưa có lịch sử. Hãy thử đọc chính tả bằng phím tắt.",
   "home.llmDefault": "Chỉnh sửa AI",
   "home.noLlm": "Không chỉnh sửa AI (chèn nguyên văn)",
-
   "stt.engineHeading": "Công cụ nhận dạng giọng nói",
   "stt.engineLocal": "Cục bộ (whisper.cpp)",
   "stt.engineCloud": "Đám mây (tương thích OpenAI)",
@@ -60,7 +55,6 @@
   "stt.modelInstalledMeta": "{0} MB ・ đã cài",
   "stt.modelNotInstalledMeta": "{0} MB ・ chưa cài",
   "stt.loadingModels": "Đang tải thông tin mô hình…",
-
   "llm.heading": "Nhà cung cấp chỉnh sửa",
   "llm.add": "＋ Thêm nhà cung cấp",
   "llm.hint": "Nhà cung cấp đang dùng sẽ thực thi lệnh chỉnh sửa của từng chế độ.",
@@ -76,7 +70,6 @@
   "llm.testBtn": "🔌 Kiểm tra",
   "llm.reply": "✓ Phản hồi: {0}",
   "llm.newProviderName": "Nhà cung cấp mới",
-
   "modes.heading": "Quản lý chế độ",
   "modes.add": "＋ Thêm chế độ",
   "modes.hint": "Chỉnh sửa lệnh định dạng của từng chế độ. Tắt \"Dùng chỉnh sửa AI\" để chèn nguyên văn bản gốc.",
@@ -87,7 +80,6 @@
   "modes.namePlaceholder": "Tên chế độ",
   "modes.instructionPlaceholder": "Lệnh chỉnh sửa (ví dụ: loại bỏ từ đệm và viết lại thành văn bản tự nhiên)",
   "modes.newModeName": "Chế độ mới",
-
   "history.clear": "🗑 Xóa tất cả",
   "history.empty": "Chưa có lịch sử.",
   "history.copied": "Đã sao chép",
@@ -96,13 +88,12 @@
   "history.clearConfirm": "Xóa toàn bộ lịch sử? Thao tác này không thể hoàn tác.",
   "history.cleared": "Đã xóa lịch sử",
   "history.clearFailed": "Xóa thất bại: {0}",
-
   "general.heading": "Cài đặt chung",
   "general.hotkey": "Phím tắt toàn cục",
   "general.hotkeyPlaceholder": "Nhấp rồi nhấn phím",
   "general.hotkeyHint": "Nhấp vào đây rồi nhấn tổ hợp phím muốn gán (ví dụ: Ctrl+Alt+Space)",
   "general.language": "Ngôn ngữ nhận dạng",
-  "general.langAuto": "Tự động nhận diện",
+  "general.langAuto": "Tự động (ngôn ngữ hệ thống)",
   "general.langJa": "Tiếng Nhật",
   "general.langEn": "Tiếng Anh",
   "general.uiLang": "Ngôn ngữ hiển thị",
@@ -114,11 +105,9 @@
   "general.restoreClipboardDesc": "Khôi phục nội dung bộ nhớ tạm trước đó sau khi dán",
   "general.autostart": "Khởi động cùng Windows",
   "general.autostartDesc": "Chạy fire-speak ở chế độ nền khi đăng nhập",
-
   "hotkey.press": "Hãy nhấn phím…",
   "hotkey.invalid": "Không thể dùng phím này",
   "hotkey.needModifier": "Hãy kết hợp với phím bổ trợ (Ctrl/Alt/Shift)",
-
   "setup.heading": "Cài đặt nhận dạng giọng nói cục bộ",
   "setup.hint": "Công cụ cục bộ cần tệp whisper-server và ít nhất một mô hình.",
   "setup.checking": "Đang kiểm tra…",
@@ -132,7 +121,6 @@
   "setup.modelDownloadFailed": "Tải mô hình {0} thất bại: {1}",
   "setup.serverInstalled": "Đã cài whisper-server",
   "setup.modelDownloaded": "Đã tải mô hình {0}",
-
   "update.currentVersion": "Phiên bản hiện tại",
   "update.check": "Kiểm tra cập nhật",
   "update.checking": "Đang kiểm tra…",
@@ -144,12 +132,10 @@
   "update.autoCheckDesc": "Tự động kiểm tra GitHub Releases khi ứng dụng khởi động",
   "update.owner": "Chủ sở hữu GitHub",
   "update.repo": "Tên kho lưu trữ",
-
   "err.saveFailed": "Lưu thất bại: {0}",
   "err.modeSwitch": "Chuyển chế độ thất bại: {0}",
   "err.loadSettings": "Tải cài đặt thất bại: {0}",
   "quit.confirm": "Thoát fire-speak? Biểu tượng khay hệ thống và phím tắt toàn cục sẽ bị tắt.",
-
   "overlay.recording": "Hãy nói… (nhấn phím tắt để kết thúc)",
   "overlay.transcribing": "Đang chuyển thành văn bản…",
   "overlay.polishing": "AI đang chỉnh sửa…",
@@ -158,7 +144,6 @@
   "overlay.error": "Đã xảy ra lỗi",
   "overlay.idle": "Chờ",
   "overlay.cancel": "Hủy",
-
   "msg.ERR_NO_SPEECH": "Không nhận dạng được giọng nói",
   "msg.ERR_SETUP_REQUIRED": "Hãy cài máy chủ Whisper và một mô hình từ mục Cài đặt",
   "msg.ERR_PORT_IN_USE": "Cổng {0} đang được ứng dụng khác sử dụng",
