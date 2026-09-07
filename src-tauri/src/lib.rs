@@ -1,5 +1,6 @@
 mod audio;
 mod history;
+mod hook;
 mod llm;
 mod locale;
 mod paste;
@@ -58,13 +59,26 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
-/// Register `hotkey` as the global shortcut.
+/// Register `hotkey` — either a single-modifier special token
+/// (RAlt/LAlt/RCtrl/LCtrl/RShift/LShift, handled by the low-level keyboard
+/// hook) or a combo string (handled by the global-shortcut plugin).
 ///
-/// The new hotkey string is parsed BEFORE touching the currently registered
-/// shortcut, so an invalid string leaves the existing hotkey working. If
-/// registration of the new (valid) hotkey fails (e.g. the combo is taken by
-/// another app), we attempt to re-register `previous` before returning Err.
+/// Validation happens BEFORE any persistent change, so a failure leaves the
+/// existing hotkey working. If registration of a new valid combo fails (e.g.
+/// taken by another app), `previous` is restored best-effort — including a
+/// previous special token, whose hook atomic was never cleared.
 fn register_hotkey(app: &AppHandle, hotkey: &str, previous: Option<&str>) -> Result<(), String> {
+    if let Some(vk) = hook::token_to_vk(hotkey) {
+        // Special token -> keyboard hook path.
+        if !hook::is_installed() {
+            return Err(format!("ERR_HOTKEY_REGISTER|{hotkey}"));
+        }
+        hook::set_watched_vk(vk);
+        let _ = app.global_shortcut().unregister_all();
+        return Ok(());
+    }
+    // Combo -> plugin path. Parse first; the hook atomic is only cleared
+    // after the combo registers successfully.
     let shortcut: Shortcut = hotkey
         .parse()
         .map_err(|_| format!("ERR_HOTKEY_PARSE|{hotkey}"))?;
@@ -74,12 +88,17 @@ fn register_hotkey(app: &AppHandle, hotkey: &str, previous: Option<&str>) -> Res
         eprintln!("hotkey register failed for {hotkey}: {e}");
         // best effort: restore the previous hotkey so the user keeps a working one
         if let Some(prev) = previous {
-            if let Ok(prev_shortcut) = prev.parse::<Shortcut>() {
-                let _ = gs.register(prev_shortcut);
+            if hook::token_to_vk(prev).is_none() {
+                if let Ok(prev_shortcut) = prev.parse::<Shortcut>() {
+                    let _ = gs.register(prev_shortcut);
+                }
             }
+            // previous was a special token: the hook atomic still holds its
+            // VK (never cleared on this failure path), so it stays active
         }
         return Err(format!("ERR_HOTKEY_REGISTER|{hotkey}"));
     }
+    hook::set_watched_vk(0);
     Ok(())
 }
 
@@ -252,6 +271,15 @@ async fn cancel_recording(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// While suspended, both hotkey paths (keyboard hook + plugin handler) are
+/// inert and the hook stops swallowing keys, so the settings capture field
+/// can see them. The UI record button is unaffected.
+#[tauri::command]
+async fn set_hotkey_suspended(suspended: bool) -> Result<(), String> {
+    pipeline::set_hotkey_suspended(suspended);
+    Ok(())
+}
+
 #[tauri::command]
 fn get_status(state: State<'_, AppState>) -> Result<String, String> {
     Ok(state.status.lock().unwrap().as_str().to_string())
@@ -394,11 +422,13 @@ pub fn run() {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
+                    // Never run the pipeline inline: audio::start can block
+                    // for up to 8s and would freeze the main thread.
+                    let app = app.clone();
                     if event.state == ShortcutState::Pressed {
-                        // Never run the pipeline inline: audio::start can block
-                        // for up to 8s and would freeze the main thread.
-                        let app = app.clone();
-                        std::thread::spawn(move || pipeline::toggle(&app));
+                        std::thread::spawn(move || pipeline::hotkey_pressed(&app));
+                    } else if event.state == ShortcutState::Released {
+                        std::thread::spawn(move || pipeline::hotkey_released(&app));
                     }
                 })
                 .build(),
@@ -408,6 +438,9 @@ pub fn run() {
             let loaded = settings::load(&handle);
             app.manage(AppState::new(loaded.clone()));
 
+            if !hook::install(handle.clone()) {
+                eprintln!("low-level keyboard hook install failed");
+            }
             if let Err(e) = register_hotkey(&handle, &loaded.hotkey, None) {
                 // non-fatal; the webview has no listener yet, so stash the
                 // error for the frontend to drain via get_startup_error
@@ -441,6 +474,7 @@ pub fn run() {
             save_settings,
             toggle_recording,
             cancel_recording,
+            set_hotkey_suspended,
             get_status,
             get_startup_error,
             get_ui_lang,

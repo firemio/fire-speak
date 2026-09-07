@@ -92,6 +92,28 @@ export function t(key: string, ...params: (string | number)[]): string {
   return params.length > 0 ? substitute(raw, params) : raw;
 }
 
+/** Special single-modifier hotkey tokens (SPEC v0.3). */
+const SPECIAL_HOTKEY_TOKENS = new Set([
+  "RAlt",
+  "LAlt",
+  "RCtrl",
+  "LCtrl",
+  "RShift",
+  "LShift",
+]);
+
+/**
+ * Display form of a hotkey string: special single-modifier tokens render via
+ * their locale key ("RAlt" → 右Alt / Right Alt / ...); combos render raw.
+ * Use everywhere a hotkey is shown to the user.
+ */
+export function displayHotkey(hotkey: string): string {
+  return SPECIAL_HOTKEY_TOKENS.has(hotkey) ? t(`hotkey.${hotkey}`) : hotkey;
+}
+
+/** Messages whose params are hotkey combos/tokens — localize special tokens. */
+const HOTKEY_MSG_KEYS = new Set(["ERR_HOTKEY_PARSE", "ERR_HOTKEY_REGISTER"]);
+
 /**
  * Render a backend-originated message of the form "KEY|p0|p1" via the
  * "msg.KEY" dictionary entry. Strings whose leading segment is not in the
@@ -109,6 +131,8 @@ export function tMsg(raw: string): string {
     const nestedKey = `msg.${params[0]}`;
     if ((DICTS[currentLang][nestedKey] ?? FALLBACK[nestedKey]) !== undefined) {
       params = [tMsg(params.join("|"))];
+    } else if (HOTKEY_MSG_KEYS.has(parts[0])) {
+      params = params.map(displayHotkey);
     }
   }
   return substitute(template, params);

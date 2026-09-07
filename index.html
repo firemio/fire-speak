@@ -205,8 +205,15 @@
                   data-i18n-placeholder="general.hotkeyPlaceholder"
                   placeholder="クリックしてキーを押してください"
                 />
-                <span class="field-hint" data-i18n="general.hotkeyHint">クリックして、割り当てたいキーの組み合わせを押してください (例: Ctrl+Alt+Space)</span>
+                <span class="field-hint" data-i18n="general.hotkeyHint">クリックしてキーの組み合わせを押してください。右Altなどの修飾キーを1回だけ押すと、そのキー単体を割り当てられます</span>
               </label>
+              <div class="field field-wide">
+                <span class="field-label" data-i18n="general.hotkeyMode">ホットキーの動作</span>
+                <div class="segmented" id="hotkey-mode-seg">
+                  <button type="button" data-mode="hold" data-i18n="general.hotkeyModeHold">押している間だけ録音（推奨）</button>
+                  <button type="button" data-mode="toggle" data-i18n="general.hotkeyModeToggle">押すたびに開始／停止</button>
+                </div>
+              </div>
               <label class="field">
                 <span class="field-label" data-i18n="general.uiLang">表示言語</span>
                 <select id="in-ui-lang"></select>

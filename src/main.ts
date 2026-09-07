@@ -3,7 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
-import { applyDom, getLang, LANGS, setLang, t, tMsg } from "./i18n";
+import { applyDom, displayHotkey, getLang, LANGS, setLang, t, tMsg } from "./i18n";
 import type {
   AppStatus,
   DownloadProgressPayload,
@@ -232,7 +232,7 @@ function setStatusPill(payload: StatusChangedPayload): void {
 
 function renderHome(): void {
   if (!settings) return;
-  $("home-hotkey").textContent = settings.hotkey;
+  $("home-hotkey").textContent = displayHotkey(settings.hotkey);
   renderHomeModes();
   renderHomeRecent();
 }
@@ -850,7 +850,10 @@ function wireHistorySection(): void {
 
 function renderGeneralSection(): void {
   if (!settings) return;
-  input("in-hotkey").value = settings.hotkey;
+  input("in-hotkey").value = displayHotkey(settings.hotkey);
+  for (const btn of document.querySelectorAll<HTMLButtonElement>("#hotkey-mode-seg button")) {
+    btn.classList.toggle("is-active", btn.dataset.mode === settings.hotkey_mode);
+  }
   selectEl("in-ui-lang").value = settings.ui_lang;
   selectEl("in-language").value = settings.language;
   selectEl("in-paste-mode").value = settings.paste_mode;
@@ -915,8 +918,8 @@ async function applyHotkey(combo: string): Promise<void> {
   if (!settings) return;
   const prev = settings.hotkey;
   settings.hotkey = combo;
-  input("in-hotkey").value = combo;
-  $("home-hotkey").textContent = combo;
+  input("in-hotkey").value = displayHotkey(combo);
+  $("home-hotkey").textContent = displayHotkey(combo);
   if (combo === prev) return;
   try {
     await persistSettings();
@@ -924,8 +927,8 @@ async function applyHotkey(combo: string): Promise<void> {
     toast(errText(e), true);
     if (settings) {
       settings.hotkey = prev;
-      input("in-hotkey").value = prev;
-      $("home-hotkey").textContent = prev;
+      input("in-hotkey").value = displayHotkey(prev);
+      $("home-hotkey").textContent = displayHotkey(prev);
       // The rejected save also un-queued any coincidental pending edits
       // (persistSettings cleared the debounce timer); re-arm so they retry
       // without the bad hotkey.
@@ -934,21 +937,42 @@ async function applyHotkey(combo: string): Promise<void> {
   }
 }
 
+/** e.code → special single-modifier hotkey token (SPEC v0.3). */
+const MOD_CODE_TOKEN: Record<string, string> = {
+  AltRight: "RAlt",
+  AltLeft: "LAlt",
+  ControlRight: "RCtrl",
+  ControlLeft: "LCtrl",
+  ShiftRight: "RShift",
+  ShiftLeft: "LShift",
+};
+
 function wireGeneralSection(): void {
   const hotkeyInput = input("in-hotkey");
+  /** e.code of a lone modifier currently held down in the capture field; its
+   * keyup (with no other key in between) confirms a bare-modifier hotkey. */
+  let pendingModCode: string | null = null;
+
   hotkeyInput.addEventListener("focus", () => {
     hotkeyInput.classList.add("capturing");
     hotkeyInput.value = t("hotkey.press");
+    pendingModCode = null;
+    // Suspend the global hotkey path while capturing so pressing the current
+    // hotkey doesn't start a recording (fire-and-forget; failures ignored).
+    void invoke("set_hotkey_suspended", { suspended: true }).catch(() => {});
   });
   hotkeyInput.addEventListener("blur", () => {
     hotkeyInput.classList.remove("capturing");
-    if (settings) hotkeyInput.value = settings.hotkey;
+    pendingModCode = null;
+    if (settings) hotkeyInput.value = displayHotkey(settings.hotkey);
+    void invoke("set_hotkey_suspended", { suspended: false }).catch(() => {});
   });
   hotkeyInput.addEventListener("keydown", (e) => {
     e.preventDefault();
     e.stopPropagation();
     if (!settings) return;
     if (e.key === "Escape") {
+      pendingModCode = null;
       hotkeyInput.blur();
       return;
     }
@@ -958,9 +982,22 @@ function wireGeneralSection(): void {
     if (e.shiftKey) mods.push("Shift");
     if (e.metaKey) mods.push("Super");
     if (e.key === "Control" || e.key === "Alt" || e.key === "Shift" || e.key === "Meta") {
-      hotkeyInput.value = mods.length > 0 ? `${mods.join("+")}+…` : t("hotkey.press");
+      const token = MOD_CODE_TOKEN[e.code];
+      if (token !== undefined && mods.length === 1) {
+        // A lone modifier went down: pending bare-modifier tap. If its keyup
+        // arrives with no other key in between, it becomes the hotkey.
+        pendingModCode = e.code;
+        hotkeyInput.value = `${displayHotkey(token)}…`;
+      } else {
+        // A second modifier joined (or an unmapped one, e.g. Meta): this is a
+        // combo in progress, not a bare tap.
+        pendingModCode = null;
+        hotkeyInput.value = mods.length > 0 ? `${mods.join("+")}+…` : t("hotkey.press");
+      }
       return;
     }
+    // Any non-modifier key cancels a pending bare-modifier tap: combo path.
+    pendingModCode = null;
     const key = normalizeHotkeyKey(e);
     if (key === null) {
       hotkeyInput.value = t("hotkey.invalid");
@@ -974,6 +1011,27 @@ function wireGeneralSection(): void {
     const combo = [...mods, key].join("+");
     void applyHotkey(combo);
     hotkeyInput.blur();
+  });
+  hotkeyInput.addEventListener("keyup", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!settings) return;
+    const token = MOD_CODE_TOKEN[e.code];
+    if (pendingModCode !== null && e.code === pendingModCode && token !== undefined) {
+      // Bare-modifier tap confirmed: keyup with no other key in between.
+      // applyHotkey validates via the backend and rolls back on Err.
+      pendingModCode = null;
+      void applyHotkey(token);
+      hotkeyInput.blur();
+    }
+  });
+
+  $("hotkey-mode-seg").addEventListener("click", (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-mode]");
+    if (!btn || !settings) return;
+    settings.hotkey_mode = btn.dataset.mode as Settings["hotkey_mode"];
+    renderGeneralSection();
+    scheduleSave();
   });
 
   const uiLangSel = selectEl("in-ui-lang");

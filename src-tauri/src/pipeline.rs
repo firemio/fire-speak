@@ -1,8 +1,110 @@
 use crate::settings::Mode;
 use crate::AppState;
-use std::sync::atomic::Ordering;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
+
+// ---------------------------------------------------------------------------
+// Hotkey dispatch state (shared by the global-shortcut plugin handler and the
+// low-level keyboard hook — both funnel into hotkey_pressed/hotkey_released)
+// ---------------------------------------------------------------------------
+
+/// While true the hotkey paths (plugin handler AND keyboard hook) are inert so
+/// the settings capture field can observe raw key events. The UI record button
+/// (`toggle_recording` -> `toggle`) is unaffected.
+static HOTKEY_SUSPENDED: AtomicBool = AtomicBool::new(false);
+/// OS auto-repeat guard: a press is handled only on the false->true
+/// transition; the matching release resets it. Lives in this shared dispatch
+/// layer so both the plugin path and the hook path are covered.
+static HOTKEY_HELD: AtomicBool = AtomicBool::new(false);
+/// Instant of the hold-mode press that started the current recording
+/// (tap-lock timing reference).
+static PRESS_AT: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// Hold mode: a release earlier than this after the starting press keeps the
+/// recording running (tap-lock) instead of confirming it.
+const TAP_LOCK_MS: u64 = 400;
+
+pub fn set_hotkey_suspended(suspended: bool) {
+    HOTKEY_SUSPENDED.store(suspended, Ordering::SeqCst);
+}
+
+pub fn hotkey_suspended() -> bool {
+    HOTKEY_SUSPENDED.load(Ordering::SeqCst)
+}
+
+/// Hotkey down. Shared entry for the global-shortcut plugin
+/// (ShortcutState::Pressed) and the low-level hook (keydown).
+pub fn hotkey_pressed(app: &AppHandle) {
+    if hotkey_suspended() {
+        return;
+    }
+    if HOTKEY_HELD.swap(true, Ordering::SeqCst) {
+        return; // OS auto-repeat while held
+    }
+    let hold = app
+        .state::<AppState>()
+        .settings
+        .lock()
+        .unwrap()
+        .hotkey_mode
+        != "toggle";
+    if !hold {
+        // toggle mode: press = classic toggle, release ignored
+        toggle(app);
+        return;
+    }
+    // hold mode
+    let current = *app.state::<AppState>().status.lock().unwrap();
+    match current {
+        Status::Idle => {
+            *PRESS_AT.lock().unwrap() = Some(Instant::now());
+            start_recording(app);
+        }
+        // recording (tap-locked, or started elsewhere): press confirms
+        Status::Recording => stop_and_process(app),
+        _ => {} // ignore while transcribing/polishing
+    }
+}
+
+/// Hotkey up. Shared entry for the global-shortcut plugin
+/// (ShortcutState::Released) and the low-level hook (keyup).
+pub fn hotkey_released(app: &AppHandle) {
+    if hotkey_suspended() {
+        // Ignore, but clear the held flag in case suspension started
+        // mid-hold — otherwise the next press would be swallowed.
+        HOTKEY_HELD.store(false, Ordering::SeqCst);
+        return;
+    }
+    if !HOTKEY_HELD.swap(false, Ordering::SeqCst) {
+        return; // release without a press we handled
+    }
+    let hold = app
+        .state::<AppState>()
+        .settings
+        .lock()
+        .unwrap()
+        .hotkey_mode
+        != "toggle";
+    if !hold {
+        return; // toggle mode: release ignored
+    }
+    let is_recording =
+        *app.state::<AppState>().status.lock().unwrap() == Status::Recording;
+    if !is_recording {
+        return;
+    }
+    let long_enough = {
+        let at = *PRESS_AT.lock().unwrap();
+        at.map(|t| t.elapsed() >= Duration::from_millis(TAP_LOCK_MS))
+            .unwrap_or(false)
+    };
+    if long_enough {
+        stop_and_process(app);
+    }
+    // else: tap-lock — keep recording; the next press confirms
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {

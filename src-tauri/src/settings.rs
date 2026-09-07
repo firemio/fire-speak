@@ -6,6 +6,9 @@ use tauri::Manager;
 pub struct Settings {
     #[serde(default = "default_hotkey")]
     pub hotkey: String,
+    /// "hold" (record while pressed, default) | "toggle" (press to start/stop).
+    #[serde(default = "default_hotkey_mode")]
+    pub hotkey_mode: String,
     #[serde(default = "default_language")]
     pub language: String,
     /// UI language code (one of the 12 supported codes) or "" = auto.
@@ -36,6 +39,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             hotkey: default_hotkey(),
+            hotkey_mode: default_hotkey_mode(),
             language: default_language(),
             ui_lang: String::new(),
             update: UpdateSettings::default(),
@@ -180,7 +184,10 @@ pub struct Mode {
 }
 
 fn default_hotkey() -> String {
-    "Ctrl+Alt+Space".to_string()
+    "RAlt".to_string()
+}
+fn default_hotkey_mode() -> String {
+    "hold".to_string()
 }
 fn default_language() -> String {
     "auto".to_string()

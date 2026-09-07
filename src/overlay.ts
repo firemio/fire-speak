@@ -92,7 +92,12 @@ function applyStatus(payload: StatusChangedPayload): void {
   switch (payload.status) {
     case "recording":
       resetBars();
-      statusText.textContent = t("overlay.recording");
+      // Hold mode (the default while settings are not yet loaded) records only
+      // while the hotkey is held — releasing it finishes.
+      statusText.textContent =
+        (settings?.hotkey_mode ?? "hold") === "hold"
+          ? t("overlay.recordingHold")
+          : t("overlay.recording");
       break;
     case "transcribing":
       statusText.textContent = t("overlay.transcribing");
@@ -178,6 +183,8 @@ async function init(): Promise<void> {
     // ("" = auto → resolve via the backend).
     void syncLang(settings.ui_lang);
     updateModeChip();
+    // hotkey_mode may have changed: refresh the recording caption in place.
+    if (currentStatus === "recording") applyStatus(lastStatusPayload);
   });
 
   try {

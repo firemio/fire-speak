@@ -3,6 +3,8 @@
 export type SttEngine = "local" | "cloud";
 export type PasteMode = "paste" | "clipboard";
 export type ProviderKind = "anthropic" | "openai";
+/** v0.3: "hold" = record while the hotkey is held (default), "toggle" = press to start/stop. */
+export type HotkeyMode = "hold" | "toggle";
 
 export interface LocalSttSettings {
   server_port: number;
@@ -52,6 +54,7 @@ export interface UpdateSettings {
 
 export interface Settings {
   hotkey: string;
+  hotkey_mode: HotkeyMode;
   language: string;
   /** UI display language code (one of the 12 SPEC codes). The backend
    * resolves "" (auto) to a concrete code before the frontend sees it. */
