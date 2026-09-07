@@ -51,6 +51,17 @@ static SWALLOWED_VK: AtomicU32 = AtomicU32::new(0);
 /// event (scanCode 0x21D). An RAlt event carrying the same timestamp is part
 /// of an AltGr sequence and must pass through untouched.
 static ALTGR_TIME: AtomicU32 = AtomicU32::new(0);
+/// Bitmask (bit = vk - 0xA0) of modifier VKs (0xA0..=0xA5) whose non-injected
+/// keydown we PASSED THROUGH (suspended, pre-watch, or otherwise unlatched).
+/// A down that leaked to the OS must never have a later typematic repeat
+/// latched (that would swallow the eventual keyup of a delivered down and
+/// leave the modifier stuck system-wide); the bit is cleared on that key's up.
+static PASSED_MASK: AtomicU32 = AtomicU32::new(0);
+
+/// Bit for a hook-eligible modifier VK, if it is one.
+fn modifier_bit(vk: u32) -> Option<u32> {
+    (0xA0..=0xA5).contains(&vk).then(|| 1 << (vk - 0xA0))
+}
 static APP: OnceLock<AppHandle> = OnceLock::new();
 /// Sender into the single long-lived dispatcher thread (true = pressed).
 static SENDER: OnceLock<Sender<bool>> = OnceLock::new();
@@ -126,6 +137,25 @@ fn dispatch(pressed: bool) {
     }
 }
 
+/// Queue a press/release from any source. The plugin (combo) path shares the
+/// same dispatcher thread so pressed/released ordering is global; if the
+/// dispatcher never started (hook install failed very early), fall back to a
+/// one-off thread.
+pub fn dispatch_event(app: &AppHandle, pressed: bool) {
+    if let Some(tx) = SENDER.get() {
+        let _ = tx.send(pressed);
+    } else {
+        let app = app.clone();
+        std::thread::spawn(move || {
+            if pressed {
+                crate::pipeline::hotkey_pressed(&app);
+            } else {
+                crate::pipeline::hotkey_released(&app);
+            }
+        });
+    }
+}
+
 unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code >= 0 {
         let kb = &*(lparam as *const KBDLLHOOKSTRUCT);
@@ -133,22 +163,33 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
         if kb.flags & LLKHF_INJECTED == 0 {
             let vk = kb.vkCode;
             // AltGr detection: the driver emits a fake LCtrl (scanCode 0x21D)
-            // with the SAME timestamp as the RAlt event of the sequence.
+            // with the SAME timestamp as the RAlt event of the sequence. The
+            // fake Ctrl itself must stay COMPLETELY outside the latch/repeat
+            // logic: with hotkey LCtrl it would otherwise be latched (breaking
+            // AltGr typing) or clear a genuine LCtrl latch on its keyup.
             if vk == VK_LCONTROL && kb.scanCode == SC_ALTGR_FAKE_CTRL {
                 ALTGR_TIME.store(kb.time, Ordering::SeqCst);
+                return CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam);
             }
             let altgr_ralt =
                 vk == VK_RMENU && kb.time == ALTGR_TIME.load(Ordering::SeqCst);
             match wparam as u32 {
                 WM_KEYDOWN | WM_SYSKEYDOWN => {
-                    if SWALLOWED_VK.load(Ordering::SeqCst) == vk {
+                    let swallowed = SWALLOWED_VK.load(Ordering::SeqCst);
+                    if swallowed == vk {
                         // Typematic repeat of the latched key: swallow
                         // unconditionally (regardless of watched/suspend).
                         return 1;
                     }
+                    let bit = modifier_bit(vk);
+                    let leaked = bit
+                        .map(|b| PASSED_MASK.load(Ordering::SeqCst) & b != 0)
+                        .unwrap_or(false);
                     let watched = WATCHED_VK.load(Ordering::SeqCst);
                     if watched != 0
                         && vk == watched
+                        && swallowed == 0
+                        && !leaked
                         && !crate::pipeline::hotkey_suspended()
                         && !altgr_ralt
                     {
@@ -156,9 +197,17 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
                         dispatch(true);
                         return 1; // swallow
                     }
-                    // otherwise: pass through, no dispatch
+                    // Passed through: remember it so no later repeat of this
+                    // press can be latched (suspend lifted mid-hold, or the
+                    // watch switched onto an already-held key).
+                    if let Some(b) = bit {
+                        PASSED_MASK.fetch_or(b, Ordering::SeqCst);
+                    }
                 }
                 WM_KEYUP | WM_SYSKEYUP => {
+                    if let Some(b) = modifier_bit(vk) {
+                        PASSED_MASK.fetch_and(!b, Ordering::SeqCst);
+                    }
                     if SWALLOWED_VK.load(Ordering::SeqCst) == vk {
                         SWALLOWED_VK.store(0, Ordering::SeqCst);
                         // Released is dispatched UNCONDITIONALLY — even while

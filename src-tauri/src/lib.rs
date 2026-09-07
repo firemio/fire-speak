@@ -457,13 +457,14 @@ pub fn run() {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
-                    // Never run the pipeline inline: audio::start can block
-                    // for up to 8s and would freeze the main thread.
-                    let app = app.clone();
+                    // Never run the pipeline inline (audio::start can block up
+                    // to 8s), and go through the shared dispatcher so a fast
+                    // tap's Pressed/Released cannot be reordered by thread
+                    // scheduling.
                     if event.state == ShortcutState::Pressed {
-                        std::thread::spawn(move || pipeline::hotkey_pressed(&app));
+                        hook::dispatch_event(app, true);
                     } else if event.state == ShortcutState::Released {
-                        std::thread::spawn(move || pipeline::hotkey_released(&app));
+                        hook::dispatch_event(app, false);
                     }
                 })
                 .build(),
