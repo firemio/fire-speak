@@ -15,6 +15,16 @@ const INSTALLER_SUFFIXES: &[&str] = &[".appimage", ".deb", ".rpm"];
 #[cfg(not(any(windows, target_os = "linux")))]
 const INSTALLER_SUFFIXES: &[&str] = &[];
 
+/// Substrings that identify an asset built for the running architecture.
+/// A release carries installers for several architectures, so matching only on
+/// the file extension would hand an arm64 machine the x86_64 build.
+#[cfg(target_arch = "x86_64")]
+const ARCH_TOKENS: &[&str] = &["x86_64", "amd64", "x64"];
+#[cfg(target_arch = "aarch64")]
+const ARCH_TOKENS: &[&str] = &["aarch64", "arm64"];
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+const ARCH_TOKENS: &[&str] = &[];
+
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateInfo {
     /// e.g. "0.2.0" (the running app's version)
@@ -69,13 +79,19 @@ pub async fn check(owner: &str, repo: &str, current: &str) -> Result<UpdateInfo,
 
     let empty = Vec::new();
     let assets = release["assets"].as_array().unwrap_or(&empty);
+    // Only ever offer an installer built for this architecture. When the
+    // release has none (or the names carry no architecture), fall back to the
+    // release page below rather than handing over the wrong binary.
     let asset_url = INSTALLER_SUFFIXES
         .iter()
         .find_map(|suffix| {
             assets.iter().find(|a| {
                 a["name"]
                     .as_str()
-                    .map(|n| n.to_lowercase().ends_with(suffix))
+                    .map(|n| {
+                        let n = n.to_lowercase();
+                        n.ends_with(suffix) && ARCH_TOKENS.iter().any(|t| n.contains(t))
+                    })
                     .unwrap_or(false)
             })
         })
