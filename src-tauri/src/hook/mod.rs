@@ -6,9 +6,11 @@
 //!
 //! - Windows: a `WH_KEYBOARD_LL` low-level keyboard hook (see `windows.rs`),
 //!   which can also *swallow* the key so other apps never see it.
-//! - Linux/X11: XInput2 raw key events on the root window (see `linux.rs`).
-//!   Raw events cannot suppress the key, so on Linux the hotkey ALSO reaches
-//!   the focused application. That is accepted (no `XGrabKey`).
+//! - Linux/X11: an exclusive core-X11 passive key grab (`GrabKey`) on the root
+//!   window (see `linux.rs`), which likewise keeps the key away from every
+//!   other client — with one documented difference: while the hotkey is held,
+//!   the resulting active grab also consumes other keys pressed during that
+//!   hold.
 //!
 //! This module owns everything that is platform independent: the token set and
 //! the single long-lived dispatcher thread that both platform listeners AND
@@ -65,6 +67,35 @@ pub fn set_watched_token(token: Option<&str>) -> bool {
         Some(t) if !is_special_token(t) => false,
         other => imp::set_watched_token(other),
     }
+}
+
+/// Tell the platform listener that the settings window's hotkey-capture field
+/// has taken (or given up) focus.
+///
+/// On Linux this releases the exclusive passive grab so the key reaches the
+/// webview and the user can re-assign it, and takes the grab back afterwards.
+/// On Windows the low-level hook consults `pipeline::hotkey_suspended()`
+/// directly, so this is a no-op there and the hook's behaviour is unchanged.
+///
+/// Call it INSIDE the `pipeline::set_hotkey_suspended(true)` window: while
+/// suspension is on but the grab is still up, a press is swallowed and ignored
+/// rather than leaking a bare Alt to the focused app.
+pub fn set_suspended(suspended: bool) {
+    imp::set_suspended(suspended);
+}
+
+/// Tell the platform listener that WE are about to synthesise keystrokes (the
+/// Ctrl+V of a paste), and that it must not treat them as a hotkey press.
+///
+/// On Linux this matters for correctness, not just for noise: XTest input is
+/// delivered by the X server like real input and therefore triggers passive
+/// grabs, so with a Ctrl hotkey the grab would swallow our own paste keystroke
+/// — the paste would silently fail and a phantom recording would latch on. The
+/// grab is dropped for the duration and taken back once the events have
+/// settled. On Windows the hook already ignores injected input
+/// (`LLKHF_INJECTED`), so this is a no-op there.
+pub fn set_synthetic_input(synthetic: bool) {
+    imp::set_synthetic_input(synthetic);
 }
 
 /// Install the platform listener once and start the single dispatcher thread.

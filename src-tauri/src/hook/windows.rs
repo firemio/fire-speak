@@ -94,6 +94,16 @@ pub(super) fn set_watched_token(token: Option<&str>) -> bool {
     }
 }
 
+/// No-op: the hook callback already consults `pipeline::hotkey_suspended()`
+/// on every keystroke, so nothing has to be installed or torn down when the
+/// settings window captures a new hotkey. Exists so `hook::set_suspended` has
+/// the same shape on every platform (Linux must drop its X11 grab there).
+pub(super) fn set_suspended(_suspended: bool) {}
+
+/// No-op: the hook callback ignores `LLKHF_INJECTED`, so our own synthetic
+/// Ctrl+V is never mistaken for a hotkey press in the first place.
+pub(super) fn set_synthetic_input(_synthetic: bool) {}
+
 /// Install the hook once on a dedicated message-pump thread.
 pub(super) fn install() -> bool {
     let (tx, rx) = std::sync::mpsc::channel::<bool>();

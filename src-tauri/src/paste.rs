@@ -37,8 +37,16 @@ pub fn paste_text(text: &str, paste_mode: &str, restore_clipboard: bool) -> Resu
         // If the user is still physically holding modifiers (e.g. the hotkey
         // keys), Ctrl+V would turn into Ctrl+Alt+V etc. Wait for release.
         wait_for_modifier_release();
-        send_ctrl_v()?;
+        // Our own Ctrl+V is synthetic but the X server delivers it like real
+        // input, so a bare-Ctrl hotkey's exclusive grab would swallow it. Drop
+        // the grab across the whole synthetic-input window and take it back
+        // only after the events have settled. The flag is cleared before `?`
+        // so a failed paste cannot leave the hotkey ungrabbed.
+        crate::hook::set_synthetic_input(true);
+        let sent = send_ctrl_v();
         std::thread::sleep(Duration::from_millis(900));
+        crate::hook::set_synthetic_input(false);
+        sent?;
         if restore_clipboard {
             // Only restore if the clipboard still contains exactly the text
             // we set; if the user or another app changed it, keep theirs.

@@ -47,13 +47,16 @@ zip = "8.6.0"
 
 # --- Linux-only -------------------------------------------------------------
 # libc: prctl(PR_SET_PDEATHSIG) + setpgid for whisper-server containment.
-# x11rb (xinput = XInput2): global raw key press/release listening without a
-#   grab, keyboard-mapping lookups and the modifier-release poll.
+# x11rb: exclusive passive key grab (core X11 GrabKey) for the bare-modifier
+#   hotkey, plus keyboard-mapping lookups and the modifier-release poll. The
+#   `xkb` feature is needed only for XkbPerClientFlags(DetectableAutoRepeat) —
+#   see hook/linux.rs. XInput2 is deliberately NOT used: raw events cannot
+#   suppress the key, so a bare Alt still reached the focused application.
 #   Pinned to 0.13 so it unifies with the copy arboard/enigo already pull in.
 # flate2 + tar: extraction of the whisper.cpp *.tar.gz release asset.
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
-x11rb = { version = "0.13", features = ["xinput"] }
+x11rb = { version = "0.13", features = ["xkb"] }
 flate2 = "1.1"
 tar = "0.4"
 

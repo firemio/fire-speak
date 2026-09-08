@@ -31,19 +31,24 @@ pub fn layout_uses_altgr() -> bool {
     false
 }
 
-/// X11 equivalent: the layout uses AltGr when any keycode in the server's
-/// current keyboard mapping is bound to `ISO_Level3_Shift` — that is the
-/// keysym the right Alt key carries on AltGr layouts, so RAlt is needed for
-/// typing and must be refused as a bare hotkey.
+/// X11 equivalent: the layout uses AltGr when the **right Alt physical key
+/// itself** carries `ISO_Level3_Shift` in the server's current keyboard
+/// mapping. Right Alt is then needed for typing and must be refused as a bare
+/// hotkey (the listener grabs it exclusively, so it would stop producing
+/// characters).
+///
+/// A third-level chooser bound to some *other* key (`lv3:switch`,
+/// `lv3:menu_switch`, ...) leaves right Alt a plain `Alt_R` and is explicitly
+/// NOT an AltGr layout for this purpose.
 ///
 /// Same downstream meaning as on Windows (`register_hotkey` rejects `RAlt`
 /// with `ERR_HOTKEY_REGISTER|RAlt`, and first-run defaults to
 /// `Ctrl+Alt+Space`). When X11 is unreachable — a pure Wayland session, where
-/// the raw-key listener cannot run at all — this returns true as well, so the
+/// the key listener cannot run at all — this returns true as well, so the
 /// first run picks a combo hotkey instead of a bare RAlt that could never fire.
 #[cfg(target_os = "linux")]
 pub fn layout_uses_altgr() -> bool {
-    crate::x11util::keysym_is_bound(crate::x11util::KEYSYM_ISO_LEVEL3_SHIFT).unwrap_or(true)
+    crate::x11util::right_alt_uses_level3_shift().unwrap_or(true)
 }
 
 /// No bare-modifier hotkey support on other platforms; nothing to refuse.

@@ -63,8 +63,8 @@ fn show_main_window(app: &AppHandle) {
 
 /// Register `hotkey` — either a single-modifier special token
 /// (RAlt/LAlt/RCtrl/LCtrl/RShift/LShift, handled by the platform key listener:
-/// the low-level keyboard hook on Windows, XInput2 raw events on Linux) or a
-/// combo string (handled by the global-shortcut plugin).
+/// the low-level keyboard hook on Windows, an exclusive X11 passive key grab
+/// on Linux) or a combo string (handled by the global-shortcut plugin).
 ///
 /// Validation happens BEFORE any persistent change, so a failure leaves the
 /// existing hotkey working. If registration of a new valid combo fails (e.g.
@@ -285,18 +285,24 @@ async fn cancel_recording(app: AppHandle) -> Result<(), String> {
 }
 
 /// While suspended, both hotkey paths (platform key listener + plugin handler)
-/// are inert and the Windows hook stops swallowing keys, so the settings
-/// capture field can see them (on Linux keys are never swallowed to begin
-/// with). When the current hotkey is a plugin combo, the combo is
-/// unregistered for the duration of the suspension (a registered global
-/// shortcut never reaches the webview at all) and re-registered on
+/// are inert and the platform listener stops taking the key away from other
+/// apps, so the settings capture field can see it: the Windows hook stops
+/// swallowing, and the Linux listener drops its exclusive X11 grab
+/// (`hook::set_suspended`). When the current hotkey is a plugin combo, the
+/// combo is unregistered for the duration of the suspension (a registered
+/// global shortcut never reaches the webview at all) and re-registered on
 /// unsuspend. The UI record button is unaffected.
+///
+/// `pipeline::set_hotkey_suspended` strictly encloses `hook::set_suspended` in
+/// both directions, so during the handover the key is at worst swallowed and
+/// ignored — it can never leak a bare Alt to the focused app.
 #[tauri::command]
 async fn set_hotkey_suspended(app: AppHandle, suspended: bool) -> Result<(), String> {
     let hotkey = app.state::<AppState>().settings.lock().unwrap().hotkey.clone();
     let is_combo = !hook::is_special_token(&hotkey);
     if suspended {
         pipeline::set_hotkey_suspended(true);
+        hook::set_suspended(true);
         if is_combo {
             let _ = app.global_shortcut().unregister_all();
         }
@@ -318,6 +324,7 @@ async fn set_hotkey_suspended(app: AppHandle, suspended: bool) -> Result<(), Str
                 Err(_) => eprintln!("hotkey re-register after unsuspend: unparsable {hotkey}"),
             }
         }
+        hook::set_suspended(false);
         pipeline::set_hotkey_suspended(false);
     }
     Ok(())

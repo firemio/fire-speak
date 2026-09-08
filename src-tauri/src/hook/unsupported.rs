@@ -12,6 +12,10 @@ pub(super) fn set_watched_token(token: Option<&str>) -> bool {
     token.is_none()
 }
 
+pub(super) fn set_suspended(_suspended: bool) {}
+
+pub(super) fn set_synthetic_input(_synthetic: bool) {}
+
 pub(super) fn install() -> bool {
     false
 }
