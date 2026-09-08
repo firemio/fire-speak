@@ -1,0 +1,89 @@
+# fire-speak Flatpak manifest — PHASE 2, NOT WIRED INTO CI YET.
+#
+# This manifest is a starting point, not a working build. It cannot build as-is:
+# flatpak-builder runs offline, so `cargo-sources.json` and `node-sources.json`
+# must be generated first (see packaging/README.md) and a `package-lock.json`
+# must exist in the repo. Read packaging/README.md before touching this file.
+
+id: jp.firemio.fire-speak
+
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+
+command: fire-speak
+
+finish-args:
+  # --- display -------------------------------------------------------------
+  # X11 only, on purpose. The global hotkey and the Ctrl+V paste injection both
+  # need X11; a native Wayland session cannot do either (see packaging/README.md).
+  - --socket=x11
+  - --share=ipc
+  - --device=dri
+
+  # --- microphone ----------------------------------------------------------
+  # cpal records through PulseAudio / PipeWire's pulse shim.
+  - --socket=pulseaudio
+
+  # --- network -------------------------------------------------------------
+  # Cloud STT + LLM APIs, GitHub release checks, model downloads, and the
+  # loopback connection to the locally managed whisper-server.
+  - --share=network
+
+  # --- tray icon -----------------------------------------------------------
+  # libayatana-appindicator publishes a StatusNotifierItem on the session bus.
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --talk-name=org.freedesktop.Notifications
+
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.node20
+  - org.freedesktop.Sdk.Extension.rust-stable
+
+build-options:
+  append-path: /usr/lib/sdk/node20/bin:/usr/lib/sdk/rust-stable/bin
+
+modules:
+  - name: fire-speak
+    buildsystem: simple
+
+    env:
+      HOME: /run/build/fire-speak
+      CARGO_HOME: /run/build/fire-speak/cargo
+      XDG_CACHE_HOME: /run/build/fire-speak/flatpak-node/cache
+      npm_config_offline: 'true'
+      npm_config_cache: /run/build/fire-speak/flatpak-node/npm-cache
+
+    sources:
+      - type: git
+        url: https://github.com/firemio/fire-speak.git
+        # Bump this to the tag being packaged.
+        tag: v0.3.0
+      # Both files are generated locally; see packaging/README.md. They are NOT
+      # checked in because they are large and must be regenerated per release.
+      - cargo-sources.json
+      - node-sources.json
+
+    build-commands:
+      # Point cargo at the vendored crates flatpak-cargo-generator produced.
+      - mkdir -p src-tauri/.cargo
+      - |
+        printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "/run/build/fire-speak/cargo/vendor"\n' > src-tauri/.cargo/config.toml
+
+      # Frontend + Rust build, producing a .deb we then unpack into /app.
+      - npm ci --offline
+      - npm run tauri build -- --bundles deb
+
+      - ar -x src-tauri/target/release/bundle/deb/*.deb
+      - mkdir -p deb-data
+      - tar -xf data.tar.gz -C deb-data
+
+      - install -Dm755 deb-data/usr/bin/fire-speak /app/bin/fire-speak
+      - install -Dm644 deb-data/usr/share/applications/fire-speak.desktop /app/share/applications/jp.firemio.fire-speak.desktop
+      - install -Dm644 deb-data/usr/share/icons/hicolor/32x32/apps/fire-speak.png /app/share/icons/hicolor/32x32/apps/jp.firemio.fire-speak.png
+      - install -Dm644 deb-data/usr/share/icons/hicolor/128x128/apps/fire-speak.png /app/share/icons/hicolor/128x128/apps/jp.firemio.fire-speak.png
+      - install -Dm644 deb-data/usr/share/icons/hicolor/512x512/apps/fire-speak.png /app/share/icons/hicolor/512x512/apps/jp.firemio.fire-speak.png
+      - install -Dm644 packaging/flatpak/jp.firemio.fire-speak.metainfo.xml /app/share/metainfo/jp.firemio.fire-speak.metainfo.xml
+
+      # The .desktop file Tauri generates uses Icon=fire-speak; Flathub requires
+      # the icon (and desktop file) to be named after the app ID.
+      - desktop-file-edit --set-icon=jp.firemio.fire-speak /app/share/applications/jp.firemio.fire-speak.desktop

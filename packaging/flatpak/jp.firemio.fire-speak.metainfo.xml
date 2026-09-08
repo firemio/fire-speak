@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PHASE 2 draft. Flathub validates this file with `appstreamcli validate`; run
+  that before submitting anything. The <releases> block must be kept in sync
+  with the app version in src-tauri/tauri.conf.json, and <screenshots> needs
+  real hosted images before a Flathub submission will be accepted.
+-->
+<component type="desktop-application">
+  <id>jp.firemio.fire-speak</id>
+  <launchable type="desktop-id">jp.firemio.fire-speak.desktop</launchable>
+  <name>fire-speak</name>
+  <summary>AI dictation: hotkey, speak, transcribe, polish, paste</summary>
+
+  <developer id="jp.firemio">
+    <name>firemio</name>
+  </developer>
+
+  <!-- TODO: the repository has no LICENSE file yet. Add one and make these two
+       fields match it (SPDX identifier) before any Flathub submission. -->
+  <metadata_license>FSFAP</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+
+  <url type="homepage">https://github.com/firemio/fire-speak</url>
+  <url type="bugtracker">https://github.com/firemio/fire-speak/issues</url>
+
+  <description>
+    <p>
+      fire-speak is an always-on AI dictation tool. Press a global hotkey, speak,
+      and the transcript is cleaned up by a language model and pasted straight
+      into whichever application has focus.
+    </p>
+    <p>
+      Speech-to-text runs locally through whisper.cpp or through any
+      OpenAI-compatible transcription API. Text polishing runs through the
+      Anthropic API or any OpenAI-compatible chat endpoint. Several polishing
+      modes ship by default (clean up, verbatim, translate, terminal command,
+      business tone) and custom modes can be added.
+    </p>
+  </description>
+
+  <categories>
+    <category>Utility</category>
+  </categories>
+
+  <keywords>
+    <keyword>dictation</keyword>
+    <keyword>speech</keyword>
+    <keyword>transcription</keyword>
+    <keyword>whisper</keyword>
+    <keyword>voice</keyword>
+  </keywords>
+
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="0.3.0" date="2026-09-08">
+      <description>
+        <p>Hold-to-talk push-to-talk with bare-modifier hotkeys.</p>
+      </description>
+    </release>
+  </releases>
+</component>

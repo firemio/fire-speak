@@ -1,0 +1,136 @@
+name: release
+
+# Tag-driven release. Push a tag like `v0.3.1` (or run this workflow manually and
+# pass the tag) and every matrix job builds its installers and uploads them to the
+# SAME GitHub release for that tag.
+#
+# The release is created as a DRAFT on purpose: the four jobs finish at different
+# times, and the in-app updater (src-tauri/src/update.rs) reads
+# `releases/latest`, which ignores drafts. Publishing the draft by hand once all
+# assets are attached means users never see a half-uploaded release.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build and publish (defaults to the current ref name)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows x86_64 -> NSIS (*-setup.exe) + MSI, from bundle.targets.
+          - label: windows-x86_64
+            platform: windows-latest
+            args: ''
+            assetNamePattern: ''
+
+          # Linux x86_64. ubuntu-22.04 (jammy) is the OLDEST GitHub-hosted image
+          # that still ships libwebkit2gtk-4.1-dev, so it gives the lowest glibc
+          # floor (2.35). Building on ubuntu-24.04 would raise it to 2.39 and the
+          # .deb/AppImage would refuse to start on Linux Mint 21 / Ubuntu 22.04.
+          - label: linux-x86_64
+            platform: ubuntu-22.04
+            args: ''
+            assetNamePattern: ''
+
+          # Linux aarch64, built natively on GitHub's Arm64 image (no cross-compile).
+          - label: linux-aarch64
+            platform: ubuntu-22.04-arm
+            args: ''
+            assetNamePattern: ''
+
+          # Windows arm64. Two constraints, both deliberate:
+          #  1. Tauri's WiX/MSI bundler has no arm64 support, so this job is
+          #     restricted to `--bundles nsis`.
+          #  2. The in-app updater picks the FIRST release asset whose name ends
+          #     with `-setup.exe` and is arch-unaware, so a second `*-setup.exe`
+          #     asset would randomly hand x86_64 users an arm64 installer. The
+          #     arm64 installer is therefore renamed to `..._arm64_installer.exe`
+          #     so it can never win that match. Drop the rename once update.rs
+          #     learns to pick an asset by architecture.
+          - label: windows-arm64
+            platform: windows-11-arm
+            args: '--bundles nsis'
+            assetNamePattern: '[name]_[version]_arm64_installer[ext]'
+
+    runs-on: ${{ matrix.platform }}
+    # Windows-on-Arm is unproven for this app (low-level keyboard hook, x64-only
+    # whisper.cpp server downloads), so it must not block an otherwise good release.
+    continue-on-error: ${{ matrix.label == 'windows-arm64' }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            patchelf \
+            xdg-utils \
+            libasound2-dev \
+            libxdo-dev \
+            libx11-dev \
+            libxi-dev \
+            libxtst-dev \
+            libxcb1-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          # package-lock.json is committed, so npm's cache can be keyed off it.
+          package-manager-cache: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: ${{ matrix.label }}
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Explicit so the local @tauri-apps/cli from package.json is used
+          # rather than a globally installed one.
+          tauriScript: npm run tauri
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: 'fire-speak ${{ github.event.inputs.tag || github.ref_name }}'
+          releaseBody: 'See the assets below to download and install this version.'
+          releaseDraft: true
+          prerelease: false
+          # The app ships its own GitHub-Releases-based update check; it does not
+          # use Tauri's signed updater, so there is no latest.json to publish.
+          uploadUpdaterJson: false
+          args: ${{ matrix.args }}
+          releaseAssetNamePattern: ${{ matrix.assetNamePattern }}

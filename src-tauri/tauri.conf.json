@@ -47,13 +47,47 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": ["nsis", "msi", "deb", "rpm", "appimage"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "Utility",
+    "publisher": "firemio",
+    "homepage": "https://github.com/firemio/fire-speak",
+    "shortDescription": "AI dictation: hotkey, speak, transcribe, polish, paste.",
+    "longDescription": "fire-speak is an always-on AI dictation tool. Press a global hotkey, speak, and the transcript is cleaned up by an LLM and pasted straight into the focused application. Speech-to-text runs locally via whisper.cpp or through any OpenAI-compatible API; text polishing runs through Anthropic or any OpenAI-compatible chat endpoint.",
+    "linux": {
+      "deb": {
+        "section": "utils",
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libayatana-appindicator3-1",
+          "libasound2t64 | libasound2",
+          "libxdo3",
+          "libx11-6",
+          "libxtst6",
+          "xdg-utils"
+        ]
+      },
+      "rpm": {
+        "depends": [
+          "webkit2gtk4.1",
+          "libayatana-appindicator-gtk3",
+          "alsa-lib",
+          "xdotool",
+          "libX11",
+          "libXtst",
+          "xdg-utils"
+        ]
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
   }
 }

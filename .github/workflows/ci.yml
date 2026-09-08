@@ -1,0 +1,81 @@
+name: ci
+
+# Fast feedback loop: compile the frontend and the Rust backend on Windows and
+# Linux x86_64 so a Linux-only compile error shows up on the PR instead of at
+# release time. Nothing is bundled and nothing is published.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: windows-x86_64
+            platform: windows-latest
+          # Same image as the release workflow so CI reproduces the real build env.
+          - label: linux-x86_64
+            platform: ubuntu-22.04
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libasound2-dev \
+            libxdo-dev \
+            libx11-dev \
+            libxi-dev \
+            libxtst-dev \
+            libxcb1-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          # package-lock.json is committed, so npm's cache can be keyed off it.
+          package-manager-cache: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: ci-${{ matrix.label }}
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # `tauri build` runs beforeBuildCommand (tsc + vite build) first, so this
+      # single step type-checks the frontend and compiles the Rust backend.
+      # --no-bundle skips deb/rpm/AppImage/NSIS packaging, which CI does not need.
+      - name: Build (no bundle)
+        run: npm run tauri build -- --no-bundle
