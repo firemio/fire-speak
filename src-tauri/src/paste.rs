@@ -2,6 +2,7 @@ use std::time::Duration;
 
 /// Copy `text` to the clipboard.
 pub fn copy_only(text: &str) -> Result<(), String> {
+    pin_clipboard_owner();
     let mut cb =
         arboard::Clipboard::new().map_err(|e| format!("ERR_CLIPBOARD|open: {e}"))?;
     cb.set_text(text.to_string())
@@ -13,6 +14,13 @@ pub fn copy_only(text: &str) -> Result<(), String> {
 /// wait for physical modifiers to be released -> Ctrl+V -> optionally restore.
 /// paste_mode == "clipboard": copy only.
 pub fn paste_text(text: &str, paste_mode: &str, restore_clipboard: bool) -> Result<(), String> {
+    pin_clipboard_owner();
+    // `cb` is deliberately held for the whole function — through the paste AND
+    // the restore. On X11 the clipboard has no server-side storage: its
+    // contents are served on demand by the owning process, and dropping the
+    // last arboard `Clipboard` tears the owner window down (handing off to a
+    // clipboard manager, if one is even running). Creating it per step would
+    // race that teardown against the Ctrl+V we are about to send.
     let mut cb =
         arboard::Clipboard::new().map_err(|e| format!("ERR_CLIPBOARD|open: {e}"))?;
     let old_text = cb.get_text().ok();
@@ -49,6 +57,28 @@ pub fn paste_text(text: &str, paste_mode: &str, restore_clipboard: bool) -> Resu
     Ok(())
 }
 
+/// Keep one arboard `Clipboard` alive for the whole process (Linux only).
+///
+/// arboard's X11 backend keeps a process-global connection plus a worker
+/// thread that answers selection requests, and tears both down — destroying
+/// the selection-owner window — when the LAST `Clipboard` handle is dropped.
+/// Without a clipboard manager running, that silently empties the clipboard as
+/// soon as `copy_only` / `paste_text` returns. Leaking exactly one handle pins
+/// the owner for the app's lifetime, which is precisely the ownership model
+/// X11 expects from a resident app; it is a bounded, one-time leak.
+#[cfg(target_os = "linux")]
+fn pin_clipboard_owner() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| match arboard::Clipboard::new() {
+        Ok(cb) => std::mem::forget(cb),
+        Err(e) => eprintln!("clipboard owner pin failed: {e}"),
+    });
+}
+
+#[cfg(not(target_os = "linux"))]
+fn pin_clipboard_owner() {}
+
 /// Poll until Alt/Ctrl/Shift/Win are all physically released (30ms interval,
 /// 2s cap). Proceeds after release, or unconditionally at the cap.
 #[cfg(windows)]
@@ -69,7 +99,46 @@ fn wait_for_modifier_release() {
     }
 }
 
-#[cfg(not(windows))]
+/// X11 equivalent: poll `QueryPointer`'s modifier mask (which reports the
+/// logical modifier state the server would apply to a synthetic key event)
+/// until Shift/Ctrl/Alt/Super/AltGr are all up. Same 30ms interval and 2s cap
+/// as the Windows path. Proceeds immediately when X11 is unreachable.
+#[cfg(target_os = "linux")]
+fn wait_for_modifier_release() {
+    use std::time::Instant;
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xproto::{ConnectionExt, KeyButMask};
+
+    let Ok((conn, screen_num)) = x11rb::connect(None) else {
+        return;
+    };
+    let Some(root) = conn.setup().roots.get(screen_num).map(|s| s.root) else {
+        return;
+    };
+    // Mod1 = Alt, Mod4 = Super/Win, Mod5 = AltGr (ISO_Level3_Shift) on the
+    // conventional XKB modifier map. Lock (CapsLock) and Mod2 (NumLock) are
+    // deliberately excluded: they latch and would never clear.
+    let watched = u16::from(
+        KeyButMask::SHIFT
+            | KeyButMask::CONTROL
+            | KeyButMask::MOD1
+            | KeyButMask::MOD4
+            | KeyButMask::MOD5,
+    );
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let any_down = match conn.query_pointer(root).map(|c| c.reply()) {
+            Ok(Ok(reply)) => u16::from(reply.mask) & watched != 0,
+            _ => return, // connection trouble: do not stall the paste
+        };
+        if !any_down || Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn wait_for_modifier_release() {}
 
 fn send_ctrl_v() -> Result<(), String> {

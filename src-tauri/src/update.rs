@@ -5,6 +5,16 @@ use std::time::Duration;
 
 const NOTES_MAX_CHARS: usize = 4000;
 
+/// Release-asset name suffixes that hold this platform's installer, in
+/// preference order. The release page (`html_url`) is the fallback when none
+/// of them is present.
+#[cfg(windows)]
+const INSTALLER_SUFFIXES: &[&str] = &["-setup.exe"];
+#[cfg(target_os = "linux")]
+const INSTALLER_SUFFIXES: &[&str] = &[".appimage", ".deb", ".rpm"];
+#[cfg(not(any(windows, target_os = "linux")))]
+const INSTALLER_SUFFIXES: &[&str] = &[];
+
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateInfo {
     /// e.g. "0.2.0" (the running app's version)
@@ -13,7 +23,8 @@ pub struct UpdateInfo {
     pub latest: String,
     /// numeric semver comparison: latest > current
     pub update_available: bool,
-    /// browser_download_url of the *-setup.exe asset, else the release html_url
+    /// browser_download_url of this platform's installer asset, else the
+    /// release html_url
     pub url: String,
     /// release notes body, truncated to 4000 chars
     pub notes: String,
@@ -58,13 +69,15 @@ pub async fn check(owner: &str, repo: &str, current: &str) -> Result<UpdateInfo,
 
     let empty = Vec::new();
     let assets = release["assets"].as_array().unwrap_or(&empty);
-    let asset_url = assets
+    let asset_url = INSTALLER_SUFFIXES
         .iter()
-        .find(|a| {
-            a["name"]
-                .as_str()
-                .map(|n| n.to_lowercase().ends_with("-setup.exe"))
-                .unwrap_or(false)
+        .find_map(|suffix| {
+            assets.iter().find(|a| {
+                a["name"]
+                    .as_str()
+                    .map(|n| n.to_lowercase().ends_with(suffix))
+                    .unwrap_or(false)
+            })
         })
         .and_then(|a| a["browser_download_url"].as_str())
         .map(|s| s.to_string());

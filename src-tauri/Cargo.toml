@@ -30,12 +30,30 @@ hound = "3.5.1"
 arboard = "3.6.1"
 enigo = "0.6.1"
 dirs = "6.0.0"
-zip = "8.6.0"
 futures-util = "0.3.34"
 uuid = { version = "1.26.0", features = ["v4"] }
 tokio = { version = "1.53.1", features = ["full"] }
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "multipart", "stream", "rustls"] }
+sys-locale = "0.3.2"
+
+# --- Windows-only -----------------------------------------------------------
+# win32job: kill-on-close Job Object for the managed whisper-server.
+# windows-sys: WH_KEYBOARD_LL hook, GetAsyncKeyState, VkKeyScanExW.
+# zip: the whisper.cpp Windows release asset is a .zip (Linux ships .tar.gz).
+[target.'cfg(windows)'.dependencies]
 win32job = "2.0.3"
 windows-sys = { version = "0.61.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
-sys-locale = "0.3.2"
+zip = "8.6.0"
+
+# --- Linux-only -------------------------------------------------------------
+# libc: prctl(PR_SET_PDEATHSIG) + setpgid for whisper-server containment.
+# x11rb (xinput = XInput2): global raw key press/release listening without a
+#   grab, keyboard-mapping lookups and the modifier-release poll.
+#   Pinned to 0.13 so it unifies with the copy arboard/enigo already pull in.
+# flate2 + tar: extraction of the whisper.cpp *.tar.gz release asset.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+x11rb = { version = "0.13", features = ["xinput"] }
+flate2 = "1.1"
+tar = "0.4"
 

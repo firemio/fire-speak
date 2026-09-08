@@ -23,9 +23,6 @@
 //!   passed-through up (symmetry).
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::mpsc::Sender;
-use std::sync::OnceLock;
-use tauri::AppHandle;
 use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetMessageW, SetWindowsHookExW, KBDLLHOOKSTRUCT, LLKHF_INJECTED, MSG,
@@ -62,12 +59,9 @@ static PASSED_MASK: AtomicU32 = AtomicU32::new(0);
 fn modifier_bit(vk: u32) -> Option<u32> {
     (0xA0..=0xA5).contains(&vk).then(|| 1 << (vk - 0xA0))
 }
-static APP: OnceLock<AppHandle> = OnceLock::new();
-/// Sender into the single long-lived dispatcher thread (true = pressed).
-static SENDER: OnceLock<Sender<bool>> = OnceLock::new();
 
 /// Map a special hotkey token to its virtual-key code.
-pub fn token_to_vk(token: &str) -> Option<u32> {
+fn token_to_vk(token: &str) -> Option<u32> {
     match token {
         "RAlt" => Some(0xA5),
         "LAlt" => Some(0xA4),
@@ -79,39 +73,29 @@ pub fn token_to_vk(token: &str) -> Option<u32> {
     }
 }
 
-pub fn is_installed() -> bool {
+pub(super) fn is_installed() -> bool {
     INSTALLED.load(Ordering::SeqCst)
 }
 
-/// Enable the hook path for `vk`, or disable it with 0.
-pub fn set_watched_vk(vk: u32) {
-    WATCHED_VK.store(vk, Ordering::SeqCst);
+/// Enable the hook path for `token`, or disable it with `None`.
+pub(super) fn set_watched_token(token: Option<&str>) -> bool {
+    match token {
+        None => {
+            WATCHED_VK.store(0, Ordering::SeqCst);
+            true
+        }
+        Some(t) => match token_to_vk(t) {
+            Some(vk) => {
+                WATCHED_VK.store(vk, Ordering::SeqCst);
+                true
+            }
+            None => false,
+        },
+    }
 }
 
-/// Install the hook once on a dedicated message-pump thread and start the
-/// single dispatcher thread. Returns whether the hook is installed
-/// (idempotent; safe to call again).
-pub fn install(app: AppHandle) -> bool {
-    if APP.set(app).is_err() {
-        return is_installed(); // already installed (or install failed) earlier
-    }
-
-    // Single long-lived dispatcher: receives press/release events in order
-    // and runs the pipeline entry points off the hook thread.
-    let (dtx, drx) = std::sync::mpsc::channel::<bool>();
-    let _ = SENDER.set(dtx);
-    std::thread::spawn(move || {
-        while let Ok(pressed) = drx.recv() {
-            if let Some(app) = APP.get() {
-                if pressed {
-                    crate::pipeline::hotkey_pressed(app);
-                } else {
-                    crate::pipeline::hotkey_released(app);
-                }
-            }
-        }
-    });
-
+/// Install the hook once on a dedicated message-pump thread.
+pub(super) fn install() -> bool {
     let (tx, rx) = std::sync::mpsc::channel::<bool>();
     std::thread::spawn(move || unsafe {
         let hook =
@@ -128,32 +112,6 @@ pub fn install(app: AppHandle) -> bool {
     });
     rx.recv_timeout(std::time::Duration::from_secs(3))
         .unwrap_or(false)
-}
-
-/// Queue a press/release for the dispatcher thread (O(1), order-preserving).
-fn dispatch(pressed: bool) {
-    if let Some(tx) = SENDER.get() {
-        let _ = tx.send(pressed);
-    }
-}
-
-/// Queue a press/release from any source. The plugin (combo) path shares the
-/// same dispatcher thread so pressed/released ordering is global; if the
-/// dispatcher never started (hook install failed very early), fall back to a
-/// one-off thread.
-pub fn dispatch_event(app: &AppHandle, pressed: bool) {
-    if let Some(tx) = SENDER.get() {
-        let _ = tx.send(pressed);
-    } else {
-        let app = app.clone();
-        std::thread::spawn(move || {
-            if pressed {
-                crate::pipeline::hotkey_pressed(&app);
-            } else {
-                crate::pipeline::hotkey_released(&app);
-            }
-        });
-    }
 }
 
 unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -194,7 +152,7 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
                         && !altgr_ralt
                     {
                         SWALLOWED_VK.store(vk, Ordering::SeqCst);
-                        dispatch(true);
+                        super::dispatch(true);
                         return 1; // swallow
                     }
                     // Passed through: remember it so no later repeat of this
@@ -214,7 +172,7 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
                         // suspended (pipeline::hotkey_released handles the
                         // suspended case safely) — so HOTKEY_HELD never goes
                         // stale and a hold-mode recording always ends.
-                        dispatch(false);
+                        super::dispatch(false);
                         return 1; // swallow (matches the swallowed down)
                     }
                     // pass through (its down was passed through too)

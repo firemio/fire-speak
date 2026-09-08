@@ -9,6 +9,8 @@ mod settings;
 mod setup;
 mod stt;
 mod update;
+#[cfg(target_os = "linux")]
+mod x11util;
 
 use settings::Settings;
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -60,16 +62,17 @@ fn show_main_window(app: &AppHandle) {
 }
 
 /// Register `hotkey` — either a single-modifier special token
-/// (RAlt/LAlt/RCtrl/LCtrl/RShift/LShift, handled by the low-level keyboard
-/// hook) or a combo string (handled by the global-shortcut plugin).
+/// (RAlt/LAlt/RCtrl/LCtrl/RShift/LShift, handled by the platform key listener:
+/// the low-level keyboard hook on Windows, XInput2 raw events on Linux) or a
+/// combo string (handled by the global-shortcut plugin).
 ///
 /// Validation happens BEFORE any persistent change, so a failure leaves the
 /// existing hotkey working. If registration of a new valid combo fails (e.g.
 /// taken by another app), `previous` is restored best-effort — including a
-/// previous special token, whose hook atomic was never cleared.
+/// previous special token, whose listener state was never cleared.
 fn register_hotkey(app: &AppHandle, hotkey: &str, previous: Option<&str>) -> Result<(), String> {
-    if let Some(vk) = hook::token_to_vk(hotkey) {
-        // Special token -> keyboard hook path.
+    if hook::is_special_token(hotkey) {
+        // Special token -> platform key listener path.
         // RAlt on an AltGr layout would swallow the key used to type
         // characters — refuse BEFORE changing any state (the existing
         // validate-before-persist flow keeps the old hotkey working).
@@ -79,12 +82,16 @@ fn register_hotkey(app: &AppHandle, hotkey: &str, previous: Option<&str>) -> Res
         if !hook::is_installed() {
             return Err(format!("ERR_HOTKEY_REGISTER|{hotkey}"));
         }
-        hook::set_watched_vk(vk);
+        // Resolves the token to platform key codes; fails (without changing
+        // state) if the key is not available in this session.
+        if !hook::set_watched_token(Some(hotkey)) {
+            return Err(format!("ERR_HOTKEY_REGISTER|{hotkey}"));
+        }
         let _ = app.global_shortcut().unregister_all();
         return Ok(());
     }
-    // Combo -> plugin path. Parse first; the hook atomic is only cleared
-    // after the combo registers successfully.
+    // Combo -> plugin path. Parse first; the listener is only disabled after
+    // the combo registers successfully.
     let shortcut: Shortcut = hotkey
         .parse()
         .map_err(|_| format!("ERR_HOTKEY_PARSE|{hotkey}"))?;
@@ -94,17 +101,17 @@ fn register_hotkey(app: &AppHandle, hotkey: &str, previous: Option<&str>) -> Res
         eprintln!("hotkey register failed for {hotkey}: {e}");
         // best effort: restore the previous hotkey so the user keeps a working one
         if let Some(prev) = previous {
-            if hook::token_to_vk(prev).is_none() {
+            if !hook::is_special_token(prev) {
                 if let Ok(prev_shortcut) = prev.parse::<Shortcut>() {
                     let _ = gs.register(prev_shortcut);
                 }
             }
-            // previous was a special token: the hook atomic still holds its
-            // VK (never cleared on this failure path), so it stays active
+            // previous was a special token: the listener still watches its
+            // key (never cleared on this failure path), so it stays active
         }
         return Err(format!("ERR_HOTKEY_REGISTER|{hotkey}"));
     }
-    hook::set_watched_vk(0);
+    hook::set_watched_token(None);
     Ok(())
 }
 
@@ -277,16 +284,17 @@ async fn cancel_recording(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// While suspended, both hotkey paths (keyboard hook + plugin handler) are
-/// inert and the hook stops swallowing keys, so the settings capture field
-/// can see them. When the current hotkey is a plugin combo, the combo is
+/// While suspended, both hotkey paths (platform key listener + plugin handler)
+/// are inert and the Windows hook stops swallowing keys, so the settings
+/// capture field can see them (on Linux keys are never swallowed to begin
+/// with). When the current hotkey is a plugin combo, the combo is
 /// unregistered for the duration of the suspension (a registered global
 /// shortcut never reaches the webview at all) and re-registered on
 /// unsuspend. The UI record button is unaffected.
 #[tauri::command]
 async fn set_hotkey_suspended(app: AppHandle, suspended: bool) -> Result<(), String> {
     let hotkey = app.state::<AppState>().settings.lock().unwrap().hotkey.clone();
-    let is_combo = hook::token_to_vk(&hotkey).is_none();
+    let is_combo = !hook::is_special_token(&hotkey);
     if suspended {
         pipeline::set_hotkey_suspended(true);
         if is_combo {
@@ -475,7 +483,10 @@ pub fn run() {
             app.manage(AppState::new(loaded.clone()));
 
             if !hook::install(handle.clone()) {
-                eprintln!("low-level keyboard hook install failed");
+                // Non-fatal: bare-modifier hotkeys are unavailable (no X11
+                // display on Linux, hook refused on Windows); combos still
+                // work and register_hotkey reports ERR_HOTKEY_REGISTER.
+                eprintln!("bare-modifier hotkey listener install failed");
             }
             if let Err(e) = register_hotkey(&handle, &loaded.hotkey, None) {
                 // non-fatal; the webview has no listener yet, so stash the

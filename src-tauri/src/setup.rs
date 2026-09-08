@@ -26,8 +26,69 @@ pub struct ManagedServer {
     /// Job object with kill-on-close: keeps the whisper-server bound to this
     /// process's lifetime even on crash / Task Manager kill. Must stay alive
     /// as long as the child runs.
+    ///
+    /// The Linux equivalent needs no handle: `PR_SET_PDEATHSIG` is set in the
+    /// child itself (see `spawn_and_health_check`).
+    #[cfg(windows)]
     #[allow(dead_code)]
     pub job: win32job::Job,
+}
+
+/// Fork the whisper-server from a dedicated, never-exiting thread (Linux).
+///
+/// `PR_SET_PDEATHSIG` is delivered when the *thread* that forked the child
+/// exits — not when the process does (see prctl(2)). `ensure_server` runs on a
+/// tokio `spawn_blocking` thread, which the runtime retires after a few
+/// seconds of idleness, so forking there would have the server SIGKILL itself
+/// shortly after every successful start. A single long-lived spawner thread,
+/// created on first use and never joined, removes that hazard.
+#[cfg(target_os = "linux")]
+fn spawn_child(cmd: Command) -> std::io::Result<Child> {
+    use std::sync::mpsc::{channel, Sender};
+    use std::sync::OnceLock;
+
+    type Request = (Command, Sender<std::io::Result<Child>>);
+    static SPAWNER: OnceLock<Sender<Request>> = OnceLock::new();
+    let gone = || std::io::Error::other("server spawner thread unavailable");
+
+    let spawner = SPAWNER.get_or_init(|| {
+        let (tx, rx) = channel::<Request>();
+        std::thread::spawn(move || {
+            while let Ok((mut cmd, reply)) = rx.recv() {
+                let _ = reply.send(cmd.spawn());
+            }
+        });
+        tx
+    });
+    let (reply_tx, reply_rx) = channel();
+    spawner.send((cmd, reply_tx)).map_err(|_| gone())?;
+    reply_rx.recv().map_err(|_| gone())?
+}
+
+#[cfg(not(target_os = "linux"))]
+fn spawn_child(mut cmd: Command) -> std::io::Result<Child> {
+    cmd.spawn()
+}
+
+/// Kill a managed child and reap it.
+///
+/// On Linux the child is its own process group leader (see the `pre_exec`
+/// below), so the whole group is signalled first — whisper-server's worker
+/// processes, if it ever spawns any, die with it. On Windows this is exactly
+/// the previous `kill()` + `wait()` pair; the Job Object handles descendants.
+fn terminate(child: &mut Child) {
+    #[cfg(target_os = "linux")]
+    {
+        let pid = child.id() as i32;
+        if pid > 0 {
+            // Negative pid = "every process in group |pid|". The group exists
+            // only because the child called setpgid(0, 0); if that failed the
+            // group does not exist and kill() just returns ESRCH.
+            unsafe { libc::kill(-pid, libc::SIGKILL) };
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -62,7 +123,22 @@ pub fn models_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir(app)?.join("models"))
 }
 
-/// Recursively search `dir` for an .exe whose file name contains "server".
+/// Whether `file_name` is the whisper server executable for this platform:
+/// Windows wants `*server*.exe`, Linux the extension-less `whisper-server`
+/// (which rules out the `lib*.so*` shipped in the same tarball).
+fn is_server_exe_name(file_name: &str) -> bool {
+    let lower = file_name.to_lowercase();
+    #[cfg(windows)]
+    {
+        lower.contains("server") && lower.ends_with(".exe")
+    }
+    #[cfg(not(windows))]
+    {
+        lower.contains("server") && !lower.contains('.')
+    }
+}
+
+/// Recursively search `dir` for the whisper server executable.
 pub fn find_server_exe(dir: &Path) -> Option<PathBuf> {
     let entries = std::fs::read_dir(dir).ok()?;
     let mut dirs: Vec<PathBuf> = Vec::new();
@@ -71,8 +147,7 @@ pub fn find_server_exe(dir: &Path) -> Option<PathBuf> {
         if path.is_dir() {
             dirs.push(path);
         } else if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            let lower = name.to_lowercase();
-            if lower.contains("server") && lower.ends_with(".exe") {
+            if is_server_exe_name(name) {
                 return Some(path);
             }
         }
@@ -213,24 +288,19 @@ fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, S
             }
         };
         if let Some(mut managed) = stale {
-            let _ = managed.child.kill();
-            let _ = managed.child.wait();
+            terminate(&mut managed.child);
             continue;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
 
     // We own `server_starting`: spawn + health-check with no lock held.
-    let result = spawn_and_health_check(&server_path, &model_path, port, threads);
+    let result = spawn_and_health_check(&server_path, &model_path, port, threads, signature);
     let mut guard = state.server.lock().unwrap();
     state.server_starting.store(false, Ordering::SeqCst);
     match result {
-        Ok((child, job)) => {
-            *guard = Some(ManagedServer {
-                child,
-                signature,
-                job,
-            });
+        Ok(managed) => {
+            *guard = Some(managed);
             Ok(port)
         }
         Err(e) => Err(e),
@@ -242,7 +312,8 @@ fn spawn_and_health_check(
     model_path: &Path,
     port: u16,
     threads: u32,
-) -> Result<(Child, win32job::Job), String> {
+    signature: String,
+) -> Result<ManagedServer, String> {
     // Refuse to spawn onto a port something already listens on (e.g. an
     // orphaned whisper-server from a previous crash). A stale managed server
     // may still be mid-kill on another thread (it is killed after the lock is
@@ -268,23 +339,62 @@ fn spawn_and_health_check(
         .stderr(Stdio::null());
     if let Some(parent) = server_path.parent() {
         cmd.current_dir(parent);
+        // The whisper.cpp Linux release ships libggml/libwhisper next to the
+        // binary; make sure they are found even without an RPATH.
+        #[cfg(target_os = "linux")]
+        {
+            let mut lib_path = parent.as_os_str().to_os_string();
+            if let Some(existing) = std::env::var_os("LD_LIBRARY_PATH") {
+                if !existing.is_empty() {
+                    lib_path.push(":");
+                    lib_path.push(existing);
+                }
+            }
+            cmd.env("LD_LIBRARY_PATH", lib_path);
+        }
     }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("ERR_SERVER_START|{e}"))?;
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::CommandExt;
+        let parent_pid = unsafe { libc::getpid() };
+        // SAFETY: `pre_exec` runs in the forked child between fork() and
+        // exec(), where only async-signal-safe operations are allowed. The
+        // closure calls nothing but raw syscalls (setpgid, prctl, getppid,
+        // raise) — no allocation, no locks, no Rust runtime re-entry — so it
+        // cannot deadlock on a lock held by another thread at fork time.
+        unsafe {
+            cmd.pre_exec(move || {
+                // Own process group, so `terminate` can signal the whole tree.
+                // Failure is non-fatal: the direct child is still killable.
+                libc::setpgid(0, 0);
+                // Die with this app even on crash / SIGKILL of the parent.
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                // Close the race where the parent died between fork() and the
+                // prctl above (the death signal would then never arrive).
+                if libc::getppid() != parent_pid {
+                    libc::raise(libc::SIGKILL);
+                }
+                Ok(())
+            });
+        }
+    }
+    let mut child = spawn_child(cmd).map_err(|e| format!("ERR_SERVER_START|{e}"))?;
 
     // Bind the child to a kill-on-close Job Object so it dies with this
-    // process even on crash / Task Manager kill.
+    // process even on crash / Task Manager kill. (Linux uses PR_SET_PDEATHSIG,
+    // set above in the child itself, so there is no handle to keep.)
+    #[cfg(windows)]
     let job = match assign_kill_on_close_job(&child) {
         Ok(job) => job,
         Err(e) => {
-            let _ = child.kill();
-            let _ = child.wait();
+            terminate(&mut child);
             return Err(e);
         }
     };
@@ -300,16 +410,21 @@ fn spawn_and_health_check(
             break;
         }
         if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
+            terminate(&mut child);
             return Err("ERR_SERVER_START|health check timeout (20s)".to_string());
         }
         std::thread::sleep(Duration::from_millis(500));
     }
 
-    Ok((child, job))
+    Ok(ManagedServer {
+        child,
+        signature,
+        #[cfg(windows)]
+        job,
+    })
 }
 
+#[cfg(windows)]
 fn assign_kill_on_close_job(child: &Child) -> Result<win32job::Job, String> {
     use std::os::windows::io::AsRawHandle;
     let mut info = win32job::ExtendedLimitInfo::new();
@@ -335,10 +450,9 @@ pub fn kill_server(app: &AppHandle) {
             Err(_) => None,
         };
         if let Some(mut managed) = managed {
-            let _ = managed.child.kill();
-            let _ = managed.child.wait();
-            // dropping `managed.job` closes the job handle, which also kills
-            // the process tree thanks to kill-on-close
+            terminate(&mut managed.child);
+            // on Windows, dropping `managed.job` closes the job handle, which
+            // also kills the process tree thanks to kill-on-close
         }
     }
 }
@@ -440,7 +554,79 @@ async fn stream_download(
     Ok((downloaded, total))
 }
 
-/// Download the latest whisper.cpp Windows x64 server zip and extract it.
+/// File name of the temporary archive downloaded into `{app_data}/bin`.
+#[cfg(windows)]
+const SERVER_ARCHIVE_TMP: &str = "_whisper-server-download.zip";
+#[cfg(not(windows))]
+const SERVER_ARCHIVE_TMP: &str = "_whisper-server-download.tar.gz";
+
+/// Pick the whisper.cpp release asset for this platform + architecture.
+///
+/// Windows x64: `whisper-bin-x64.zip` (fallback `(?i)win.*x64.*\.zip`).
+/// Linux: `whisper-bin-ubuntu-x64.tar.gz` / `whisper-bin-ubuntu-arm64.tar.gz`
+/// (asset names verified against the ggml-org/whisper.cpp releases API).
+fn pick_server_asset(assets: &[serde_json::Value]) -> Option<&serde_json::Value> {
+    let name = |a: &serde_json::Value| a["name"].as_str().unwrap_or("").to_lowercase();
+
+    #[cfg(windows)]
+    {
+        assets
+            .iter()
+            .find(|a| {
+                let n = name(a);
+                n.contains("bin-x64") && n.ends_with(".zip")
+            })
+            .or_else(|| {
+                assets.iter().find(|a| {
+                    let n = name(a);
+                    n.contains("win") && n.contains("x64") && n.ends_with(".zip")
+                })
+            })
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let arch = if cfg!(target_arch = "aarch64") {
+            "arm64"
+        } else {
+            "x64"
+        };
+        let exact = format!("whisper-bin-ubuntu-{arch}.tar.gz");
+        assets.iter().find(|a| name(a) == exact).or_else(|| {
+            // tolerate a renamed/retagged asset as long as it is clearly the
+            // Linux build for this architecture
+            assets.iter().find(|a| {
+                let n = name(a);
+                n.contains("ubuntu") && n.contains(arch) && n.ends_with(".tar.gz")
+            })
+        })
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = name;
+        let _ = assets;
+        None
+    }
+}
+
+/// Extract the downloaded server archive into `dest`
+/// (.zip on Windows, .tar.gz on Linux).
+fn extract_server_archive(archive: &Path, dest: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        extract_zip(archive, dest)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        extract_tar_gz(archive, dest)
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = (archive, dest);
+        Err("ERR_NO_SERVER_ASSET".to_string())
+    }
+}
+
+/// Download the latest whisper.cpp server build for this platform and extract it.
 pub async fn download_whisper_server(app: AppHandle) -> Result<(), String> {
     let result = download_whisper_server_inner(&app).await;
     if let Err(e) = &result {
@@ -465,22 +651,9 @@ async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
 
     let empty = Vec::new();
     let assets = release["assets"].as_array().unwrap_or(&empty);
-    let asset_name = |a: &serde_json::Value| a["name"].as_str().unwrap_or("").to_string();
-    let picked = assets
-        .iter()
-        .find(|a| {
-            let n = asset_name(a).to_lowercase();
-            n.contains("bin-x64") && n.ends_with(".zip")
-        })
-        .or_else(|| {
-            assets.iter().find(|a| {
-                let n = asset_name(a).to_lowercase();
-                n.contains("win") && n.contains("x64") && n.ends_with(".zip")
-            })
-        })
-        .ok_or_else(|| "ERR_NO_SERVER_ASSET".to_string())?;
+    let picked = pick_server_asset(assets).ok_or_else(|| "ERR_NO_SERVER_ASSET".to_string())?;
 
-    let name = asset_name(picked);
+    let name = picked["name"].as_str().unwrap_or("").to_string();
     let url = picked["browser_download_url"]
         .as_str()
         .ok_or_else(|| "ERR_NO_SERVER_ASSET".to_string())?
@@ -490,24 +663,36 @@ async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
     tokio::fs::create_dir_all(&bin)
         .await
         .map_err(|e| format!("ERR_FILE_IO|create dir: {e}"))?;
-    let zip_path = bin.join("_whisper-server-download.zip");
+    let archive_path = bin.join(SERVER_ARCHIVE_TMP);
 
     let (downloaded, total) =
-        stream_download(app, &client, &url, &zip_path, "server", &name).await?;
+        stream_download(app, &client, &url, &archive_path, "server", &name).await?;
 
-    // extract in a blocking thread; the temp zip is removed on every outcome
+    // extract in a blocking thread; the temp archive is removed on every outcome
     let bin2 = bin.clone();
-    let zip2 = zip_path.clone();
-    let extract_result = tokio::task::spawn_blocking(move || extract_zip(&zip2, &bin2))
-        .await
-        .map_err(|e| format!("ERR_INTERNAL|extract: {e}"))
-        .and_then(|r| r);
-    let _ = tokio::fs::remove_file(&zip_path).await;
+    let archive2 = archive_path.clone();
+    let extract_result =
+        tokio::task::spawn_blocking(move || extract_server_archive(&archive2, &bin2))
+            .await
+            .map_err(|e| format!("ERR_INTERNAL|extract: {e}"))
+            .and_then(|r| r);
+    let _ = tokio::fs::remove_file(&archive_path).await;
     extract_result?;
 
-    if find_server_exe(&bin).is_none() {
+    let Some(server_exe) = find_server_exe(&bin) else {
         return Err("ERR_NO_SERVER_ASSET".to_string());
+    };
+    // Tar preserves the mode bits, but a release built with a restrictive
+    // umask (or a future switch to an archive format that drops them) would
+    // leave the server unexecutable. Force it.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&server_exe, std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("ERR_FILE_IO|chmod server: {e}"))?;
     }
+    #[cfg(not(unix))]
+    let _ = server_exe;
 
     emit_progress(
         app,
@@ -521,6 +706,7 @@ async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(windows)]
 fn extract_zip(zip_path: &Path, dest: &Path) -> Result<(), String> {
     let file =
         std::fs::File::open(zip_path).map_err(|e| format!("ERR_ZIP|open: {e}"))?;
@@ -529,6 +715,97 @@ fn extract_zip(zip_path: &Path, dest: &Path) -> Result<(), String> {
     archive
         .extract(dest)
         .map_err(|e| format!("ERR_ZIP|extract: {e}"))
+}
+
+/// Normalize a tar entry path to a relative path guaranteed to stay inside the
+/// destination directory: absolute paths, `..` and Windows drive prefixes are
+/// rejected outright rather than silently stripped.
+#[cfg(target_os = "linux")]
+fn safe_relative_path(path: &Path) -> Result<PathBuf, String> {
+    use std::path::Component;
+    let mut safe = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => safe.push(part),
+            Component::CurDir => {}
+            _ => return Err(format!("ERR_ZIP|unsafe entry path: {}", path.display())),
+        }
+    }
+    Ok(safe)
+}
+
+/// Extract a gzip-compressed tar into `dest`.
+///
+/// Every entry path is validated against directory traversal (including via a
+/// symlink target) before anything is written. Regular files, directories and
+/// relative symlinks are extracted; anything else (device nodes, hard links,
+/// FIFOs) is skipped.
+#[cfg(target_os = "linux")]
+fn extract_tar_gz(archive_path: &Path, dest: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let file =
+        std::fs::File::open(archive_path).map_err(|e| format!("ERR_ZIP|open: {e}"))?;
+    let decoder = flate2::read::GzDecoder::new(std::io::BufReader::new(file));
+    let mut archive = tar::Archive::new(decoder);
+    let entries = archive
+        .entries()
+        .map_err(|e| format!("ERR_ZIP|read: {e}"))?;
+
+    for entry in entries {
+        let mut entry = entry.map_err(|e| format!("ERR_ZIP|entry: {e}"))?;
+        let raw_path = entry
+            .path()
+            .map_err(|e| format!("ERR_ZIP|path: {e}"))?
+            .into_owned();
+        let relative = safe_relative_path(&raw_path)?;
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+        let out = dest.join(&relative);
+        let entry_type = entry.header().entry_type();
+
+        if entry_type.is_dir() {
+            std::fs::create_dir_all(&out)
+                .map_err(|e| format!("ERR_ZIP|create dir: {e}"))?;
+            continue;
+        }
+        if let Some(parent) = out.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("ERR_ZIP|create dir: {e}"))?;
+        }
+
+        if entry_type.is_symlink() {
+            // The whisper.cpp tarball ships versioned shared objects behind
+            // symlinks (libwhisper.so -> libwhisper.so.1); keep them, but only
+            // when the target cannot escape `dest`.
+            let Some(target) = entry
+                .link_name()
+                .map_err(|e| format!("ERR_ZIP|link: {e}"))?
+                .map(|t| t.into_owned())
+            else {
+                continue;
+            };
+            safe_relative_path(&target)?;
+            let _ = std::fs::remove_file(&out);
+            std::os::unix::fs::symlink(&target, &out)
+                .map_err(|e| format!("ERR_ZIP|symlink: {e}"))?;
+            continue;
+        }
+        if !entry_type.is_file() {
+            continue; // device nodes, hard links, FIFOs: not shipped, not wanted
+        }
+
+        let mode = entry.header().mode().unwrap_or(0o644) & 0o777;
+        let mut out_file =
+            std::fs::File::create(&out).map_err(|e| format!("ERR_ZIP|create: {e}"))?;
+        std::io::copy(&mut entry, &mut out_file)
+            .map_err(|e| format!("ERR_ZIP|extract: {e}"))?;
+        drop(out_file);
+        std::fs::set_permissions(&out, std::fs::Permissions::from_mode(mode))
+            .map_err(|e| format!("ERR_ZIP|chmod: {e}"))?;
+    }
+    Ok(())
 }
 
 /// Download a whisper.cpp GGML model from Hugging Face.

@@ -18,6 +18,7 @@ pub fn resolve_ui_lang() -> String {
 /// character. Scans the characters 0x20..0x100 with `VkKeyScanExW` against
 /// the current thread's layout: if any mapping requires both CTRL and ALT
 /// modifiers (high-byte bits 0x06), the layout uses AltGr (SPEC v0.3.1).
+#[cfg(windows)]
 pub fn layout_uses_altgr() -> bool {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyboardLayout, VkKeyScanExW};
     let hkl = unsafe { GetKeyboardLayout(0) };
@@ -27,6 +28,27 @@ pub fn layout_uses_altgr() -> bool {
             return true;
         }
     }
+    false
+}
+
+/// X11 equivalent: the layout uses AltGr when any keycode in the server's
+/// current keyboard mapping is bound to `ISO_Level3_Shift` — that is the
+/// keysym the right Alt key carries on AltGr layouts, so RAlt is needed for
+/// typing and must be refused as a bare hotkey.
+///
+/// Same downstream meaning as on Windows (`register_hotkey` rejects `RAlt`
+/// with `ERR_HOTKEY_REGISTER|RAlt`, and first-run defaults to
+/// `Ctrl+Alt+Space`). When X11 is unreachable — a pure Wayland session, where
+/// the raw-key listener cannot run at all — this returns true as well, so the
+/// first run picks a combo hotkey instead of a bare RAlt that could never fire.
+#[cfg(target_os = "linux")]
+pub fn layout_uses_altgr() -> bool {
+    crate::x11util::keysym_is_bound(crate::x11util::KEYSYM_ISO_LEVEL3_SHIFT).unwrap_or(true)
+}
+
+/// No bare-modifier hotkey support on other platforms; nothing to refuse.
+#[cfg(not(any(windows, target_os = "linux")))]
+pub fn layout_uses_altgr() -> bool {
     false
 }
 
