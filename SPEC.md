@@ -483,7 +483,7 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 ## アイコン
 
 - `src-tauri/icons/source.svg`(1024px)から `npm run tauri icon -- src-tauri/icons/source.svg` で全サイズ生成。
-- v0.7.1 で作り直し: **黒い円盤は無し**(16〜32px で「黒丸に炎」に見えるため)。シルエットは**太い炎のリング**(stroke 64px + グロー、両縁に金の細線、8 本の暗いルーン切り欠き、8 個の金の点)そのもの。内側に太い金→橙の六芒星(stroke 20px + ソフトグロー)、リング上部から立ち上がる炎(朱→橙→金→白、白熱コア、火の粉)。リング内側だけ暗いヘイズで炎のコントラストを確保し、外縁に向かって透明にフェード。確認は 256/128/64/48/32/24/16px のシートで行う。
+- v0.8.0 で作り直し: **黒い円盤は無し**(16〜32px で「黒丸に炎」に見えるため)。シルエットは**太い炎のリング**(stroke 64px + グロー、両縁に金の細線、8 本の暗いルーン切り欠き、8 個の金の点)そのもの。内側に太い金→橙の六芒星(stroke 20px + ソフトグロー)、リング上部から立ち上がる炎(朱→橙→金→白、白熱コア、火の粉)。リング内側だけ暗いヘイズで炎のコントラストを確保し、外縁に向かって透明にフェード。**魔法陣がアイコン**: リング(stroke 80)は枠いっぱい(外縁 r=504)、六芒星は内縁に接する大きさ(外接半径 400、stroke 26)、内側に点線の小円、炎は中央に 66% スケールで小さめ。確認は 256/128/64/48/32/24/16px のシートで行う。
 
 ## AI整形の「キー未設定」を見える化 + Ollama プリセット (v0.7)
 
@@ -491,3 +491,30 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 - 修正: `llm::is_configured(provider)` = API キーあり、または **kind≠anthropic かつ base_url が localhost/127.0.0.1**(Ollama 等はキー不要。Bearer ヘッダはキーがある時だけ付ける)。`use_llm` のモードでプロバイダが無い/未設定なら `WARN_LLM_NO_KEY` を done メッセージに載せる(HUD: 「✓ 貼り付けました — AI整形はスキップしました（API キー未設定）」)。
 - エラーキー: `ERR_LLM_NO_KEY|{provider name}`(接続テスト時。旧 `ERR_INTERNAL|LLM API key not set`)、`ERR_STT_NO_KEY`(クラウド STT)。12 言語に `msg.ERR_LLM_NO_KEY` `msg.ERR_STT_NO_KEY` `msg.WARN_LLM_NO_KEY` 追加。
 - 既定プロバイダに **Ollama (local, free)**(id `ollama`, kind openai, `http://localhost:11434/v1`, model `qwen2.5:7b`, キー空)を追加。既存 settings.json には defaults version 3(`modes_version` フィールドを流用、v0.6 の 2 = 忍者モード)で一度だけ追補(id `ollama` が無い場合のみ)。
+
+# v0.8 追加仕様: GPU(CUDA)版 whisper-server の自動選択
+
+## 背景
+
+- 実機(RTX 4070 Ti SUPER, 16 論理 CPU)で「変換が遅い」「字幕が出ない」: whisper large-v3-turbo を **CPU 4 スレッド**で回していたため、字幕 1 リクエストに数秒かかり短い発話では最初の字幕が出る前に離していた。whisper.cpp のリリースには CUDA ランタイム DLL 同梱の Windows x64 CUDA ビルドがあり、NVIDIA ドライバだけで動く。
+- NPU / DirectML について: whisper.cpp の配布バイナリに NPU 対応は無い(OpenVINO はエンコーダのみで別ランタイムが必要)。miomail の方式(ONNX Runtime + EP デバイス列挙: OpenVINO/VitisAI/QNN/DirectML)を fire-speak に持ち込むには STT エンジンを ONNX Runtime 系(sherpa-onnx 等)に差し替える必要があり、別バージョンの作業とする。v0.8 は whisper.cpp の CUDA ビルドまで。
+
+## 設定 / 状態
+
+- `stt.local.gpu: bool`(既定 true): 詳細設定のスイッチ「GPU を使う（NVIDIA CUDA）」。
+- `SetupStatus.gpu_available`(Windows: `%SystemRoot%\System32\nvcuda.dll` の存在 = NVIDIA ドライバあり。他 OS は false)、`SetupStatus.server_backend`("cuda" = サーバ exe の隣に `ggml-cuda.dll` がある / "cpu" / "")。
+- `default_threads()` = 論理 CPU 数 / 2 を 4..=8 に丸める(新規インストールのみ。既存の 4 は変更しない)。
+
+## サーバのダウンロード (setup.rs)
+
+- `releases/latest` 単発ではなく **`releases?per_page=10` を新しい順に走査**し、draft を除き、最初に条件を満たすアセットを持つリリースを使う(v1.9.4 のようにアセット無しの latest や、CUDA ビルドの無いリリースをスキップ)。
+- `want_cuda = settings.stt.local.gpu && gpu_available()` のとき `pick_server_asset(assets, true)`: 名前に `cublas` または `cuda`、`x64`、`arm64` を含まず `.zip`。`12.` を含むものを優先(`whisper-cublas-12.4.0-bin-x64.zip` 約 670 MB、新命名 `whisper-bin-win-cuda-12.x-x64.zip` も一致)。どのリリースにも無ければ CPU ビルドにフォールバック。
+- **ステージング方式**: `bin.new/` にダウンロード・展開し、サーバ exe が見つかることを確認してから、稼働中サーバを kill(spawn_blocking)→ 旧 `bin/` 削除 → `bin.new` を `bin` にリネーム。途中で失敗したら `bin.new` を消して旧サーバはそのまま残す。CPU/CUDA の DLL 混在も起きない。
+- 起動時: `gpu=false` かつ `server_backend == "cuda"` のときだけ `--no-gpu` を付ける(ユーザー指定の古い server_path が未知フラグで落ちないように)。`-fa`(flash attention)は whisper-server の既定で有効。シグネチャに `gpu=` を含め、切替時にサーバを再起動する。
+
+## フロントエンド
+
+- サーバカード: インストール状態の隣に **ビルドのバッジ**(`setup.backendCpu` / `setup.backendCuda`)。`gpu_available && gpu 設定 on && backend≠cuda` のとき、ヒント `setup.gpuHint` と主ボタン **「GPU 版をインストール」**(`setup.installGpu`、同じ download_whisper_server コマンド。バックエンドが CUDA アセットを選ぶ)を表示。それ以外は従来の インストール / 再インストール。
+- ロケール追加(12 言語): `setup.backendCpu` `setup.backendCuda` `setup.gpuHint` `setup.installGpu` `stt.useGpu` `stt.useGpuDesc`。
+- 字幕ループの待機 `CAPTION_PERIOD_MS` を 1200 → 700ms(GPU では 1 リクエスト 1 秒未満なので更新が滑らかになる。CPU では逐次実行なので自然に間引かれる)。
+

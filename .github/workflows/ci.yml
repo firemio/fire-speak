@@ -77,5 +77,8 @@ jobs:
       # `tauri build` runs beforeBuildCommand (tsc + vite build) first, so this
       # single step type-checks the frontend and compiles the Rust backend.
       # --no-bundle skips deb/rpm/AppImage/NSIS packaging, which CI does not need.
+      - name: Rust unit tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
       - name: Build (no bundle)
         run: npm run tauri build -- --no-bundle

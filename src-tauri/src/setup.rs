@@ -100,6 +100,43 @@ pub struct SetupStatus {
     /// Absolute path of the managed models directory ({app_data}/models).
     pub models_dir: String,
     pub models: Vec<ModelInfo>,
+    /// An NVIDIA driver is installed (Windows: nvcuda.dll present), so the
+    /// CUDA build of whisper-server can run here (v0.8).
+    pub gpu_available: bool,
+    /// Build of the installed server: "cuda" | "cpu" | "" (not installed).
+    pub server_backend: String,
+}
+
+/// Whether the NVIDIA driver (and therefore CUDA) is present on this machine.
+/// Windows only: the whisper.cpp releases ship CUDA builds for Windows x64
+/// alone, so on other platforms this is always false.
+pub fn gpu_available() -> bool {
+    #[cfg(windows)]
+    {
+        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+        Path::new(&root).join("System32").join("nvcuda.dll").exists()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// "cuda" when the ggml CUDA backend library sits next to the server
+/// executable (whisper.cpp CUDA builds ship ggml-cuda.dll), else "cpu".
+/// A heuristic for the app-managed install; a custom `server_path` packaged
+/// differently may be reported as "cpu".
+pub fn server_backend(server_exe: &Path) -> &'static str {
+    let dir = server_exe.parent().unwrap_or(server_exe);
+    let cuda = std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten().any(|e| {
+                let n = e.file_name().to_string_lossy().to_ascii_lowercase();
+                n.starts_with("ggml-cuda") && (n.ends_with(".dll") || n.ends_with(".so"))
+            })
+        })
+        .unwrap_or(false);
+    if cuda { "cuda" } else { "cpu" }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -208,11 +245,17 @@ pub fn get_setup_status(app: &AppHandle, settings: &Settings) -> Result<SetupSta
             size_mb: *size_mb,
         })
         .collect();
+    let server_backend = server
+        .as_deref()
+        .map(|p| server_backend(p).to_string())
+        .unwrap_or_default();
     Ok(SetupStatus {
         server_installed: server.is_some(),
         server_path: server
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default(),
+        gpu_available: gpu_available(),
+        server_backend,
         model_installed: model.is_some(),
         model_path: model
             .map(|p| p.to_string_lossy().to_string())
@@ -245,16 +288,18 @@ fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, S
 
     let port = settings.stt.local.server_port;
     let threads = settings.stt.local.threads;
+    let gpu = settings.stt.local.gpu;
     let server_path =
         resolve_server_path(app, settings).ok_or_else(|| SETUP_REQUIRED_MSG.to_string())?;
     let model_path =
         resolve_model_path(app, settings).ok_or_else(|| SETUP_REQUIRED_MSG.to_string())?;
     let signature = format!(
-        "{}|{}|{}|{}",
+        "{}|{}|{}|{}|gpu={}",
         server_path.display(),
         model_path.display(),
         port,
-        threads
+        threads,
+        gpu
     );
 
     let state = app.state::<crate::AppState>();
@@ -295,7 +340,7 @@ fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, S
     }
 
     // We own `server_starting`: spawn + health-check with no lock held.
-    let result = spawn_and_health_check(&server_path, &model_path, port, threads, signature);
+    let result = spawn_and_health_check(&server_path, &model_path, port, threads, gpu, signature);
     let mut guard = state.server.lock().unwrap();
     state.server_starting.store(false, Ordering::SeqCst);
     match result {
@@ -312,6 +357,7 @@ fn spawn_and_health_check(
     model_path: &Path,
     port: u16,
     threads: u32,
+    gpu: bool,
     signature: String,
 ) -> Result<ManagedServer, String> {
     // Refuse to spawn onto a port something already listens on (e.g. an
@@ -333,8 +379,14 @@ fn spawn_and_health_check(
         .arg("--host")
         .arg("127.0.0.1")
         .arg("-t")
-        .arg(threads.to_string())
-        .stdin(Stdio::null())
+        .arg(threads.to_string());
+    if !gpu && server_backend(server_path) == "cuda" {
+        // CUDA build with the GPU switched off in settings: stay on the CPU.
+        // Only the CUDA build gets the flag, so a user-supplied server_path
+        // pointing at an older binary that lacks `--no-gpu` keeps working.
+        cmd.arg("--no-gpu");
+    }
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     if let Some(parent) = server_path.parent() {
@@ -562,14 +614,38 @@ const SERVER_ARCHIVE_TMP: &str = "_whisper-server-download.tar.gz";
 
 /// Pick the whisper.cpp release asset for this platform + architecture.
 ///
-/// Windows x64: `whisper-bin-x64.zip` (fallback `(?i)win.*x64.*\.zip`).
-/// Linux: `whisper-bin-ubuntu-x64.tar.gz` / `whisper-bin-ubuntu-arm64.tar.gz`
-/// (asset names verified against the ggml-org/whisper.cpp releases API).
-fn pick_server_asset(assets: &[serde_json::Value]) -> Option<&serde_json::Value> {
+/// Windows x64, `want_cuda`: the CUDA build (`whisper-cublas-12.x-bin-x64.zip`
+/// or the newer `whisper-bin-win-cuda-12.x-x64.zip`; 12.x preferred over
+/// 11.x). It bundles the CUDA runtime DLLs (release.yml "Copy CUDA DLLs"), so
+/// no toolkit install is needed — only the NVIDIA driver.
+/// Windows x64 otherwise: `whisper-bin-x64.zip` (fallback `win…x64….zip`).
+/// Linux: `whisper-bin-ubuntu-x64.tar.gz` / `whisper-bin-ubuntu-arm64.tar.gz`.
+/// Returns None when this release carries no suitable asset (the caller then
+/// tries the next release: `releases/latest` is sometimes tagged before its
+/// binaries are uploaded).
+fn pick_server_asset<'a>(
+    assets: &'a [serde_json::Value],
+    want_cuda: bool,
+) -> Option<&'a serde_json::Value> {
     let name = |a: &serde_json::Value| a["name"].as_str().unwrap_or("").to_lowercase();
 
     #[cfg(windows)]
     {
+        if want_cuda {
+            let is_cuda_x64 = |n: &str| {
+                (n.contains("cublas") || n.contains("cuda"))
+                    && n.contains("x64")
+                    && !n.contains("arm64")
+                    && n.ends_with(".zip")
+            };
+            return assets
+                .iter()
+                .find(|a| {
+                    let n = name(a);
+                    is_cuda_x64(&n) && n.contains("12.")
+                })
+                .or_else(|| assets.iter().find(|a| is_cuda_x64(&name(a))));
+        }
         assets
             .iter()
             .find(|a| {
@@ -579,12 +655,18 @@ fn pick_server_asset(assets: &[serde_json::Value]) -> Option<&serde_json::Value>
             .or_else(|| {
                 assets.iter().find(|a| {
                     let n = name(a);
-                    n.contains("win") && n.contains("x64") && n.ends_with(".zip")
+                    n.contains("win")
+                        && n.contains("x64")
+                        && !n.contains("arm64")
+                        && !n.contains("cuda")
+                        && !n.contains("cublas")
+                        && n.ends_with(".zip")
                 })
             })
     }
     #[cfg(target_os = "linux")]
     {
+        let _ = want_cuda;
         let arch = if cfg!(target_arch = "aarch64") {
             "arm64"
         } else {
@@ -602,8 +684,7 @@ fn pick_server_asset(assets: &[serde_json::Value]) -> Option<&serde_json::Value>
     }
     #[cfg(not(any(windows, target_os = "linux")))]
     {
-        let _ = name;
-        let _ = assets;
+        let _ = (name, assets, want_cuda);
         None
     }
 }
@@ -637,8 +718,11 @@ pub async fn download_whisper_server(app: AppHandle) -> Result<(), String> {
 
 async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
     let client = download_client()?;
-    let release: serde_json::Value = client
-        .get("https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest")
+    // Newest releases first. `releases/latest` alone is not enough: whisper.cpp
+    // sometimes tags a release before CI has uploaded its binaries (v1.9.4 had
+    // no assets at all), and not every release carries the CUDA build.
+    let releases: Vec<serde_json::Value> = client
+        .get("https://api.github.com/repos/ggml-org/whisper.cpp/releases?per_page=10")
         .header("Accept", "application/vnd.github+json")
         .send()
         .await
@@ -647,11 +731,35 @@ async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
         .map_err(|e| format!("ERR_DOWNLOAD_FAILED|GitHub API: {e}"))?
         .json()
         .await
-        .map_err(|e| format!("ERR_DOWNLOAD_FAILED|parse release: {e}"))?;
+        .map_err(|e| format!("ERR_DOWNLOAD_FAILED|parse releases: {e}"))?;
 
+    let want_cuda = {
+        let gpu_setting = app
+            .state::<crate::AppState>()
+            .settings
+            .lock()
+            .unwrap()
+            .stt
+            .local
+            .gpu;
+        gpu_setting && gpu_available()
+    };
     let empty = Vec::new();
-    let assets = release["assets"].as_array().unwrap_or(&empty);
-    let picked = pick_server_asset(assets).ok_or_else(|| "ERR_NO_SERVER_ASSET".to_string())?;
+    let picked = releases
+        .iter()
+        .filter(|r| !r["draft"].as_bool().unwrap_or(false))
+        .find_map(|r| pick_server_asset(r["assets"].as_array().unwrap_or(&empty), want_cuda))
+        .or_else(|| {
+            // no CUDA asset anywhere: fall back to the CPU build rather than fail
+            if want_cuda {
+                releases.iter().find_map(|r| {
+                    pick_server_asset(r["assets"].as_array().unwrap_or(&empty), false)
+                })
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| "ERR_NO_SERVER_ASSET".to_string())?;
 
     let name = picked["name"].as_str().unwrap_or("").to_string();
     let url = picked["browser_download_url"]
@@ -660,24 +768,64 @@ async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
         .to_string();
 
     let bin = bin_dir(app)?;
-    tokio::fs::create_dir_all(&bin)
+    // Stage the new build in a sibling directory and only replace the
+    // existing install once the download extracted and contains a server
+    // executable. A failed download therefore leaves the old server intact,
+    // and the swap guarantees CPU and CUDA files never mix (both archives
+    // extract to `Release/`, so stale ggml-*.dll files could otherwise shadow
+    // the new backend).
+    let staging = bin.with_file_name("bin.new");
+    if staging.exists() {
+        let _ = tokio::fs::remove_dir_all(&staging).await;
+    }
+    tokio::fs::create_dir_all(&staging)
         .await
         .map_err(|e| format!("ERR_FILE_IO|create dir: {e}"))?;
-    let archive_path = bin.join(SERVER_ARCHIVE_TMP);
+    let archive_path = staging.join(SERVER_ARCHIVE_TMP);
 
-    let (downloaded, total) =
-        stream_download(app, &client, &url, &archive_path, "server", &name).await?;
+    let staged = async {
+        let (downloaded, total) =
+            stream_download(app, &client, &url, &archive_path, "server", &name).await?;
 
-    // extract in a blocking thread; the temp archive is removed on every outcome
-    let bin2 = bin.clone();
-    let archive2 = archive_path.clone();
-    let extract_result =
-        tokio::task::spawn_blocking(move || extract_server_archive(&archive2, &bin2))
+        // extract in a blocking thread; the temp archive is removed on every outcome
+        let staging2 = staging.clone();
+        let archive2 = archive_path.clone();
+        let extract_result =
+            tokio::task::spawn_blocking(move || extract_server_archive(&archive2, &staging2))
+                .await
+                .map_err(|e| format!("ERR_INTERNAL|extract: {e}"))
+                .and_then(|r| r);
+        let _ = tokio::fs::remove_file(&archive_path).await;
+        extract_result?;
+
+        if find_server_exe(&staging).is_none() {
+            return Err("ERR_NO_SERVER_ASSET".to_string());
+        }
+        Ok::<(u64, u64), String>((downloaded, total))
+    }
+    .await;
+    let (downloaded, total) = match staged {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = tokio::fs::remove_dir_all(&staging).await;
+            return Err(e);
+        }
+    };
+
+    // Swap: stop the running server (blocking kill/wait, off the async
+    // worker), drop the old install, move the verified one into place.
+    let app_kill = app.clone();
+    tokio::task::spawn_blocking(move || crate::setup::kill_server(&app_kill))
+        .await
+        .map_err(|e| format!("ERR_INTERNAL|kill server: {e}"))?;
+    if bin.exists() {
+        tokio::fs::remove_dir_all(&bin)
             .await
-            .map_err(|e| format!("ERR_INTERNAL|extract: {e}"))
-            .and_then(|r| r);
-    let _ = tokio::fs::remove_file(&archive_path).await;
-    extract_result?;
+            .map_err(|e| format!("ERR_FILE_IO|remove old server: {e}"))?;
+    }
+    tokio::fs::rename(&staging, &bin)
+        .await
+        .map_err(|e| format!("ERR_FILE_IO|install server: {e}"))?;
 
     let Some(server_exe) = find_server_exe(&bin) else {
         return Err("ERR_NO_SERVER_ASSET".to_string());
@@ -862,3 +1010,59 @@ async fn download_model_inner(app: &AppHandle, model: &str) -> Result<(), String
     );
     Ok(())
 }
+
+#[cfg(all(test, windows))]
+mod asset_tests {
+    use super::pick_server_asset;
+
+    /// Asset names of whisper.cpp release b5130 (verified via the GitHub API).
+    fn b5130() -> Vec<serde_json::Value> {
+        [
+            "whisper-b5130-xcframework.zip",
+            "whisper-bin-ubuntu-arm64.tar.gz",
+            "whisper-bin-ubuntu-x64.tar.gz",
+            "whisper-bin-win-cpu-arm64.zip",
+            "whisper-bin-win-cuda-13.4-arm64.zip",
+            "whisper-bin-win-opencl-adreno-arm64.zip",
+            "whisper-bin-Win32.zip",
+            "whisper-bin-x64.zip",
+            "whisper-blas-bin-Win32.zip",
+            "whisper-blas-bin-x64.zip",
+            "whisper-cublas-11.8.0-bin-x64.zip",
+            "whisper-cublas-12.4.0-bin-x64.zip",
+        ]
+        .iter()
+        .map(|n| serde_json::json!({ "name": n }))
+        .collect()
+    }
+
+    fn name(a: Option<&serde_json::Value>) -> &str {
+        a.and_then(|a| a["name"].as_str()).unwrap_or("")
+    }
+
+    #[test]
+    fn cuda_prefers_the_12x_x64_build() {
+        assert_eq!(name(pick_server_asset(&b5130(), true)), "whisper-cublas-12.4.0-bin-x64.zip");
+    }
+
+    #[test]
+    fn cpu_picks_the_plain_x64_build() {
+        assert_eq!(name(pick_server_asset(&b5130(), false)), "whisper-bin-x64.zip");
+    }
+
+    #[test]
+    fn cuda_accepts_the_newer_naming_and_skips_arm64() {
+        let assets: Vec<serde_json::Value> = ["whisper-bin-win-cuda-13.4-arm64.zip", "whisper-bin-win-cuda-12.4-x64.zip"]
+            .iter()
+            .map(|n| serde_json::json!({ "name": n }))
+            .collect();
+        assert_eq!(name(pick_server_asset(&assets, true)), "whisper-bin-win-cuda-12.4-x64.zip");
+    }
+
+    #[test]
+    fn release_without_assets_yields_none() {
+        assert!(pick_server_asset(&[], true).is_none());
+        assert!(pick_server_asset(&[], false).is_none());
+    }
+}
+

@@ -119,6 +119,10 @@ pub struct LocalSttSettings {
     pub server_path: String,
     #[serde(default = "default_threads")]
     pub threads: u32,
+    /// Use the GPU (NVIDIA CUDA build of whisper-server) when one is present
+    /// (v0.8). Off = CPU build / `--no-gpu`.
+    #[serde(default = "default_true")]
+    pub gpu: bool,
 }
 
 impl Default for LocalSttSettings {
@@ -127,6 +131,7 @@ impl Default for LocalSttSettings {
             server_port: default_server_port(),
             model_path: String::new(),
             server_path: String::new(),
+            gpu: true,
             threads: default_threads(),
         }
     }
@@ -224,8 +229,13 @@ fn default_stt_engine() -> String {
 fn default_server_port() -> u16 {
     8178
 }
+/// CPU threads for whisper-server: about the physical core count (half the
+/// logical CPUs), clamped to 4..=8 — more than that gives diminishing returns
+/// on whisper.cpp and starves the rest of the desktop.
 fn default_threads() -> u32 {
-    4
+    std::thread::available_parallelism()
+        .map(|n| (n.get() as u32 / 2).clamp(4, 8))
+        .unwrap_or(4)
 }
 fn default_cloud_base_url() -> String {
     "https://api.openai.com/v1".to_string()

@@ -312,6 +312,7 @@ function renderSttSection(): void {
 
   input("in-local-port").value = String(settings.stt.local.server_port);
   input("in-local-threads").value = String(settings.stt.local.threads);
+  input("in-local-gpu").checked = settings.stt.local.gpu;
   input("in-local-model-path").value = settings.stt.local.model_path;
   input("in-local-server-path").value = settings.stt.local.server_path;
 
@@ -431,6 +432,12 @@ function wireSttSection(): void {
       settings.stt.local.server_port = v;
       scheduleSave();
     }
+  });
+  input("in-local-gpu").addEventListener("change", () => {
+    if (!settings) return;
+    settings.stt.local.gpu = input("in-local-gpu").checked;
+    renderServerCard();
+    scheduleSave();
   });
   input("in-local-threads").addEventListener("input", () => {
     if (!settings) return;
@@ -1176,12 +1183,16 @@ function downloadKey(kind: string, name: string): string {
 function renderServerCard(): void {
   const s = setupStatus;
   const serverBadge = $("server-badge");
+  const backendBadge = $("server-backend-badge");
+  const gpuHint = $("server-gpu-hint");
   const serverPath = $("server-path");
   const installBtn = $("btn-install-server") as HTMLButtonElement;
 
   if (!s) {
     serverBadge.textContent = t("setup.checking");
     serverBadge.className = "badge";
+    backendBadge.hidden = true;
+    gpuHint.hidden = true;
     serverPath.textContent = "—";
     installBtn.disabled = true;
     return;
@@ -1190,7 +1201,22 @@ function renderServerCard(): void {
   serverBadge.textContent = s.server_installed ? t("common.installed") : t("common.notInstalled");
   serverBadge.className = `badge${s.server_installed ? " ok" : ""}`;
   serverPath.textContent = s.server_path || "—";
-  installBtn.textContent = s.server_installed ? t("setup.reinstall") : t("setup.install");
+
+  // Which build is installed, and whether a faster one is available (v0.8):
+  // an NVIDIA driver + the GPU switch on, but a CPU build (or nothing) on disk.
+  const wantGpu = (settings?.stt.local.gpu ?? true) && s.gpu_available;
+  const hasCuda = s.server_backend === "cuda";
+  backendBadge.hidden = !s.server_installed;
+  backendBadge.textContent = hasCuda ? t("setup.backendCuda") : t("setup.backendCpu");
+  backendBadge.className = `badge${hasCuda ? " accent" : ""}`;
+  const offerGpu = wantGpu && !hasCuda;
+  gpuHint.hidden = !offerGpu;
+  installBtn.textContent = offerGpu
+    ? t("setup.installGpu")
+    : s.server_installed
+      ? t("setup.reinstall")
+      : t("setup.install");
+  installBtn.className = `btn btn-sm${offerGpu || !s.server_installed ? " btn-primary" : ""}`;
   installBtn.disabled = activeDownloads.has(downloadKey("server", "whisper-server"));
 }
 

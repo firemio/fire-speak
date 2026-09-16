@@ -31,7 +31,7 @@ const TAP_LOCK_MS: u64 = 400;
 // emitted as `caption` for the HUD. The final result still comes from the
 // full recording in run_pipeline.
 /// Pause between the end of one caption request and the next snapshot.
-const CAPTION_PERIOD_MS: u64 = 1200;
+const CAPTION_PERIOD_MS: u64 = 700;
 /// Skip a tick unless at least this much new audio arrived since the last one.
 const CAPTION_MIN_NEW_SECS: f32 = 0.8;
 /// Once the open window is this long its text is committed and a new window

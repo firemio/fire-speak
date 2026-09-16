@@ -11,6 +11,8 @@ export interface LocalSttSettings {
   model_path: string;
   server_path: string;
   threads: number;
+  /** Use the GPU (CUDA build) when available (v0.8). */
+  gpu: boolean;
 }
 
 export interface CloudSttSettings {
@@ -96,6 +98,10 @@ export interface SetupStatus {
   /** Absolute path of the managed models directory ({app_data}/models). */
   models_dir: string;
   models: SetupModelInfo[];
+  /** NVIDIA driver present: the CUDA whisper-server build can run (v0.8). */
+  gpu_available: boolean;
+  /** Installed server build: "cuda" | "cpu" | "" (not installed). */
+  server_backend: string;
 }
 
 export type AppStatus =

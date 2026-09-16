@@ -118,8 +118,9 @@
             <div class="card setup-card" id="setup-server-card">
               <div class="setup-row">
                 <div class="setup-info">
-                  <div class="setup-name">whisper-server <span class="badge" id="server-badge">未インストール</span></div>
+                  <div class="setup-name">whisper-server <span class="badge" id="server-badge">未インストール</span> <span class="badge" id="server-backend-badge" hidden></span></div>
                   <div class="setup-path mono" id="server-path">—</div>
+                  <div class="hint" id="server-gpu-hint" hidden data-i18n="setup.gpuHint">NVIDIA GPU を検出しました。GPU 版の whisper-server にすると認識が数倍速くなります（約 670 MB）</div>
                 </div>
                 <button class="btn btn-primary btn-sm" id="btn-install-server">インストール</button>
               </div>
@@ -146,6 +147,15 @@
                   <span class="field-label" data-i18n="stt.threads">スレッド数</span>
                   <input type="number" id="in-local-threads" min="1" max="64" />
                 </label>
+                <div class="switch-rows field-wide">
+                  <label class="switch-row">
+                    <span>
+                      <span class="switch-title" data-i18n="stt.useGpu">GPU を使う（NVIDIA CUDA）</span>
+                      <span class="switch-desc" data-i18n="stt.useGpuDesc">オフにすると CPU で処理します。GPU 版の whisper-server が必要です</span>
+                    </span>
+                    <input type="checkbox" id="in-local-gpu" class="switch" />
+                  </label>
+                </div>
                 <label class="field field-wide">
                   <span class="field-label" data-i18n="stt.modelPathOverride">モデルパス上書き (空 = 既定)</span>
                   <input type="text" id="in-local-model-path" placeholder="C:\...\ggml-base.bin" spellcheck="false" />
