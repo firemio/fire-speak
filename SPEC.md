@@ -168,7 +168,7 @@ user メッセージ = STTの生テキスト。
 4. **モード**: 一覧+追加/編集/削除(name, instruction, use_llm)。デフォルトモードも編集可。ドラッグ並べ替えは不要
 5. **履歴**: 一覧(時刻・モード・整形後テキスト、クリックで生テキストも展開)、コピー(copy_text)、全消去
 6. **一般**: ホットキー変更(キー押下キャプチャ式: Ctrl/Alt/Shift+キー → "Ctrl+Alt+Space"形式の文字列)、認識言語(自動判定 + 11言語、v0.5)、paste_mode、restore_clipboard、autostart、live_caption(v0.5)
-7. **セットアップ**: setup_status表示、whisper-serverインストールボタン、モデル一覧とDLボタン、進捗バー(download-progress)、open_config_dir
+7. ~~**セットアップ**~~ (v0.6 で **音声認識** に統合: whisper-server カードとモデル一覧+DLボタン+進捗バー、open_config_dir はローカルパネル内)
 
 - 保存は明示ボタンでなく **変更時に自動保存**(debounce 500ms で save_settings)。ただしAPIキー入力はblurで保存。
 - `settings-changed` 受信で再描画(無限ループ注意: 自分のsave由来は無視してよい)。
@@ -420,4 +420,39 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 - `#caption`: 最大3行(`max-height: calc(1.45em * 3); overflow: hidden`)、更新毎に `scrollTop = scrollHeight` で**末尾(いま話している部分)**を表示。録音中は末尾に点滅カーソル。`:empty` で非表示。
 - `caption` イベントは status が recording のときだけ反映。`recording` / `idle` の status で字幕をクリア。transcribing / polishing / done 中は最後の字幕を残す。
 - `types.ts`: `Settings.live_caption`, `CaptionPayload { text }`。
+
+# v0.6 追加仕様: ワンクリック自動アップデート
+
+## 方針
+
+- 更新の**確認**は従来どおり `update.rs`(GitHub API `releases/latest`、リリースノート表示用)。更新の**適用**は `tauri-plugin-updater` に任せる(署名検証・ダウンロード・インストーラ起動・再起動を自前実装しない)。
+- 署名: minisign 鍵ペア。公開鍵は `tauri.conf.json` の `plugins.updater.pubkey`。秘密鍵は開発者ローカル `~/.tauri/fire-speak.key`(パスワード無し)と GitHub Secrets `TAURI_SIGNING_PRIVATE_KEY`。**秘密鍵を失うと以後の自動更新が不可能になる**(新しい鍵で署名したビルドは既存インストールが拒否する)。
+- `bundle.createUpdaterArtifacts: true` で各バンドルに `.sig` を生成。release.yml の tauri-action は `uploadUpdaterJson: true` で `latest.json` をリリースに載せ、4 つのマトリクスジョブがそれぞれ自分のプラットフォームをマージする。`updaterJsonPreferNsis: true`: インストール済みアプリは NSIS 版なので `windows-x86_64` は setup.exe を指す(MSI を重ねると二重インストールになる)。build.yml(手動テストビルド)も署名鍵が必要(無いとバンドルが失敗する)。
+
+## バックエンド (`install_update` コマンド)
+
+1. settings.update の owner/repo から endpoint `https://github.com/{owner}/{repo}/releases/latest/download/latest.json` を組み、`updater_builder().endpoints([...]).on_before_exit(kill_server).build()`。
+2. `check()` → None なら `ERR_UPDATE_INSTALL|no update available`。
+3. `download_and_install(on_chunk, on_finished)`: `update-progress {phase:"download", downloaded, total, version}` を chunk 毎に、`{phase:"install"}` を完了時に emit。
+4. Windows: プラグインが NSIS を `/P`(passive) + `/UPDATE` + 再起動指定で起動し、`std::process::exit(0)` で終了する(RunEvent::Exit は発火しないため whisper-server は `on_before_exit` で停止)。Linux: AppImage は置換、deb/rpm は `dpkg -i` / `rpm` (権限昇格はプラグイン側)、その後 `kill_server` → `app.restart()`。
+5. 失敗はすべて `ERR_UPDATE_INSTALL|{detail}`。
+
+## フロントエンド
+
+- ホームのバナーと「アップデート」セクションのボタンは「今すぐアップデート」(`update.install`)。押すと `install_update` を invoke し、`update-progress` を `update.downloading`(`{0}` = `NN%` または `N.N MB`) / `update.installing` として両方の場所に表示。実行中は確認ボタン含め無効化。
+- 成功時は UI 更新なし(プロセスが置き換わる)。失敗時は `msg.ERR_UPDATE_INSTALL` をトースト、バナーとセクションに「ダウンロードページを開く」(`update.openDownload`)をフォールバックとして表示。
+- ロケール追加(12言語): `update.install` `update.downloading` `update.installing` `msg.ERR_UPDATE_INSTALL`。
+
+## 注意
+
+- 0.5.0 以前のインストールにはこのプラグインが無いので、0.6.0 への更新だけは手動インストール。以後はワンクリック。
+- 設定で owner/repo を変えたフォークは、そのリリースが同じ秘密鍵で署名されていなければ更新できない(署名検証で拒否)。
+
+## 設定画面の整理 (v0.6)
+
+- ナビ順: **ホーム / 一般 / 音声認識 / AI整形 / モード / 履歴 / アップデート**(7 項目)。「セットアップ」は廃止し音声認識のローカルパネルへ統合。`SECTION_NAMES` と `nav.*` キーを同期(`nav.setup` 削除)。
+- **一般**は 4 カード構成、上から: 言語(表示言語・認識言語) → ホットキー(キー・動作) → 貼り付け(貼り付け方法・クリップボード復元・リアルタイム字幕) → システム(自動起動・履歴保存件数)。見出し h2「一般設定」は廃止(タイトルバーと重複)。カードタイトルのキー: `general.languageHeading` `general.hotkeyHeading` `general.outputHeading` `general.systemHeading`。
+- **音声認識(ローカル)**: whisper-server カード(旧セットアップのバッジ/パス/インストールボタン/進捗) → モデル選択カード(1 行 = 選択ラジオ + サイズ/状態 + ダウンロード/再ダウンロードボタン + 進捗バー。未インストール行は選択不可だがダウンロードは可) → 詳細設定。接続テストの行に「設定フォルダを開く」。`stt.modelHint` に一本化(`stt.modelHintPre/Link/Post` 削除)。`msg.ERR_SETUP_REQUIRED` の文言は「音声認識」画面を指すよう 12 言語更新。
+- **既定モードに「忍者口調」(id `ninja`, use_llm) を追加**(12 言語、`locale::ninja_mode_for`)。日本語は一人称「拙者」・文末「〜でござる」。既存 settings.json には `modes_version`(新フィールド、既定 0、現行 2)による**一度だけの追補**: `load` 時に `modes_version < 2` かつ id `ninja` が無ければ UI 言語で生成して末尾に追加し、`modes_version = 2` で保存。ユーザーが削除した後に復活しない。
+- **ホーム**: アクティブモードはカードグリッドではなく**チップ列**(`.mode-chips` / `.mode-chip-btn`、名前のみ・説明は title)。バナー / ヒーロー / 直近履歴 3 件は維持。
 

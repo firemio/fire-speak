@@ -19,6 +19,9 @@
           <button class="nav-item is-active" data-section="home">
             <span class="nav-icon">🏠</span><span data-i18n="nav.home">ホーム</span>
           </button>
+          <button class="nav-item" data-section="general">
+            <span class="nav-icon">⚙️</span><span data-i18n="nav.general">一般</span>
+          </button>
           <button class="nav-item" data-section="stt">
             <span class="nav-icon">🎙️</span><span data-i18n="nav.stt">音声認識</span>
           </button>
@@ -30,12 +33,6 @@
           </button>
           <button class="nav-item" data-section="history">
             <span class="nav-icon">🕘</span><span data-i18n="nav.history">履歴</span>
-          </button>
-          <button class="nav-item" data-section="general">
-            <span class="nav-icon">⚙️</span><span data-i18n="nav.general">一般</span>
-          </button>
-          <button class="nav-item" data-section="setup">
-            <span class="nav-icon">📦</span><span data-i18n="nav.setup">セットアップ</span>
           </button>
           <button class="nav-item" data-section="update">
             <span class="nav-icon">🔄</span><span data-i18n="nav.update">アップデート</span>
@@ -63,7 +60,8 @@
           <div class="update-banner" id="update-banner" hidden>
             <span class="update-banner-icon">🔄</span>
             <span class="update-banner-text" id="update-banner-text"></span>
-            <button class="btn btn-primary btn-sm" id="btn-banner-open" data-i18n="update.openDownload">ダウンロードページを開く</button>
+            <button class="btn btn-primary btn-sm" id="btn-banner-install" data-i18n="update.install">今すぐアップデート</button>
+            <button class="btn btn-sm" id="btn-banner-open" data-i18n="update.openDownload" hidden>ダウンロードページを開く</button>
             <button class="icon-btn" id="btn-banner-close" data-i18n-title="common.close" title="閉じる">✕</button>
           </div>
 
@@ -81,7 +79,7 @@
           </div>
 
           <h2 class="section-heading" data-i18n="home.activeMode">アクティブモード</h2>
-          <div class="mode-grid" id="home-modes"></div>
+          <div class="mode-chips" id="home-modes"></div>
 
           <h2 class="section-heading" data-i18n="home.recent">直近の履歴</h2>
           <div class="recent-list" id="home-recent"></div>
@@ -96,13 +94,23 @@
           </div>
 
           <div id="stt-local-panel">
+            <div class="card setup-card" id="setup-server-card">
+              <div class="setup-row">
+                <div class="setup-info">
+                  <div class="setup-name">whisper-server <span class="badge" id="server-badge">未インストール</span></div>
+                  <div class="setup-path mono" id="server-path">—</div>
+                </div>
+                <button class="btn btn-primary btn-sm" id="btn-install-server">インストール</button>
+              </div>
+              <div class="progress" id="server-progress" hidden>
+                <div class="progress-bar" id="server-progress-bar"></div>
+                <span class="progress-text" id="server-progress-text"></span>
+              </div>
+            </div>
+
             <div class="card">
               <div class="card-title" data-i18n="stt.modelSelect">モデル選択</div>
-              <div class="hint">
-                <span data-i18n="stt.modelHintPre">使用する Whisper モデルを選択します。未インストールのモデルは</span>
-                <a href="#" id="link-goto-setup" data-i18n="stt.modelHintLink">セットアップ</a>
-                <span data-i18n="stt.modelHintPost">からダウンロードできます。</span>
-              </div>
+              <div class="hint" data-i18n="stt.modelHint">使用する Whisper モデルを選びます。未インストールのモデルはここからダウンロードできます</div>
               <div class="model-select-list" id="stt-model-list"></div>
             </div>
 
@@ -153,6 +161,7 @@
 
           <div class="test-row">
             <button class="btn" id="btn-test-stt" data-i18n="stt.testBtn">🔌 接続テスト</button>
+            <button class="btn btn-ghost" id="btn-open-config" data-i18n="setup.openConfig">📂 設定フォルダを開く</button>
             <span class="test-result" id="stt-test-result"></span>
           </div>
         </section>
@@ -192,8 +201,22 @@
 
         <!-- 一般 -->
         <section class="section" id="section-general">
-          <h2 class="section-heading" data-i18n="general.heading">一般設定</h2>
           <div class="card">
+            <div class="card-title" data-i18n="general.languageHeading">言語</div>
+            <div class="form-grid">
+              <label class="field">
+                <span class="field-label" data-i18n="general.uiLang">表示言語</span>
+                <select id="in-ui-lang"></select>
+              </label>
+              <label class="field">
+                <span class="field-label" data-i18n="general.language">認識言語</span>
+                <select id="in-language"></select>
+              </label>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title" data-i18n="general.hotkeyHeading">ホットキー</div>
             <div class="form-grid">
               <label class="field field-wide">
                 <span class="field-label" data-i18n="general.hotkey">グローバルホットキー</span>
@@ -214,24 +237,18 @@
                   <button type="button" data-mode="toggle" data-i18n="general.hotkeyModeToggle">押すたびに開始／停止</button>
                 </div>
               </div>
-              <label class="field">
-                <span class="field-label" data-i18n="general.uiLang">表示言語</span>
-                <select id="in-ui-lang"></select>
-              </label>
-              <label class="field">
-                <span class="field-label" data-i18n="general.language">認識言語</span>
-                <select id="in-language"></select>
-              </label>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title" data-i18n="general.outputHeading">貼り付け</div>
+            <div class="form-grid">
               <label class="field">
                 <span class="field-label" data-i18n="general.pasteMode">貼り付け方法</span>
                 <select id="in-paste-mode">
                   <option value="paste" data-i18n="general.pasteAuto">自動貼り付け (Ctrl+V送信)</option>
                   <option value="clipboard" data-i18n="general.pasteClipboard">クリップボードにコピーのみ</option>
                 </select>
-              </label>
-              <label class="field">
-                <span class="field-label" data-i18n="general.historyLimit">履歴保存件数</span>
-                <input type="number" id="in-history-limit" min="0" max="1000" />
               </label>
             </div>
             <div class="switch-rows">
@@ -244,13 +261,6 @@
               </label>
               <label class="switch-row">
                 <span>
-                  <span class="switch-title" data-i18n="general.autostart">Windows 起動時に自動起動</span>
-                  <span class="switch-desc" data-i18n="general.autostartDesc">サインイン時に fire-speak を常駐開始します</span>
-                </span>
-                <input type="checkbox" id="in-autostart" class="switch" />
-              </label>
-              <label class="switch-row">
-                <span>
                   <span class="switch-title" data-i18n="general.liveCaption">リアルタイム字幕</span>
                   <span class="switch-desc" data-i18n="general.liveCaptionDesc">録音中に認識途中のテキストをポップアップに表示します（クラウド認識ではリクエスト数が増えます）</span>
                 </span>
@@ -258,34 +268,24 @@
               </label>
             </div>
           </div>
-        </section>
 
-        <!-- セットアップ -->
-        <section class="section" id="section-setup">
-          <h2 class="section-heading" data-i18n="setup.heading">ローカル音声認識のセットアップ</h2>
-          <div class="hint" data-i18n="setup.hint">
-            ローカルエンジンを使うには whisper-server 本体と、いずれかのモデルが必要です。
-          </div>
-
-          <div class="card setup-card" id="setup-server-card">
-            <div class="setup-row">
-              <div class="setup-info">
-                <div class="setup-name">whisper-server <span class="badge" id="server-badge">未インストール</span></div>
-                <div class="setup-path mono" id="server-path">—</div>
-              </div>
-              <button class="btn btn-primary btn-sm" id="btn-install-server">インストール</button>
+          <div class="card">
+            <div class="card-title" data-i18n="general.systemHeading">システム</div>
+            <div class="switch-rows">
+              <label class="switch-row">
+                <span>
+                  <span class="switch-title" data-i18n="general.autostart">Windows 起動時に自動起動</span>
+                  <span class="switch-desc" data-i18n="general.autostartDesc">サインイン時に fire-speak を常駐開始します</span>
+                </span>
+                <input type="checkbox" id="in-autostart" class="switch" />
+              </label>
             </div>
-            <div class="progress" id="server-progress" hidden>
-              <div class="progress-bar" id="server-progress-bar"></div>
-              <span class="progress-text" id="server-progress-text"></span>
+            <div class="form-grid">
+              <label class="field">
+                <span class="field-label" data-i18n="general.historyLimit">履歴保存件数</span>
+                <input type="number" id="in-history-limit" min="0" max="1000" />
+              </label>
             </div>
-          </div>
-
-          <h2 class="section-heading" data-i18n="setup.modelsHeading">モデル</h2>
-          <div class="stack" id="setup-model-list"></div>
-
-          <div class="test-row">
-            <button class="btn" id="btn-open-config" data-i18n="setup.openConfig">📂 設定フォルダを開く</button>
           </div>
         </section>
 
@@ -307,7 +307,11 @@
                 <div class="field-label" data-i18n="update.notes">リリースノート</div>
                 <pre class="update-notes" id="update-notes"></pre>
               </div>
-              <button class="btn" id="btn-open-download" data-i18n="update.openDownload" hidden>ダウンロードページを開く</button>
+              <div class="test-row">
+                <button class="btn btn-primary" id="btn-install-update" data-i18n="update.install" hidden>今すぐアップデート</button>
+                <button class="btn" id="btn-open-download" data-i18n="update.openDownload" hidden>ダウンロードページを開く</button>
+                <span class="test-result" id="update-install-result"></span>
+              </div>
             </div>
           </div>
 

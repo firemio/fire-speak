@@ -1172,3 +1172,66 @@ input.switch:focus-visible {
   color: var(--text-dim);
   margin: 6px 0 12px;
 }
+
+/* ---------- home: compact mode chips (v0.6) ---------- */
+
+.mode-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mode-chip-btn {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg-raise);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, transform 0.06s ease;
+}
+
+.mode-chip-btn:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-raise-2);
+}
+
+.mode-chip-btn:active {
+  transform: translateY(1px);
+}
+
+.mode-chip-btn.is-active {
+  color: var(--accent-2);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+/* ---------- stt: model row = option + download button + progress (v0.6) ---------- */
+
+.model-row-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.model-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-row .model-option {
+  flex: 1;
+  min-width: 0;
+}
+
+.model-row .btn {
+  flex: none;
+}
+
+.model-row-wrap .progress {
+  margin-top: 6px;
+}

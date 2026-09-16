@@ -1,6 +1,6 @@
 [package]
 name = "fire-speak"
-version = "0.5.0"
+version = "0.6.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -35,6 +35,8 @@ uuid = { version = "1.26.0", features = ["v4"] }
 tokio = { version = "1.53.1", features = ["full"] }
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "multipart", "stream", "rustls"] }
 sys-locale = "0.3.2"
+tauri-plugin-updater = "2.11.0"
+url = "2.5.8"
 
 # --- Windows-only -----------------------------------------------------------
 # win32job: kill-on-close Job Object for the managed whisper-server.

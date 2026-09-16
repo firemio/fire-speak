@@ -437,6 +437,78 @@ async fn check_update(app: AppHandle) -> Result<update::UpdateInfo, String> {
     update::check(&owner, &repo, &current).await
 }
 
+/// Download, verify (minisign, pubkey in tauri.conf.json) and install the
+/// latest release with tauri-plugin-updater, then relaunch (SPEC v0.6).
+/// Progress is streamed as `update-progress`. On Windows the installer is
+/// started in passive mode and this process exits inside the plugin; on Linux
+/// the package is installed in place and the app restarts itself.
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let err = |detail: String| format!("ERR_UPDATE_INSTALL|{detail}");
+
+    let (owner, repo) = {
+        let state = app.state::<AppState>();
+        let guard = state.settings.lock().unwrap();
+        (guard.update.owner.trim().to_string(), guard.update.repo.trim().to_string())
+    };
+    if owner.is_empty() || repo.is_empty() {
+        return Err(err("owner/repo not configured".to_string()));
+    }
+    // latest.json is assembled by tauri-action from the release's *.sig files
+    // (release.yml: uploadUpdaterJson). The plugin resolves the platform key
+    // (e.g. windows-x86_64) and verifies the download against the pubkey.
+    let endpoint = format!("https://github.com/{owner}/{repo}/releases/latest/download/latest.json");
+    let endpoint: url::Url = endpoint
+        .parse()
+        .map_err(|e| err(format!("endpoint: {e}")))?;
+
+    let app_exit = app.clone();
+    let updater = app
+        .updater_builder()
+        .endpoints(vec![endpoint])
+        .map_err(|e| err(e.to_string()))?
+        // The plugin leaves via std::process::exit on Windows, which skips
+        // RunEvent::Exit — stop the managed whisper-server here instead.
+        .on_before_exit(move || setup::kill_server(&app_exit))
+        .build()
+        .map_err(|e| err(e.to_string()))?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| err(e.to_string()))?
+        .ok_or_else(|| err("no update available".to_string()))?;
+
+    let version = update.version.clone();
+    let app_dl = app.clone();
+    let app_inst = app.clone();
+    let mut downloaded: u64 = 0;
+    update
+        .download_and_install(
+            move |chunk, total| {
+                downloaded += chunk as u64;
+                let _ = app_dl.emit(
+                    "update-progress",
+                    serde_json::json!({
+                        "phase": "download",
+                        "downloaded": downloaded,
+                        "total": total,
+                        "version": version,
+                    }),
+                );
+            },
+            move || {
+                let _ = app_inst.emit("update-progress", serde_json::json!({ "phase": "install" }));
+            },
+        )
+        .await
+        .map_err(|e| err(e.to_string()))?;
+
+    // Linux: the new package is in place; relaunch into it.
+    setup::kill_server(&app);
+    app.restart();
+}
+
 #[tauri::command]
 async fn open_url(app: AppHandle, url: String) -> Result<(), String> {
     if !url.starts_with("https://") {
@@ -465,6 +537,7 @@ pub fn run() {
             show_main_window(app);
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
@@ -544,6 +617,7 @@ pub fn run() {
             open_config_dir,
             quit_app,
             check_update,
+            install_update,
             open_url
         ])
         .build(tauri::generate_context!())

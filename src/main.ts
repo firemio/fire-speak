@@ -16,6 +16,7 @@ import type {
   StatusChangedPayload,
   SttEngine,
   UpdateInfo,
+  UpdateProgressPayload,
 } from "./types";
 
 /** Whisper language codes offered in the recognition-language selector
@@ -188,7 +189,7 @@ function flushApiKeySave(): void {
 // navigation
 // ---------------------------------------------------------------------------
 
-const SECTION_NAMES = ["home", "stt", "llm", "modes", "history", "general", "setup", "update"];
+const SECTION_NAMES = ["home", "general", "stt", "llm", "modes", "history", "update"];
 
 function showSection(name: string): void {
   for (const btn of document.querySelectorAll<HTMLButtonElement>(".nav-item")) {
@@ -211,7 +212,7 @@ function showSection(name: string): void {
     renderHome();
   } else if (name === "history") {
     void refreshHistory();
-  } else if (name === "setup" || name === "stt") {
+  } else if (name === "stt") {
     void refreshSetupStatus();
   }
 }
@@ -258,21 +259,13 @@ function renderHomeModes(): void {
   const host = $("home-modes");
   host.textContent = "";
   for (const mode of settings.modes) {
-    const card = el("button", "mode-card");
-    card.type = "button";
-    if (mode.id === settings.active_mode_id) card.classList.add("is-active");
-    const name = el("div", "mode-card-name", mode.name);
-    const sub = el(
-      "div",
-      "mode-card-sub",
-      mode.use_llm ? mode.instruction || t("home.llmDefault") : t("home.noLlm"),
-    );
-    card.append(name, sub);
-    if (mode.id === settings.active_mode_id) {
-      card.appendChild(el("span", "mode-card-check", "✓"));
-    }
-    card.addEventListener("click", () => void activateMode(mode.id));
-    host.appendChild(card);
+    const chip = el("button", "mode-chip-btn", mode.name);
+    chip.type = "button";
+    // The instruction is long; keep it as a tooltip rather than on the card.
+    chip.title = mode.use_llm ? mode.instruction || t("home.llmDefault") : t("home.noLlm");
+    if (mode.id === settings.active_mode_id) chip.classList.add("is-active");
+    chip.addEventListener("click", () => void activateMode(mode.id));
+    host.appendChild(chip);
   }
 }
 
@@ -347,30 +340,49 @@ function renderSttModelList(): void {
   }
   const currentPath = settings.stt.local.model_path;
 
-  const addOption = (
+  /** One row: radio option (select when installed) + optional download button + progress. */
+  const addRow = (
     label: string,
     meta: string,
     selected: boolean,
-    disabled: boolean,
+    installed: boolean,
     onSelect: (() => void) | null,
+    download: { name: string; installed: boolean } | null,
   ): void => {
+    const wrap = el("div", "model-row-wrap");
+    const row = el("div", "model-row");
     const opt = el("div", "model-option");
     if (selected) opt.classList.add("is-selected");
-    if (disabled) opt.classList.add("is-disabled");
+    if (!installed) opt.classList.add("is-disabled");
     opt.appendChild(el("span", "radio"));
     opt.appendChild(el("span", "model-option-name", label));
     opt.appendChild(el("span", "model-option-meta", meta));
-    if (!disabled && onSelect) {
-      opt.addEventListener("click", onSelect);
+    if (installed && onSelect) opt.addEventListener("click", onSelect);
+    row.appendChild(opt);
+    if (download) {
+      const key = downloadKey("model", download.name);
+      const btn = el(
+        "button",
+        `btn btn-sm${download.installed ? "" : " btn-primary"}`,
+        download.installed ? t("setup.redownload") : t("setup.download"),
+      ) as HTMLButtonElement;
+      btn.type = "button";
+      btn.disabled = activeDownloads.has(key);
+      btn.addEventListener("click", () => void startModelDownload(download.name));
+      row.appendChild(btn);
+      wrap.appendChild(row);
+      wrap.appendChild(buildProgressEl(key));
+    } else {
+      wrap.appendChild(row);
     }
-    host.appendChild(opt);
+    host.appendChild(wrap);
   };
 
-  addOption(
+  addRow(
     t("stt.autoModel"),
     setupStatus?.model_installed ? t("stt.available") : t("stt.modelNotInstalled"),
     currentPath === "",
-    false,
+    true,
     () => {
       if (!settings) return;
       settings.stt.local.model_path = "";
@@ -378,18 +390,19 @@ function renderSttModelList(): void {
       renderSttModelList();
       scheduleSave();
     },
+    null,
   );
 
   for (const m of models) {
     const managed = managedModelPathFor(m.name);
     const selected = managed !== null && currentPath === managed && currentPath !== "";
-    addOption(
+    addRow(
       m.name,
       m.installed
         ? t("stt.modelInstalledMeta", m.size_mb)
         : t("stt.modelNotInstalledMeta", m.size_mb),
       selected,
-      !m.installed || managed === null,
+      m.installed && managed !== null,
       () => {
         if (!settings || managed === null) return;
         settings.stt.local.model_path = managed;
@@ -397,6 +410,7 @@ function renderSttModelList(): void {
         renderSttModelList();
         scheduleSave();
       },
+      { name: m.name, installed: m.installed },
     );
   }
 }
@@ -408,11 +422,6 @@ function wireSttSection(): void {
     settings.stt.engine = btn.dataset.engine as SttEngine;
     renderSttSection();
     scheduleSave();
-  });
-
-  $("link-goto-setup").addEventListener("click", (e) => {
-    e.preventDefault();
-    showSection("setup");
   });
 
   input("in-local-port").addEventListener("input", () => {
@@ -1163,7 +1172,8 @@ function downloadKey(kind: string, name: string): string {
   return `${kind}:${name}`;
 }
 
-function renderSetupSection(): void {
+/** whisper-server card at the top of the local STT panel (was the Setup section). */
+function renderServerCard(): void {
   const s = setupStatus;
   const serverBadge = $("server-badge");
   const serverPath = $("server-path");
@@ -1182,59 +1192,6 @@ function renderSetupSection(): void {
   serverPath.textContent = s.server_path || "—";
   installBtn.textContent = s.server_installed ? t("setup.reinstall") : t("setup.install");
   installBtn.disabled = activeDownloads.has(downloadKey("server", "whisper-server"));
-
-  renderSetupModels();
-}
-
-function renderSetupModels(): void {
-  const host = $("setup-model-list");
-  host.textContent = "";
-  const models = setupStatus?.models ?? [];
-  if (models.length === 0) {
-    host.appendChild(el("div", "hint", t("stt.loadingModels")));
-    return;
-  }
-  for (const m of models) {
-    const card = el("div", "card setup-card");
-    card.style.marginBottom = "0";
-    const row = el("div", "setup-row");
-
-    const info = el("div", "setup-info");
-    const name = el("div", "setup-name");
-    name.appendChild(document.createTextNode(`ggml-${m.name}.bin`));
-    const badge = el(
-      "span",
-      `badge${m.installed ? " ok" : ""}`,
-      m.installed ? t("common.installed") : t("common.notInstalled"),
-    );
-    name.appendChild(badge);
-    info.appendChild(name);
-    row.appendChild(info);
-
-    const right = el("div");
-    right.style.display = "flex";
-    right.style.alignItems = "center";
-    right.appendChild(el("span", "setup-size", `${m.size_mb} MB`));
-    const dlBtn = el(
-      "button",
-      `btn btn-sm${m.installed ? "" : " btn-primary"}`,
-      m.installed ? t("setup.redownload") : t("setup.download"),
-    ) as HTMLButtonElement;
-    const key = downloadKey("model", m.name);
-    dlBtn.disabled = activeDownloads.has(key);
-    dlBtn.addEventListener("click", () => void startModelDownload(m.name));
-    right.appendChild(dlBtn);
-    row.appendChild(right);
-    card.appendChild(row);
-
-    // progress bar (hidden unless downloading)
-    const prog = buildProgressEl(key);
-    card.appendChild(prog);
-
-    host.appendChild(card);
-  }
-  // container gap handles spacing
-  host.style.gap = "10px";
 }
 
 function buildProgressEl(key: string): HTMLElement {
@@ -1300,7 +1257,7 @@ async function startModelDownload(name: string): Promise<void> {
     total: 0,
     done: false,
   });
-  renderSetupModels();
+  renderSttModelList();
   try {
     await invoke("download_model", { model: name });
   } catch (e: unknown) {
@@ -1308,7 +1265,7 @@ async function startModelDownload(name: string): Promise<void> {
     // handled (and toasted) this failure — don't toast twice.
     const stillPending = activeDownloads.has(key);
     activeDownloads.delete(key);
-    renderSetupModels();
+    renderSttModelList();
     if (stillPending) toast(t("setup.modelDownloadFailed", name, errText(e)), true);
   }
 }
@@ -1341,12 +1298,12 @@ function onDownloadProgress(p: DownloadProgressPayload): void {
     ($("btn-install-server") as HTMLButtonElement).disabled = true;
   } else {
     const wrap = document.querySelector<HTMLElement>(
-      `#setup-model-list .progress[data-download-key="${key}"]`,
+      `#stt-model-list .progress[data-download-key="${key}"]`,
     );
     if (wrap) {
       applyProgress(wrap, p);
     } else {
-      renderSetupModels();
+      renderSttModelList();
     }
   }
 }
@@ -1357,11 +1314,11 @@ async function refreshSetupStatus(): Promise<void> {
   } catch {
     setupStatus = null;
   }
-  renderSetupSection();
+  renderServerCard();
   renderSttModelList();
 }
 
-function wireSetupSection(): void {
+function wireServerCard(): void {
   $("btn-install-server").addEventListener("click", () => void startServerDownload());
   $("btn-open-config").addEventListener("click", async () => {
     try {
@@ -1392,6 +1349,68 @@ function renderUpdateSection(): void {
   renderUpdateResult();
 }
 
+/** True while install_update runs; both update buttons stay disabled. */
+let updateInstalling = false;
+/** Set after a failed install so the download-page fallback becomes visible. */
+let updateInstallFailed = false;
+
+function formatProgress(p: UpdateProgressPayload): string {
+  if (p.phase === "install") return t("update.installing");
+  const done = p.downloaded ?? 0;
+  if (p.total && p.total > 0) {
+    return t("update.downloading", `${Math.min(100, Math.round((done / p.total) * 100))}%`);
+  }
+  return t("update.downloading", `${(done / (1024 * 1024)).toFixed(1)} MB`);
+}
+
+function setUpdateButtonsDisabled(disabled: boolean): void {
+  for (const id of [
+    "btn-banner-install",
+    "btn-banner-open",
+    "btn-install-update",
+    "btn-open-download",
+    "btn-check-update",
+  ]) {
+    ($(id) as HTMLButtonElement).disabled = disabled;
+  }
+}
+
+/**
+ * One-click update (SPEC v0.6): the backend downloads, verifies and installs
+ * the latest release and relaunches; the UI only mirrors `update-progress`.
+ * On failure the download-page buttons appear as a manual fallback.
+ */
+async function startInstallUpdate(): Promise<void> {
+  if (updateInstalling) return;
+  updateInstalling = true;
+  updateInstallFailed = false;
+  setUpdateButtonsDisabled(true);
+  // a retry hides the fallback from the previous failure
+  ($("btn-banner-open") as HTMLButtonElement).hidden = true;
+  ($("btn-open-download") as HTMLButtonElement).hidden = true;
+  const initial = t("update.downloading", "0%");
+  $("update-install-result").className = "test-result";
+  $("update-install-result").textContent = initial;
+  $("update-banner-text").textContent = initial;
+  try {
+    await invoke("install_update");
+    // On success the process is replaced (Windows: installer, Linux: restart).
+  } catch (e: unknown) {
+    updateInstalling = false;
+    updateInstallFailed = true;
+    setUpdateButtonsDisabled(false);
+    const msg = errText(e);
+    $("update-install-result").classList.add("err");
+    $("update-install-result").textContent = `✗ ${msg}`;
+    toast(msg, true);
+    renderUpdateResult();
+    if (bannerInfo) {
+      $("update-banner-text").textContent = t("update.available", bannerInfo.latest);
+      ($("btn-banner-open") as HTMLButtonElement).hidden = false;
+    }
+  }
+}
+
 function renderUpdateResult(): void {
   const panel = $("update-result");
   if (!updateInfo) {
@@ -1410,7 +1429,9 @@ function renderUpdateResult(): void {
   // Release notes are untrusted remote content — textContent only, never HTML.
   $("update-notes").textContent = updateInfo.notes;
   $("update-notes-wrap").hidden = updateInfo.notes.trim() === "";
-  ($("btn-open-download") as HTMLButtonElement).hidden = !updateInfo.update_available;
+  ($("btn-install-update") as HTMLButtonElement).hidden = !updateInfo.update_available;
+  ($("btn-open-download") as HTMLButtonElement).hidden =
+    !(updateInfo.update_available && updateInstallFailed);
 }
 
 function showUpdateBanner(info: UpdateInfo): void {
@@ -1442,9 +1463,21 @@ function wireUpdateSection(): void {
   $("btn-open-download").addEventListener("click", () => {
     if (updateInfo) void openUpdateUrl(updateInfo.url);
   });
+  $("btn-install-update").addEventListener("click", () => {
+    void startInstallUpdate();
+  });
 
+  $("btn-banner-install").addEventListener("click", () => {
+    void startInstallUpdate();
+  });
   $("btn-banner-open").addEventListener("click", () => {
     if (bannerInfo) void openUpdateUrl(bannerInfo.url);
+  });
+  void listen<UpdateProgressPayload>("update-progress", (event) => {
+    if (!updateInstalling) return;
+    const text = formatProgress(event.payload);
+    $("update-install-result").textContent = text;
+    $("update-banner-text").textContent = text;
   });
   $("btn-banner-close").addEventListener("click", () => {
     $("update-banner").hidden = true;
@@ -1492,7 +1525,7 @@ function renderAll(): void {
   renderProviderList();
   renderModeList();
   renderGeneralSection();
-  renderSetupSection();
+  renderServerCard();
   renderUpdateSection();
 }
 
@@ -1590,7 +1623,7 @@ async function init(): Promise<void> {
   wireModesSection();
   wireHistorySection();
   wireGeneralSection();
-  wireSetupSection();
+  wireServerCard();
   wireUpdateSection();
 
   $("btn-record-test").addEventListener("click", async () => {

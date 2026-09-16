@@ -111,6 +111,13 @@ jobs:
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the bundles (bundle.createUpdaterArtifacts) so the in-app
+          # updater can verify them against plugins.updater.pubkey. Key has
+          # no password; the matching public key lives in tauri.conf.json.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # The key has no password, but the CLI prompts (and hangs) unless the
+          # variable exists, so it must be set to the empty string explicitly.
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           # Explicit so the local @tauri-apps/cli from package.json is used
           # rather than a globally installed one.
@@ -120,7 +127,10 @@ jobs:
           releaseBody: 'See the assets below to download and install this version.'
           releaseDraft: true
           prerelease: false
-          # The app ships its own GitHub-Releases-based update check; it does not
-          # use Tauri's signed updater, so there is no latest.json to publish.
-          uploadUpdaterJson: false
+          # latest.json for tauri-plugin-updater. Each matrix job merges its
+          # platform entry into the same asset. The installed app came from the
+          # NSIS setup.exe, so windows-x86_64 must point at the NSIS bundle,
+          # not the MSI (installing the MSI on top would leave two copies).
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
           args: ${{ matrix.args }}

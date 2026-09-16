@@ -74,6 +74,13 @@ jobs:
         run: npm ci
 
       - name: Build installers
+        env:
+          # bundle.createUpdaterArtifacts needs the signing key even for
+          # test builds; without it the bundler aborts.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # The key has no password, but the CLI prompts (and hangs) unless the
+          # variable exists, so it must be set to the empty string explicitly.
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: npm run tauri build
 
       - uses: actions/upload-artifact@v7

@@ -70,6 +70,8 @@ export interface Settings {
   stt: SttSettings;
   llm: LlmSettings;
   modes: Mode[];
+  /** Default-mode set version; round-tripped untouched (v0.6). */
+  modes_version: number;
 }
 
 export interface HistoryEntry {
@@ -129,6 +131,14 @@ export interface UpdateInfo {
   update_available: boolean; // semver-ish comparison latest > current
   url: string; // setup.exe asset browser_download_url, else the release html_url
   notes: string; // release notes body, truncated to 4000 chars (UNTRUSTED — render as textContent only)
+}
+
+/** `update-progress` event (v0.6) from install_update. */
+export interface UpdateProgressPayload {
+  phase: "download" | "install";
+  downloaded?: number; // bytes so far
+  total?: number | null; // content-length when known
+  version?: string;
 }
 
 export interface DownloadProgressPayload {

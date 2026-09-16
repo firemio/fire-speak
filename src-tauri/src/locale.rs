@@ -125,13 +125,16 @@ pub fn tray_labels(lang: &str) -> (&'static str, &'static str) {
     }
 }
 
-/// Build the 6 default modes (polish, raw, to_en, to_ja, terminal, business)
-/// with name and instruction in `lang`. Used only at first run.
+/// Build the 7 default modes (polish, raw, to_en, to_ja, terminal, business,
+/// ninja) with name and instruction in `lang`. Used only at first run; the
+/// ninja mode is also back-filled once into existing settings
+/// (`settings::load`, modes_version 2).
 pub fn default_modes_for(lang: &str) -> Vec<Mode> {
     const IDS: [&str; 6] = ["polish", "raw", "to_en", "to_ja", "terminal", "business"];
     const USE_LLM: [bool; 6] = [true, false, true, true, true, true];
     let texts = mode_texts(lang);
-    IDS.iter()
+    let mut modes: Vec<Mode> = IDS
+        .iter()
         .zip(texts.iter())
         .zip(USE_LLM.iter())
         .map(|((id, (name, instruction)), use_llm)| Mode {
@@ -140,7 +143,34 @@ pub fn default_modes_for(lang: &str) -> Vec<Mode> {
             instruction: (*instruction).to_string(),
             use_llm: *use_llm,
         })
-        .collect()
+        .collect();
+    modes.push(ninja_mode_for(lang));
+    modes
+}
+
+/// The "ninja voice" fun mode (v0.6): archaic, humble ninja speech
+/// (Japanese: 拙者 / 〜でござる).
+pub fn ninja_mode_for(lang: &str) -> Mode {
+    let (name, instruction): (&str, &str) = match lang {
+        "ja" => ("忍者口調", "内容を忍者の口調に書き直してください。一人称は「拙者」、文末は「〜でござる」「〜なのじゃ」「〜せぬか」などを使い、忍びらしい古風で簡潔な言い回しにしてください。フィラーは除去し、内容・意味は変えないでください。"),
+        "zh-CN" => ("忍者口吻", "把内容改写成忍者的口吻：自称“在下”，语气古风、含蓄、简短，带一点忍者式的说法。去除填充词，不要改变内容和含义。"),
+        "zh-TW" => ("忍者口吻", "把內容改寫成忍者的口吻：自稱「在下」，語氣古風、含蓄、簡短，帶一點忍者式的說法。去除填充詞，不要改變內容與含義。"),
+        "ko" => ("닌자 말투", "내용을 닌자 말투로 바꿔 쓰세요. 스스로를 '소인'이라 부르고, 고풍스럽고 절제된 어조에 닌자다운 표현을 살짝 섞어 주세요. 필러는 제거하고 내용과 의미는 바꾸지 마세요."),
+        "es" => ("Estilo ninja", "Reescribe el contenido con la voz de un ninja de antaño: primera persona humilde («este humilde ninja»), tono solemne, arcaico y escueto, con algún giro propio de ninjas. Elimina las muletillas y no cambies el significado."),
+        "fr" => ("Style ninja", "Réécris le contenu avec la voix d'un ninja d'autrefois : première personne humble (« votre humble ninja »), ton solennel, archaïque et laconique, avec quelques tournures de ninja. Supprime les mots de remplissage sans changer le sens."),
+        "de" => ("Ninja-Stil", "Formuliere den Inhalt in der Stimme eines Ninjas alter Schule: demütige erste Person („dieser bescheidene Ninja“), feierlich, altertümlich und knapp, mit gelegentlichen Ninja-Wendungen. Entferne Füllwörter und ändere den Sinn nicht."),
+        "pt-BR" => ("Estilo ninja", "Reescreva o conteúdo na voz de um ninja das antigas: primeira pessoa humilde («este humilde ninja»), tom solene, arcaico e conciso, com algumas expressões de ninja. Remova os vícios de linguagem e não altere o sentido."),
+        "ru" => ("Стиль ниндзя", "Перепиши текст голосом ниндзя старой школы: скромное первое лицо («сей скромный ниндзя»), торжественный, архаичный и лаконичный тон с редкими оборотами ниндзя. Убери слова-заполнители, не меняя смысла."),
+        "vi" => ("Giọng ninja", "Viết lại nội dung theo giọng một ninja xưa: ngôi thứ nhất khiêm nhường («kẻ ninja hèn mọn này»), giọng trang trọng, cổ kính và ngắn gọn, thêm chút cách nói của ninja. Bỏ từ đệm và không thay đổi ý nghĩa."),
+        "id" => ("Gaya ninja", "Tulis ulang isi dengan gaya bicara ninja zaman dulu: orang pertama yang rendah hati («hamba ninja ini»), nada khidmat, kuno, dan ringkas, dengan sedikit ungkapan khas ninja. Hapus kata pengisi dan jangan ubah maknanya."),
+        _ => ("Ninja voice", "Rewrite the content in the voice of an old-school ninja: humble first person (\"this humble ninja\"), solemn, archaic and terse, with the occasional ninja idiom. Remove fillers and keep the meaning unchanged."),
+    };
+    Mode {
+        id: "ninja".to_string(),
+        name: name.to_string(),
+        instruction: instruction.to_string(),
+        use_llm: true,
+    }
 }
 
 /// (name, instruction) pairs in the fixed order

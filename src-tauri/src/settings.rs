@@ -36,7 +36,15 @@ pub struct Settings {
     pub llm: LlmSettings,
     #[serde(default = "default_modes")]
     pub modes: Vec<Mode>,
+    /// Bumped when a new default mode is back-filled into existing settings
+    /// (2 = ninja mode, v0.6). Lets `load` add a mode exactly once without
+    /// resurrecting it after the user deletes it.
+    #[serde(default)]
+    pub modes_version: u32,
 }
+
+/// Current default-mode set version (see `Settings::modes_version`).
+pub const MODES_VERSION: u32 = 2;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -55,6 +63,7 @@ impl Default for Settings {
             stt: SttSettings::default(),
             llm: LlmSettings::default(),
             modes: default_modes(),
+            modes_version: MODES_VERSION,
         }
     }
 }
@@ -306,7 +315,17 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
         Err(_) => return first_run_defaults(false, app),
     };
     if let Ok(text) = std::fs::read_to_string(&path) {
-        if let Ok(s) = serde_json::from_str::<Settings>(&text) {
+        if let Ok(mut s) = serde_json::from_str::<Settings>(&text) {
+            if s.modes_version < MODES_VERSION {
+                // One-time back-fill of default modes added after this file was
+                // created. Skipped when the user already has a mode with that id.
+                if !s.modes.iter().any(|m| m.id == "ninja") {
+                    let lang = crate::locale::resolve_ui_lang_setting(&s.ui_lang);
+                    s.modes.push(crate::locale::ninja_mode_for(&lang));
+                }
+                s.modes_version = MODES_VERSION;
+                let _ = save(app, &s);
+            }
             return s;
         }
     }
