@@ -36,15 +36,16 @@ pub struct Settings {
     pub llm: LlmSettings,
     #[serde(default = "default_modes")]
     pub modes: Vec<Mode>,
-    /// Bumped when a new default mode is back-filled into existing settings
-    /// (2 = ninja mode, v0.6). Lets `load` add a mode exactly once without
-    /// resurrecting it after the user deletes it.
+    /// Bumped when a new default entry is back-filled into existing settings
+    /// (2 = ninja mode, v0.6; 3 = Ollama provider preset, v0.7). Lets `load`
+    /// add each entry exactly once without resurrecting it after the user
+    /// deletes it.
     #[serde(default)]
     pub modes_version: u32,
 }
 
-/// Current default-mode set version (see `Settings::modes_version`).
-pub const MODES_VERSION: u32 = 2;
+/// Current defaults version (see `Settings::modes_version`).
+pub const MODES_VERSION: u32 = 3;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -263,7 +264,21 @@ fn default_providers() -> Vec<LlmProvider> {
             api_key: String::new(),
             model: "poolside/laguna-s-2.1:free".to_string(),
         },
+        ollama_provider(),
     ]
+}
+
+/// Local Ollama preset (v0.7): OpenAI-compatible endpoint on localhost, no API
+/// key needed (`llm::is_configured` accepts key-less localhost providers).
+pub fn ollama_provider() -> LlmProvider {
+    LlmProvider {
+        id: "ollama".to_string(),
+        name: "Ollama (local, free)".to_string(),
+        kind: "openai".to_string(),
+        base_url: "http://localhost:11434/v1".to_string(),
+        api_key: String::new(),
+        model: "qwen2.5:7b".to_string(),
+    }
 }
 
 /// serde default for a settings file that is missing the `modes` field:
@@ -317,11 +332,14 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
     if let Ok(text) = std::fs::read_to_string(&path) {
         if let Ok(mut s) = serde_json::from_str::<Settings>(&text) {
             if s.modes_version < MODES_VERSION {
-                // One-time back-fill of default modes added after this file was
-                // created. Skipped when the user already has a mode with that id.
-                if !s.modes.iter().any(|m| m.id == "ninja") {
+                // One-time back-fill of defaults added after this file was
+                // created. Each entry is skipped when its id already exists.
+                if s.modes_version < 2 && !s.modes.iter().any(|m| m.id == "ninja") {
                     let lang = crate::locale::resolve_ui_lang_setting(&s.ui_lang);
                     s.modes.push(crate::locale::ninja_mode_for(&lang));
+                }
+                if s.modes_version < 3 && !s.llm.providers.iter().any(|p| p.id == "ollama") {
+                    s.llm.providers.push(ollama_provider());
                 }
                 s.modes_version = MODES_VERSION;
                 let _ = save(app, &s);

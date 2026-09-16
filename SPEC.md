@@ -456,3 +456,37 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 - **既定モードに「忍者口調」(id `ninja`, use_llm) を追加**(12 言語、`locale::ninja_mode_for`)。日本語は一人称「拙者」・文末「〜でござる」。既存 settings.json には `modes_version`(新フィールド、既定 0、現行 2)による**一度だけの追補**: `load` 時に `modes_version < 2` かつ id `ninja` が無ければ UI 言語で生成して末尾に追加し、`modes_version = 2` で保存。ユーザーが削除した後に復活しない。
 - **ホーム**: アクティブモードはカードグリッドではなく**チップ列**(`.mode-chips` / `.mode-chip-btn`、名前のみ・説明は title)。バナー / ヒーロー / 直近履歴 3 件は維持。
 
+# v0.7 追加仕様: 炎魔法テーマ「Ember Grimoire」+ 新アイコン
+
+## 方針
+
+- 見た目だけの変更。レイアウト・DOM 構造・挙動は v0.6 のまま。`src/theme-ember.css` を `styles.css` の**後**に読み込み、CSS 変数の再定義と主要サーフェスの上書きで実現する(styles.css 自体は最小限の修正: `[hidden] { display: none !important }` の追加)。
+- フォント: 見出し `Cinzel`(呪文書・碑文の雰囲気、大文字のみのフォントなので brand / 見出しは大文字表示になる)、本文 `Zen Kaku Gothic New`。Google Fonts から読み込み、オフライン時は Segoe UI / Hiragino Sans にフォールバック(index.html / overlay.html の `<link>`)。
+- 配色トークン: 背景 `#0b0708`(黒曜石)、カードは半透明ガラス + 暖色ボーダー、テキストは羊皮紙色 `#f4e9dc`、アクセントは ember `#ff4a00 → #ff7a1f → #ffb347` のグラデーション、金 `#ffd27a` をルーン枠に使用。
+
+## 設定ウィンドウ
+
+- 背景: 左下に残り火の放射グラデーション、`body::before` の feTurbulence ノイズ(opacity 0.16, screen)、`.embers` レイヤー(index.html に 12 個の span、`--x/--s/--d/--delay/--drift` で個別に上昇アニメーション)。
+- サイドバー: グリモワールの背表紙。brand は Cinzel + 金→橙のグラデーション文字、🔥 は flicker アニメーション。アクティブなナビ項目は左に発光する ember バー(`::before`)。
+- トップバー h1 は Cinzel のグラデーション文字。ステータスピルは録音中に ember グロー。
+- カード(`.card` / `.entity-card` / `.history-item`): 半透明 + backdrop-filter、`.card::before/::after` で左上・右下に金のコーナーティック(ゲーム HUD の枠)。`.card-title` は Cinzel 大文字・字間 1.6px。`.section-heading` は右にフェードするラインを持つ。
+- ボタン: `.btn-primary` は ember グラデーション + 内側の金リング + hover で光沢スイープ(`::after`、`overflow: hidden` で内側にクリップ)。
+- ホームのヒーロー: 左奥に**逆回転する 2 本のルーンリング**(`::before` 点線 28s、`::after` conic-gradient 12s reverse)。ホットキーのチップは Cinzel のルーンプレート。モードチップのアクティブは ember グラデーション。
+- select は `background-color` で上書きする(shorthand `background` を使うと矢印画像の no-repeat / position が失われタイル表示になる)。
+- `prefers-reduced-motion: reduce` で火の粉・炎・リングのアニメーションを停止。
+
+## 録音 HUD (overlay.css 末尾に追記)
+
+- カードは黒曜石 + 左下の ember グロー、録音中は ember のボーダーと外側/内側グロー。
+- 録音中は rec-dot の周囲に点線のルーンリング(`::before`, 6s 回転)。モードチップは Cinzel の金文字(呪文名)。波形バーは金→橙→朱のグラデーション + グロー、done は緑。
+
+## アイコン
+
+- `src-tauri/icons/source.svg`(1024px)から `npm run tauri icon -- src-tauri/icons/source.svg` で全サイズ生成。デザイン: 黒曜石の円盤、外周に**燃える魔法陣**(グロー付き二重リング + 点線リング + 16 本のルーンティック)、ember 色の六芒星、中央に炎(朱→橙→金→白のグラデーション、白熱コア、火の粉)。
+
+## AI整形の「キー未設定」を見える化 + Ollama プリセット (v0.7)
+
+- 問題: `run_pipeline` はアクティブプロバイダに API キーが無いと**何も表示せず**文字起こしをそのまま貼り付けていた(履歴では raw_text == final_text)。ユーザーは整形が動いていると思い込める。
+- 修正: `llm::is_configured(provider)` = API キーあり、または **kind≠anthropic かつ base_url が localhost/127.0.0.1**(Ollama 等はキー不要。Bearer ヘッダはキーがある時だけ付ける)。`use_llm` のモードでプロバイダが無い/未設定なら `WARN_LLM_NO_KEY` を done メッセージに載せる(HUD: 「✓ 貼り付けました — AI整形はスキップしました（API キー未設定）」)。
+- エラーキー: `ERR_LLM_NO_KEY|{provider name}`(接続テスト時。旧 `ERR_INTERNAL|LLM API key not set`)、`ERR_STT_NO_KEY`(クラウド STT)。12 言語に `msg.ERR_LLM_NO_KEY` `msg.ERR_STT_NO_KEY` `msg.WARN_LLM_NO_KEY` 追加。
+- 既定プロバイダに **Ollama (local, free)**(id `ollama`, kind openai, `http://localhost:11434/v1`, model `qwen2.5:7b`, キー空)を追加。既存 settings.json には defaults version 3(`modes_version` フィールドを流用、v0.6 の 2 = 忍者モード)で一度だけ追補(id `ollama` が無い場合のみ)。

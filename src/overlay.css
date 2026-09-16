@@ -8,8 +8,9 @@
   --accent-grad: linear-gradient(180deg, #ff9558, #ff6b35);
   --danger: #ff5468;
   --ok: #3ddc84;
-  --text: #eef0f4;
-  --text-dim: #a7afbd;
+  --text: #f4e9dc;
+  --text-dim: #bda393;
+  --gold: #ffd27a;
 }
 
 * {
@@ -27,7 +28,7 @@ body {
 }
 
 body {
-  font-family: "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  font-family: "Zen Kaku Gothic New", "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
   user-select: none;
   cursor: default;
 }
@@ -250,3 +251,87 @@ body {
     opacity: 1;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Ember Grimoire theme (v0.7): the HUD is a casting bar. While recording a
+   rune ring turns around the rec dot and the card glows ember; the mode chip
+   reads like a spell name.
+--------------------------------------------------------------------------- */
+
+.hud {
+  background:
+    radial-gradient(260px 120px at 10% 120%, rgba(255, 74, 0, 0.28), transparent 70%),
+    rgba(14, 8, 9, 0.9);
+  border: 1px solid rgba(255, 170, 90, 0.28);
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+.hud[data-status="recording"] {
+  border-color: rgba(255, 138, 42, 0.6);
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.6),
+    0 0 26px rgba(255, 106, 26, 0.3),
+    inset 0 0 30px rgba(255, 74, 0, 0.08);
+}
+
+.hud[data-status="done"] {
+  border-color: rgba(126, 226, 168, 0.5);
+}
+
+.rec-dot {
+  position: relative;
+  background: radial-gradient(circle, #fff1c2 0%, #ff9a3c 45%, #ff3d00 100%);
+  box-shadow: 0 0 10px #ff6a1a, 0 0 22px rgba(255, 61, 0, 0.6);
+}
+
+/* rune ring around the dot while recording */
+.hud[data-status="recording"] .rec-dot::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 1px dashed rgba(255, 210, 122, 0.8);
+  animation: hud-ring 6s linear infinite;
+}
+
+@keyframes hud-ring {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.status-text {
+  letter-spacing: 0.3px;
+}
+
+.mode-chip {
+  font-family: "Cinzel", "Zen Kaku Gothic New", serif;
+  letter-spacing: 0.8px;
+  color: var(--gold);
+  background: rgba(255, 138, 42, 0.12);
+  border-color: rgba(255, 210, 122, 0.4);
+}
+
+.caption {
+  color: #fbf1e4;
+  text-shadow: 0 0 12px rgba(255, 138, 42, 0.25);
+}
+
+.viz .bar {
+  background: linear-gradient(180deg, #ffe29a 0%, #ff9a3c 40%, #ff4a00 100%);
+  box-shadow: 0 0 6px rgba(255, 106, 26, 0.45);
+}
+
+.hud[data-status="done"] .viz .bar {
+  background: linear-gradient(180deg, #a8f0c8, #7ee2a8);
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud[data-status="recording"] .rec-dot::before {
+    animation: none;
+  }
+}
+

@@ -4,6 +4,31 @@ use std::time::Duration;
 const LLM_TIMEOUT_SECS: u64 = 60;
 const SYSTEM_PREFIX: &str = "あなたは音声入力の後処理エンジンです。ユーザーが口述したテキストが与えられます。以下の指示に従って処理し、処理後のテキストだけを出力してください。前置き・引用符・説明・コードフェンスは一切付けないでください。\n\n指示: ";
 
+/// Whether `base_url` points at this machine (Ollama, LM Studio, llama.cpp
+/// server...). Local OpenAI-compatible servers need no API key.
+pub fn is_local_url(base_url: &str) -> bool {
+    let rest = base_url
+        .trim()
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
+    // Bracketed IPv6 literal (`[::1]:11434/v1`) must be taken up to the
+    // closing bracket; splitting on ':' first would return "[".
+    let host = if let Some(inner) = rest.strip_prefix('[') {
+        inner.split(']').next().unwrap_or("")
+    } else {
+        rest.split(['/', ':', '?', '#']).next().unwrap_or("")
+    }
+    .to_ascii_lowercase();
+    matches!(host.as_str(), "localhost" | "127.0.0.1" | "0.0.0.0" | "::1")
+}
+
+/// A provider can be called when it has an API key, or when it is an
+/// OpenAI-compatible server on localhost (no key needed).
+pub fn is_configured(provider: &LlmProvider) -> bool {
+    !provider.api_key.trim().is_empty()
+        || (provider.kind != "anthropic" && is_local_url(&provider.base_url))
+}
+
 /// Polish `raw` text with the given provider according to the mode instruction.
 pub async fn polish(provider: &LlmProvider, instruction: &str, raw: &str) -> Result<String, String> {
     let system = format!("{SYSTEM_PREFIX}{instruction}");
@@ -32,8 +57,8 @@ async fn chat(
     system: Option<&str>,
     user: &str,
 ) -> Result<String, String> {
-    if provider.api_key.trim().is_empty() {
-        return Err("ERR_INTERNAL|LLM API key not set".to_string());
+    if !is_configured(provider) {
+        return Err(format!("ERR_LLM_NO_KEY|{}", provider.name.trim()));
     }
     match provider.kind.as_str() {
         "anthropic" => chat_anthropic(provider, system, user).await,
@@ -103,10 +128,11 @@ async fn chat_openai(
         "model": provider.model,
         "messages": messages,
     });
-    let resp = client()?
-        .post(&url)
-        .bearer_auth(provider.api_key.trim())
-        .header("content-type", "application/json")
+    let mut req = client()?.post(&url).header("content-type", "application/json");
+    if !provider.api_key.trim().is_empty() {
+        req = req.bearer_auth(provider.api_key.trim());
+    }
+    let resp = req
         .json(&body)
         .send()
         .await

@@ -27,6 +27,13 @@
   box-sizing: border-box;
 }
 
+/* Elements toggled with the `hidden` attribute must stay hidden even when a
+   class rule sets display (e.g. .update-banner { display: flex }). Without
+   this the update banner showed permanently with empty text. */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;

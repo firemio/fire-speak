@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- fire-speak app icon: a flame cast from a burning magic circle -->
+  <defs>
+    <radialGradient id="disc" cx="50%" cy="45%" r="62%">
+      <stop offset="0" stop-color="#2e120e"/>
+      <stop offset="0.5" stop-color="#160809"/>
+      <stop offset="1" stop-color="#080405"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="56%" r="46%">
+      <stop offset="0" stop-color="#ff8a2a" stop-opacity="0.6"/>
+      <stop offset="0.55" stop-color="#ff4a00" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#ff4a00" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="flame" x1="0.5" y1="1" x2="0.5" y2="0">
+      <stop offset="0" stop-color="#ff3000"/>
+      <stop offset="0.4" stop-color="#ff7a1f"/>
+      <stop offset="0.78" stop-color="#ffb347"/>
+      <stop offset="1" stop-color="#fff0b8"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0.5" y1="1" x2="0.5" y2="0">
+      <stop offset="0" stop-color="#ffb347"/>
+      <stop offset="0.55" stop-color="#fff3cf"/>
+      <stop offset="1" stop-color="#ffffff"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff3d00"/>
+      <stop offset="0.35" stop-color="#ff8a2a"/>
+      <stop offset="0.65" stop-color="#ffd27a"/>
+      <stop offset="1" stop-color="#ff7a1f"/>
+    </linearGradient>
+    <filter id="blur" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="24"/>
+    </filter>
+    <filter id="ringglow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+  </defs>
+
+  <!-- obsidian disc -->
+  <circle cx="512" cy="512" r="490" fill="url(#disc)"/>
+  <circle cx="512" cy="512" r="490" fill="none" stroke="#ff6a1a" stroke-opacity="0.45" stroke-width="8"/>
+
+  <!-- ember glow -->
+  <ellipse cx="512" cy="560" rx="360" ry="330" fill="url(#glow)"/>
+
+  <!-- burning magic circle: glow pass -->
+  <g fill="none" stroke="#ff6a1a" stroke-linecap="round" filter="url(#ringglow)" opacity="0.9">
+    <circle cx="512" cy="512" r="400" stroke-width="18"/>
+    <circle cx="512" cy="512" r="330" stroke-width="10"/>
+  </g>
+
+  <!-- burning magic circle: crisp pass -->
+  <g fill="none" stroke="url(#ring)" stroke-linecap="round">
+    <circle cx="512" cy="512" r="400" stroke-width="12"/>
+    <circle cx="512" cy="512" r="372" stroke-width="4" stroke-dasharray="14 18" opacity="0.9"/>
+    <circle cx="512" cy="512" r="330" stroke-width="6"/>
+    <!-- rune ticks on the outer ring, 16 marks -->
+    <g stroke-width="9" opacity="0.95">
+      <line x1="512" y1="90" x2="512" y2="136"/>
+      <line x1="512" y1="888" x2="512" y2="934"/>
+      <line x1="90" y1="512" x2="136" y2="512"/>
+      <line x1="888" y1="512" x2="934" y2="512"/>
+      <line x1="213.6" y1="213.6" x2="246.1" y2="246.1"/>
+      <line x1="810.4" y1="213.6" x2="777.9" y2="246.1"/>
+      <line x1="213.6" y1="810.4" x2="246.1" y2="777.9"/>
+      <line x1="810.4" y1="810.4" x2="777.9" y2="777.9"/>
+    </g>
+    <g stroke-width="5" opacity="0.75">
+      <line x1="673.5" y1="122.2" x2="659.4" y2="156.1"/>
+      <line x1="901.8" y1="350.5" x2="867.9" y2="364.6"/>
+      <line x1="901.8" y1="673.5" x2="867.9" y2="659.4"/>
+      <line x1="673.5" y1="901.8" x2="659.4" y2="867.9"/>
+      <line x1="350.5" y1="901.8" x2="364.6" y2="867.9"/>
+      <line x1="122.2" y1="673.5" x2="156.1" y2="659.4"/>
+      <line x1="122.2" y1="350.5" x2="156.1" y2="364.6"/>
+      <line x1="350.5" y1="122.2" x2="364.6" y2="156.1"/>
+    </g>
+  </g>
+
+  <!-- hexagram sigil, ember colored -->
+  <g fill="none" stroke="url(#ring)" stroke-width="7" stroke-linejoin="round" opacity="0.8">
+    <polygon points="512,222 763,657 261,657"/>
+    <polygon points="512,802 261,367 763,367"/>
+  </g>
+  <g fill="none" stroke="#ff6a1a" stroke-width="12" stroke-linejoin="round" filter="url(#ringglow)" opacity="0.45">
+    <polygon points="512,222 763,657 261,657"/>
+    <polygon points="512,802 261,367 763,367"/>
+  </g>
+
+  <!-- flame glow -->
+  <path filter="url(#blur)" fill="#ff5a12" opacity="0.8"
+        d="M512 236c-32 100-150 176-150 314 0 96 66 170 150 170s150-74 150-170c0-74-32-120-60-158-8 64-38 86-58 94 14-76-6-180-32-250z"/>
+
+  <!-- flame body -->
+  <path fill="url(#flame)"
+        d="M512 254c-28 94-142 168-142 298 0 90 62 160 142 160s142-70 142-160c0-70-30-114-56-150-6 62-34 84-56 92 12-74-6-174-30-240z"/>
+
+  <!-- flame core -->
+  <path fill="url(#core)" filter="url(#soft)" opacity="0.96"
+        d="M512 470c-14 48-66 86-66 146 0 46 30 80 66 80s66-34 66-80c0-34-14-58-30-80-2 32-16 44-28 48 6-38-2-80-8-114z"/>
+
+  <!-- sparks -->
+  <g fill="#ffe29a">
+    <circle cx="402" cy="296" r="10" opacity="0.95"/>
+    <circle cx="636" cy="262" r="8" opacity="0.85"/>
+    <circle cx="684" cy="392" r="6" opacity="0.75"/>
+    <circle cx="352" cy="430" r="6" opacity="0.65"/>
+    <circle cx="596" cy="196" r="5" opacity="0.7"/>
+    <circle cx="452" cy="212" r="4" opacity="0.6"/>
+  </g>
+</svg>

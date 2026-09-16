@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# local dev-server launch config for the Claude desktop preview
+.claude/launch.json

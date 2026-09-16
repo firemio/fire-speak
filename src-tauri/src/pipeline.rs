@@ -474,25 +474,31 @@ async fn run_pipeline(
     let mut warning: Option<String> = None;
     let mut final_text = raw_text.clone();
     if mode.use_llm {
-        if let Some(p) = provider.filter(|p| !p.api_key.trim().is_empty()) {
-            {
-                // Only advance to Polishing if this pipeline is still current.
-                let state = app.state::<AppState>();
-                let mut status = state.status.lock().unwrap();
-                if is_canceled(&app, gen) || *status != Status::Transcribing {
-                    return Ok(());
+        match provider.filter(crate::llm::is_configured) {
+            // The mode asks for polishing but nothing can run it: paste the
+            // transcript and SAY SO in the HUD, instead of silently pretending
+            // the polish happened (v0.7 — this hid a missing API key for weeks).
+            None => warning = Some("WARN_LLM_NO_KEY".to_string()),
+            Some(p) => {
+                {
+                    // Only advance to Polishing if this pipeline is still current.
+                    let state = app.state::<AppState>();
+                    let mut status = state.status.lock().unwrap();
+                    if is_canceled(&app, gen) || *status != Status::Transcribing {
+                        return Ok(());
+                    }
+                    *status = Status::Polishing;
                 }
-                *status = Status::Polishing;
-            }
-            emit_status(&app, "polishing", None);
-            match crate::llm::polish(&p, &mode.instruction, &raw_text).await {
-                Ok(t) if !t.trim().is_empty() => final_text = t.trim().to_string(),
-                Ok(_) => {
-                    warning = Some("WARN_LLM_FALLBACK".to_string());
-                }
-                Err(e) => {
-                    eprintln!("llm polish failed, falling back to raw text: {e}");
-                    warning = Some("WARN_LLM_FALLBACK".to_string());
+                emit_status(&app, "polishing", None);
+                match crate::llm::polish(&p, &mode.instruction, &raw_text).await {
+                    Ok(t) if !t.trim().is_empty() => final_text = t.trim().to_string(),
+                    Ok(_) => {
+                        warning = Some("WARN_LLM_FALLBACK".to_string());
+                    }
+                    Err(e) => {
+                        eprintln!("llm polish failed, falling back to raw text: {e}");
+                        warning = Some("WARN_LLM_FALLBACK".to_string());
+                    }
                 }
             }
         }

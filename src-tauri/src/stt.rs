@@ -66,7 +66,7 @@ pub async fn transcribe_local(
 pub async fn transcribe_cloud(settings: &Settings, wav: Vec<u8>) -> Result<String, String> {
     let cloud = &settings.stt.cloud;
     if cloud.api_key.trim().is_empty() {
-        return Err("ERR_INTERNAL|cloud STT API key not set".to_string());
+        return Err("ERR_STT_NO_KEY".to_string());
     }
     let url = format!(
         "{}/audio/transcriptions",
