@@ -13,9 +13,46 @@ const LEVEL_INTERVAL_MS: u64 = 60;
 pub struct RecorderHandle {
     stop: Arc<AtomicBool>,
     rx: mpsc::Receiver<Result<Vec<i16>, String>>,
+    /// Mono samples at the device's native rate, shared with the capture
+    /// callback so live captions can read the audio while recording.
+    samples: Arc<Mutex<Vec<f32>>>,
+    sample_rate: u32,
+}
+
+/// A copy of the audio captured so far (live-caption snapshot).
+pub struct Snapshot {
+    /// 16kHz mono i16 samples from `from` up to `end`.
+    pub samples: Vec<i16>,
+    /// Number of device-rate samples the buffer held when the snapshot was
+    /// taken; pass it back as `from` to continue from this point.
+    pub end: usize,
+    /// Peak absolute amplitude (0.0..1.0) of the snapshot window — lets the
+    /// caller skip STT on near-silence.
+    pub peak: f32,
 }
 
 impl RecorderHandle {
+    /// Device-rate sample count that corresponds to `secs` seconds.
+    pub fn samples_for_secs(&self, secs: f32) -> usize {
+        (self.sample_rate as f32 * secs) as usize
+    }
+
+    /// Copy the audio captured since device-rate index `from` (clamped to
+    /// the buffer) as 16kHz i16, without stopping the recording.
+    pub fn snapshot(&self, from: usize) -> Snapshot {
+        let buf = self.samples.lock().unwrap();
+        let end = buf.len();
+        let from = from.min(end);
+        let window: Vec<f32> = buf[from..end].to_vec();
+        drop(buf);
+        let peak = window.iter().fold(0f32, |m, s| m.max(s.abs()));
+        Snapshot {
+            samples: resample_to_16k_i16(&window, self.sample_rate),
+            end,
+            peak,
+        }
+    }
+
     /// Stop recording and take the captured samples (16kHz mono i16).
     pub fn stop_and_take(self) -> Result<Vec<i16>, String> {
         self.stop.store(true, Ordering::SeqCst);
@@ -43,19 +80,25 @@ impl Drop for RecorderHandle {
 /// Emits `level` events (~60ms) with `{ rms: 0.0..1.0 }` while recording.
 pub fn start(app: AppHandle) -> Result<RecorderHandle, String> {
     let stop = Arc::new(AtomicBool::new(false));
-    let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
+    // ready carries the device sample rate once the stream is playing
+    let (ready_tx, ready_rx) = mpsc::channel::<Result<u32, String>>();
     let (result_tx, result_rx) = mpsc::channel::<Result<Vec<i16>, String>>();
     let stop2 = stop.clone();
+    // mono samples at the device's native rate (shared with the handle)
+    let samples: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
+    let samples2 = samples.clone();
 
     std::thread::spawn(move || {
-        let result = record_thread(app, stop2, ready_tx);
+        let result = record_thread(app, stop2, ready_tx, samples2);
         let _ = result_tx.send(result);
     });
 
     match ready_rx.recv_timeout(Duration::from_secs(8)) {
-        Ok(Ok(())) => Ok(RecorderHandle {
+        Ok(Ok(sample_rate)) => Ok(RecorderHandle {
             stop,
             rx: result_rx,
+            samples,
+            sample_rate,
         }),
         Ok(Err(e)) => Err(e),
         Err(_) => {
@@ -70,9 +113,10 @@ pub fn start(app: AppHandle) -> Result<RecorderHandle, String> {
 fn record_thread(
     app: AppHandle,
     stop: Arc<AtomicBool>,
-    ready_tx: mpsc::Sender<Result<(), String>>,
+    ready_tx: mpsc::Sender<Result<u32, String>>,
+    samples: Arc<Mutex<Vec<f32>>>,
 ) -> Result<Vec<i16>, String> {
-    let fail = |e: String, tx: &mpsc::Sender<Result<(), String>>| -> String {
+    let fail = |e: String, tx: &mpsc::Sender<Result<u32, String>>| -> String {
         let _ = tx.send(Err(e.clone()));
         e
     };
@@ -100,8 +144,6 @@ fn record_thread(
     let sample_format = supported.sample_format();
     let config: cpal::StreamConfig = supported.into();
 
-    // mono samples at the device's native rate
-    let samples: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
     // most recent RMS level of the incoming audio
     let level: Arc<Mutex<f32>> = Arc::new(Mutex::new(0.0));
     let max_samples = (sample_rate as u64 * MAX_RECORD_SECS) as usize;
@@ -146,7 +188,7 @@ fn record_thread(
         return Err(fail(format!("ERR_MIC_INIT|play: {e}"), &ready_tx));
     }
 
-    let _ = ready_tx.send(Ok(()));
+    let _ = ready_tx.send(Ok(sample_rate));
 
     let started = Instant::now();
     while !stop.load(Ordering::SeqCst) && started.elapsed() < Duration::from_secs(MAX_RECORD_SECS)

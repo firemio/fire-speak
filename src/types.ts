@@ -64,6 +64,8 @@ export interface Settings {
   paste_mode: PasteMode;
   restore_clipboard: boolean;
   autostart: boolean;
+  /** Show partial transcription in the HUD while recording (v0.5). */
+  live_caption: boolean;
   history_limit: number;
   stt: SttSettings;
   llm: LlmSettings;
@@ -109,6 +111,11 @@ export interface StatusChangedPayload {
 
 export interface LevelPayload {
   rms: number; // 0.0 - 1.0
+}
+
+/** `caption` event (v0.5): partial transcription of the current recording. */
+export interface CaptionPayload {
+  text: string;
 }
 
 export interface ResultPayload {

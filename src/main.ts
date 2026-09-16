@@ -18,6 +18,22 @@ import type {
   UpdateInfo,
 } from "./types";
 
+/** Whisper language codes offered in the recognition-language selector
+ * (SPEC v0.5). Native names need no translation. */
+const STT_LANGS: readonly { code: string; label: string }[] = [
+  { code: "ja", label: "日本語" },
+  { code: "en", label: "English" },
+  { code: "zh", label: "中文" },
+  { code: "ko", label: "한국어" },
+  { code: "es", label: "Español" },
+  { code: "fr", label: "Français" },
+  { code: "de", label: "Deutsch" },
+  { code: "pt", label: "Português" },
+  { code: "ru", label: "Русский" },
+  { code: "vi", label: "Tiếng Việt" },
+  { code: "id", label: "Bahasa Indonesia" },
+];
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
@@ -855,11 +871,26 @@ function renderGeneralSection(): void {
     btn.classList.toggle("is-active", btn.dataset.mode === settings.hotkey_mode);
   }
   selectEl("in-ui-lang").value = settings.ui_lang;
-  selectEl("in-language").value = settings.language;
+  {
+    // keep an unknown persisted code selectable instead of showing blank
+    const sel = selectEl("in-language");
+    const lang = settings.language;
+    for (const o of sel.querySelectorAll("option[data-synthetic]")) {
+      if ((o as HTMLOptionElement).value !== lang) o.remove();
+    }
+    if (![...sel.options].some((o) => o.value === lang)) {
+      const opt = el("option", undefined, lang) as HTMLOptionElement;
+      opt.value = lang;
+      opt.dataset.synthetic = "1";
+      sel.appendChild(opt);
+    }
+    sel.value = lang;
+  }
   selectEl("in-paste-mode").value = settings.paste_mode;
   input("in-history-limit").value = String(settings.history_limit);
   input("in-restore-clipboard").checked = settings.restore_clipboard;
   input("in-autostart").checked = settings.autostart;
+  input("in-live-caption").checked = settings.live_caption;
 }
 
 /**
@@ -1077,6 +1108,18 @@ function wireGeneralSection(): void {
     void applyLanguageSetting(uiLangSel.value);
   });
 
+  // STT language: whisper language codes (SPEC v0.5). "auto" = whisper
+  // detects the language itself, which is error-prone on short utterances.
+  const sttLangSel = selectEl("in-language");
+  const detectOpt = el("option", undefined, t("general.langDetect")) as HTMLOptionElement;
+  detectOpt.value = "auto";
+  detectOpt.dataset.i18n = "general.langDetect";
+  sttLangSel.appendChild(detectOpt);
+  for (const lang of STT_LANGS) {
+    const opt = el("option", undefined, lang.label) as HTMLOptionElement;
+    opt.value = lang.code;
+    sttLangSel.appendChild(opt);
+  }
   selectEl("in-language").addEventListener("change", () => {
     if (!settings) return;
     settings.language = selectEl("in-language").value;
@@ -1098,6 +1141,11 @@ function wireGeneralSection(): void {
   input("in-restore-clipboard").addEventListener("change", () => {
     if (!settings) return;
     settings.restore_clipboard = input("in-restore-clipboard").checked;
+    scheduleSave();
+  });
+  input("in-live-caption").addEventListener("change", () => {
+    if (!settings) return;
+    settings.live_caption = input("in-live-caption").checked;
     scheduleSave();
   });
   input("in-autostart").addEventListener("change", () => {

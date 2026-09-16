@@ -1,4 +1,6 @@
-/* fire-speak — recording HUD (overlay window, 380x110, transparent) */
+/* fire-speak — recording HUD (overlay window, 380x190, transparent).
+   The card is anchored to the bottom edge and grows upward when a live
+   caption is shown (SPEC v0.5). */
 
 :root {
   --accent: #ff6b35;
@@ -32,7 +34,9 @@ body {
 
 .hud {
   position: absolute;
-  inset: 6px 8px;
+  left: 8px;
+  right: 8px;
+  bottom: 6px;
   display: flex;
   flex-direction: column;
   background: rgba(17, 20, 26, 0.86);
@@ -171,10 +175,39 @@ body {
   color: #fff;
 }
 
+/* ---------- live caption ---------- */
+
+.caption {
+  margin: 6px 0 2px;
+  max-height: calc(1.45em * 3); /* 3 lines; the 190px window keeps ~25px headroom */
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.caption:empty {
+  display: none;
+}
+
+.hud[data-status="recording"] .caption::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 0.9em;
+  margin-left: 2px;
+  vertical-align: -0.12em;
+  background: var(--accent-2);
+  animation: blink 1s steps(1) infinite;
+}
+
 /* ---------- visualizer ---------- */
 
 .viz {
-  flex: 1;
+  height: 52px;
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: center;

@@ -25,6 +25,9 @@ pub struct Settings {
     pub restore_clipboard: bool,
     #[serde(default = "default_true")]
     pub autostart: bool,
+    /// Show partial transcription in the HUD while recording (v0.5).
+    #[serde(default = "default_true")]
+    pub live_caption: bool,
     #[serde(default = "default_history_limit")]
     pub history_limit: usize,
     #[serde(default)]
@@ -47,6 +50,7 @@ impl Default for Settings {
             paste_mode: default_paste_mode(),
             restore_clipboard: true,
             autostart: true,
+            live_caption: true,
             history_limit: default_history_limit(),
             stt: SttSettings::default(),
             llm: LlmSettings::default(),
@@ -280,6 +284,11 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
     let first_run_defaults = |persist: bool, app: &tauri::AppHandle| -> Settings {
         let mut s = Settings::default();
         s.modes = crate::locale::default_modes_for(&crate::locale::resolve_ui_lang());
+        // Whisper's language auto-detection misfires on short utterances
+        // (Japanese speech coming back as English), so a fresh install pins
+        // the recognition language to the OS locale (SPEC v0.5). The static
+        // serde default stays "auto" for settings files that predate the key.
+        s.language = crate::locale::default_stt_language();
         // AltGr layouts (e.g. many European keyboards) use RAlt to type
         // characters, so RAlt cannot be the hotkey there. The static serde
         // default stays "RAlt"; only first-run creation consults the layout.

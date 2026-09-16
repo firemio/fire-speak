@@ -57,6 +57,18 @@ pub fn layout_uses_altgr() -> bool {
     false
 }
 
+/// Whisper language code for the OS locale (SPEC v0.5 first-run default for
+/// `language`). The 12 UI codes collapse to whisper's 2-letter codes; both
+/// Chinese variants map to "zh".
+pub fn default_stt_language() -> String {
+    let ui = resolve_ui_lang();
+    match ui.as_str() {
+        "zh-CN" | "zh-TW" => "zh".to_string(),
+        "pt-BR" => "pt".to_string(),
+        other => other.to_string(),
+    }
+}
+
 /// Resolve a persisted `ui_lang` setting to a concrete code:
 /// a valid stored code wins; `""` (auto) or an unknown code falls back to the
 /// OS locale.

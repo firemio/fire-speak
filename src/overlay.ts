@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { applyDom, getLang, setLang, t, tMsg } from "./i18n";
 import type {
   AppStatus,
+  CaptionPayload,
   LevelPayload,
   Settings,
   StatusChangedPayload,
@@ -19,6 +20,7 @@ const statusText = document.getElementById("status-text") as HTMLSpanElement;
 const modeChip = document.getElementById("mode-chip") as HTMLSpanElement;
 const closeBtn = document.getElementById("close-btn") as HTMLButtonElement;
 const viz = document.getElementById("viz") as HTMLDivElement;
+const caption = document.getElementById("caption") as HTMLDivElement;
 
 let currentStatus: AppStatus = "idle";
 let settings: Settings | null = null;
@@ -120,12 +122,23 @@ function renderCaption(payload: StatusChangedPayload): void {
   }
 }
 
+/**
+ * Live caption (SPEC v0.5): partial transcription while recording. Always
+ * shows the tail of the text — the words being spoken right now.
+ */
+function setCaption(text: string): void {
+  caption.textContent = text;
+  caption.scrollTop = caption.scrollHeight;
+}
+
 function applyStatus(payload: StatusChangedPayload): void {
   lastStatusPayload = payload;
   currentStatus = payload.status;
   hud.dataset.status = payload.status;
   if (payload.status === "recording" || payload.status === "idle") {
     resetBars();
+    // a new recording starts with an empty caption; idle clears it
+    setCaption("");
   }
   renderCaption(payload);
   // clear CSS animation heights when leaving processing states
@@ -187,6 +200,10 @@ async function init(): Promise<void> {
 
   await listen<LevelPayload>("level", (event) => {
     onLevel(event.payload.rms);
+  });
+
+  await listen<CaptionPayload>("caption", (event) => {
+    if (currentStatus === "recording") setCaption(event.payload.text);
   });
 
   await listen<Settings>("settings-changed", (event) => {

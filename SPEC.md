@@ -50,7 +50,7 @@ serde は全フィールド `#[serde(default = ...)]` で欠損に耐えるこ�
 }
 ```
 
-- `language`: `"auto" | "ja" | "en" | …` (whisperの言語ヒント。auto時はパラメータ送らない/`auto`)
+- `language`: whisper言語コード(`"ja" | "en" | "zh" | "ko" | "es" | "fr" | "de" | "pt" | "ru" | "vi" | "id"`)または `"auto"`。auto時はパラメータを送らない。**初回起動時の値は OS ロケールから決定**(v0.5、`locale::default_stt_language`)。serde の静的既定は後方互換のため `"auto"` のまま
 - `ui_lang`: UI表示言語コード(下記12種)または `""` = 自動。`""` のとき settings::load 後にOSロケールから解決した値を**メモリ上だけ**セット(永続化しない)。ユーザーが選択したら実コードを保存
 - `update`: アップデート確認設定。`owner`/`repo` はGitHubリポジトリ
 - `paste_mode`: `"paste"`(クリップボード経由でCtrl+V自動送信) | `"clipboard"`(コピーのみ)
@@ -167,7 +167,7 @@ user メッセージ = STTの生テキスト。
 3. **AI整形**: プロバイダ一覧(追加/編集/削除)、kind選択(anthropic/openai互換)、base_url/model/api_key(パスワード型・表示切替)、アクティブ選択、テストボタン(test_llm)
 4. **モード**: 一覧+追加/編集/削除(name, instruction, use_llm)。デフォルトモードも編集可。ドラッグ並べ替えは不要
 5. **履歴**: 一覧(時刻・モード・整形後テキスト、クリックで生テキストも展開)、コピー(copy_text)、全消去
-6. **一般**: ホットキー変更(キー押下キャプチャ式: Ctrl/Alt/Shift+キー → "Ctrl+Alt+Space"形式の文字列)、言語(auto/ja/en)、paste_mode、restore_clipboard、autostart
+6. **一般**: ホットキー変更(キー押下キャプチャ式: Ctrl/Alt/Shift+キー → "Ctrl+Alt+Space"形式の文字列)、認識言語(自動判定 + 11言語、v0.5)、paste_mode、restore_clipboard、autostart、live_caption(v0.5)
 7. **セットアップ**: setup_status表示、whisper-serverインストールボタン、モデル一覧とDLボタン、進捗バー(download-progress)、open_config_dir
 
 - 保存は明示ボタンでなく **変更時に自動保存**(debounce 500ms で save_settings)。ただしAPIキー入力はblurで保存。
@@ -393,3 +393,31 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 
 - キャプチャ欄: **押下中の修飾キー e.code を Set で追跡**し、bare-tap確定は「そのkeyupまでSetのサイズが1のまま」の場合のみ(両Shift同時押し等の誤検出防止)。`e.key === "AltGraph"` は修飾キーとして扱い AltRight→RAlt にマップ(拒否メッセージを出さない。AltGr配列ではバックエンドが ERR_HOTKEY_REGISTER で拒否し既存ロールバックが働く)。
 - overlay: 録音中に settings-changed を受けてもビジュアライザのバー状態をリセットしない(キャプション/モードチップのみ更新)。
+
+# v0.5 追加仕様: リアルタイム字幕 + 認識言語の既定を OS ロケールに
+
+## 設定値
+
+- `live_caption: bool`(既定 `true`): 録音中に途中認識テキストを HUD に表示する。一般タブのスイッチ(`general.liveCaption` / `general.liveCaptionDesc`)。クラウド STT では録音中のリクエストが増える旨を説明文に明記。
+- `language` の初回起動時の値は `locale::default_stt_language()`(OS ロケール → whisper コード。zh-CN/zh-TW→`zh`、pt-BR→`pt`、その他は UI コードそのまま)。既存の settings.json は変更しない。
+- 認識言語セレクタは「自動判定（非推奨）」(`general.langDetect`, 値 `auto`) + 11 言語(ネイティブ表記、翻訳不要)を main.ts の `STT_LANGS` から動的生成。永続値がリストに無い場合はその値の option を追加して空表示を避ける。`general.langJa` / `general.langEn` は廃止(12言語全ファイルから削除、キーパリティ維持)。
+
+## バックエンド (pipeline.rs / audio.rs)
+
+- `audio::RecorderHandle` は録音バッファ(デバイスレート mono f32)と sample_rate を共有し、`snapshot(from) -> Snapshot { samples(16k i16), end, peak }` で録音を止めずに `from` 以降のコピーを取得できる。
+- `start_recording` でハンドル格納後、`settings.live_caption` なら `spawn_live_captions(app, gen)` を起動。ループ:
+  1. `CAPTION_PERIOD_MS`(1200ms) 待機 → 録音中でなければ(status≠Recording または generation 不一致)終了。recorder が None(stop_and_process が take 済み)でも終了。
+  2. `snapshot(window_start)`。前回から `CAPTION_MIN_NEW_SECS`(0.8s) 未満の新規音声なら skip。`peak < CAPTION_SILENCE_PEAK`(0.01) なら無音として skip(whisper の無音ハルシネーション回避)。
+  3. WAV 化して `stt::transcribe`(設定エンジン: local/cloud 共通)。連続 `CAPTION_MAX_FAILURES`(2) 回失敗で当該録音の字幕を打ち切る(サーバ未導入等で再試行し続けない)。
+  4. 応答後も録音中なら `caption {text}` を emit。text は `committed + 現在ウィンドウ` (`join_caption`: 境界のどちらかが CJK 文字(かな/漢字/ハングル/全角記号)か空白なら直結、それ以外(ラテン/キリル/ベトナム語等)は空白区切り)。
+  5. 開いているウィンドウが `CAPTION_WINDOW_SECS`(20s) を超えたらその text を committed に確定し、`window_start = snapshot.end` で新ウィンドウ開始(長時間口述でもリクエストサイズと遅延を一定に保つ)。
+- 最終結果は従来どおり `run_pipeline` が**全録音**を一括認識する(字幕テキストは使わない)。字幕ループは status を一切書き換えない。リクエストは逐次(前の応答が返るまで次を送らない)ので whisper-server への同時要求は最大 1 + 最終認識 1。
+- **既知の制約**: 確定時に飛んでいる字幕リクエストは中断できない(HTTP をキャンセルしてもサーバ側の推論は続く)。whisper-server は逐次処理なので、最終認識はその 1 リクエスト(最大 20 秒分の音声)の完了を待つことがある。ウィンドウ上限 20 秒はこの待ちを抑えるためでもある。
+
+## フロントエンド (overlay)
+
+- overlay ウィンドウは 380x190(3行字幕 + 上段 + 波形で約165px、上方向クリップを避ける余裕を持たせる)。カードは**下端に固定**(`bottom: 6px`)し、字幕が無いときは従来の高さ、字幕があると上方向に伸びる。`.viz` は固定高 52px。
+- `#caption`: 最大3行(`max-height: calc(1.45em * 3); overflow: hidden`)、更新毎に `scrollTop = scrollHeight` で**末尾(いま話している部分)**を表示。録音中は末尾に点滅カーソル。`:empty` で非表示。
+- `caption` イベントは status が recording のときだけ反映。`recording` / `idle` の status で字幕をクリア。transcribing / polishing / done 中は最後の字幕を残す。
+- `types.ts`: `Settings.live_caption`, `CaptionPayload { text }`。
+

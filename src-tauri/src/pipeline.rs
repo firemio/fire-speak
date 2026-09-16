@@ -26,6 +26,24 @@ static PRESS_AT: Mutex<Option<Instant>> = Mutex::new(None);
 /// recording running (tap-lock) instead of confirming it.
 const TAP_LOCK_MS: u64 = 400;
 
+// Live captions (SPEC v0.5): while recording, the audio captured so far is
+// periodically sent to the configured STT engine and the partial text is
+// emitted as `caption` for the HUD. The final result still comes from the
+// full recording in run_pipeline.
+/// Pause between the end of one caption request and the next snapshot.
+const CAPTION_PERIOD_MS: u64 = 1200;
+/// Skip a tick unless at least this much new audio arrived since the last one.
+const CAPTION_MIN_NEW_SECS: f32 = 0.8;
+/// Once the open window is this long its text is committed and a new window
+/// starts, so request size (and latency) stays bounded on long dictations.
+const CAPTION_WINDOW_SECS: f32 = 20.0;
+/// Windows whose peak amplitude stays below this are treated as silence and
+/// not sent (whisper hallucinates on silence).
+const CAPTION_SILENCE_PEAK: f32 = 0.01;
+/// Give up on live captions for this recording after this many consecutive
+/// STT failures (e.g. server not installed) instead of retrying forever.
+const CAPTION_MAX_FAILURES: u32 = 2;
+
 pub fn set_hotkey_suspended(suspended: bool) {
     HOTKEY_SUSPENDED.store(suspended, Ordering::SeqCst);
 }
@@ -149,7 +167,7 @@ pub fn show_overlay(app: &AppHandle) {
             let scale = monitor.scale_factor();
             let (w, h) = match window.outer_size() {
                 Ok(s) => (s.width as i32, s.height as i32),
-                Err(_) => ((380.0 * scale) as i32, (110.0 * scale) as i32),
+                Err(_) => ((380.0 * scale) as i32, (190.0 * scale) as i32),
             };
             let area = monitor.work_area();
             let margin = (24.0 * scale) as i32;
@@ -214,6 +232,9 @@ pub fn start_recording(app: &AppHandle) {
                 }
                 *recorder = Some(handle);
             }
+            if state.settings.lock().unwrap().live_caption {
+                spawn_live_captions(app.clone(), gen);
+            }
             // safety watchdog: auto stop+process after 5 minutes
             let app2 = app.clone();
             tauri::async_runtime::spawn(async move {
@@ -238,6 +259,115 @@ pub fn start_recording(app: &AppHandle) {
             error_flow(app, e);
         }
     }
+}
+
+fn is_recording(app: &AppHandle, gen: u64) -> bool {
+    !is_canceled(app, gen) && *app.state::<AppState>().status.lock().unwrap() == Status::Recording
+}
+
+/// Scripts written without inter-word spaces (kana, kanji/hanzi, hangul,
+/// fullwidth punctuation): a caption window boundary next to one of these
+/// characters is joined directly, any other script gets a separating space.
+fn is_cjk(c: char) -> bool {
+    matches!(c as u32,
+        0x3000..=0x303F   // CJK symbols & punctuation
+        | 0x3040..=0x30FF // hiragana, katakana
+        | 0x3400..=0x4DBF // CJK ext A
+        | 0x4E00..=0x9FFF // CJK unified
+        | 0xAC00..=0xD7AF // hangul syllables
+        | 0xF900..=0xFAFF // CJK compatibility
+        | 0xFF00..=0xFFEF // fullwidth forms
+        | 0x20000..=0x2FFFF // CJK ext B+
+    )
+}
+
+/// Append a freshly transcribed window to the committed caption text.
+fn join_caption(committed: &str, tail: &str) -> String {
+    if committed.is_empty() {
+        return tail.to_string();
+    }
+    if tail.is_empty() {
+        return committed.to_string();
+    }
+    let last = committed.chars().last().unwrap_or(' ');
+    let first = tail.chars().next().unwrap_or(' ');
+    let joined_directly =
+        last.is_whitespace() || first.is_whitespace() || is_cjk(last) || is_cjk(first);
+    if joined_directly {
+        format!("{committed}{tail}")
+    } else {
+        format!("{committed} {tail}")
+    }
+}
+
+/// Live-caption loop for the recording identified by `gen`. Exits as soon as
+/// the recording stops or is canceled; never touches status.
+fn spawn_live_captions(app: AppHandle, gen: u64) {
+    tauri::async_runtime::spawn(async move {
+        let mut committed = String::new();
+        let mut window_start: usize = 0; // device-rate index where the open window begins
+        let mut last_end: usize = 0; // device-rate length at the previous request
+        let mut failures: u32 = 0;
+        loop {
+            tokio::time::sleep(Duration::from_millis(CAPTION_PERIOD_MS)).await;
+            if !is_recording(&app, gen) {
+                return;
+            }
+            let settings = app.state::<AppState>().settings.lock().unwrap().clone();
+            if !settings.live_caption {
+                return;
+            }
+            let (snap, min_new, window_limit) = {
+                let state = app.state::<AppState>();
+                let recorder = state.recorder.lock().unwrap();
+                let Some(handle) = recorder.as_ref() else {
+                    return; // recorder taken: stop_and_process is running
+                };
+                (
+                    handle.snapshot(window_start),
+                    handle.samples_for_secs(CAPTION_MIN_NEW_SECS),
+                    handle.samples_for_secs(CAPTION_WINDOW_SECS),
+                )
+            };
+            if snap.end < last_end + min_new {
+                continue; // not enough new audio yet
+            }
+            last_end = snap.end;
+            if snap.peak < CAPTION_SILENCE_PEAK {
+                continue; // silence: nothing to transcribe
+            }
+            let wav = match crate::audio::wav_bytes(&snap.samples) {
+                Ok(w) => w,
+                Err(e) => {
+                    eprintln!("live caption wav failed: {e}");
+                    continue;
+                }
+            };
+            let text = match crate::stt::transcribe(&app, &settings, wav).await {
+                Ok(t) => {
+                    failures = 0;
+                    t.trim().to_string()
+                }
+                Err(e) => {
+                    failures += 1;
+                    eprintln!("live caption STT failed ({failures}/{CAPTION_MAX_FAILURES}): {e}");
+                    if failures >= CAPTION_MAX_FAILURES {
+                        return;
+                    }
+                    continue;
+                }
+            };
+            if !is_recording(&app, gen) {
+                return; // recording ended while the request was in flight
+            }
+            let combined = join_caption(&committed, &text);
+            let _ = app.emit("caption", serde_json::json!({ "text": combined }));
+            if snap.end - window_start >= window_limit {
+                committed = combined;
+                window_start = snap.end;
+            }
+        }
+    });
 }
 
 pub fn stop_and_process(app: &AppHandle) {

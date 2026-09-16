@@ -220,11 +220,7 @@
               </label>
               <label class="field">
                 <span class="field-label" data-i18n="general.language">認識言語</span>
-                <select id="in-language">
-                  <option value="auto" data-i18n="general.langAuto">自動判定</option>
-                  <option value="ja" data-i18n="general.langJa">日本語</option>
-                  <option value="en" data-i18n="general.langEn">英語</option>
-                </select>
+                <select id="in-language"></select>
               </label>
               <label class="field">
                 <span class="field-label" data-i18n="general.pasteMode">貼り付け方法</span>
@@ -252,6 +248,13 @@
                   <span class="switch-desc" data-i18n="general.autostartDesc">サインイン時に fire-speak を常駐開始します</span>
                 </span>
                 <input type="checkbox" id="in-autostart" class="switch" />
+              </label>
+              <label class="switch-row">
+                <span>
+                  <span class="switch-title" data-i18n="general.liveCaption">リアルタイム字幕</span>
+                  <span class="switch-desc" data-i18n="general.liveCaptionDesc">録音中に認識途中のテキストをポップアップに表示します（クラウド認識ではリクエスト数が増えます）</span>
+                </span>
+                <input type="checkbox" id="in-live-caption" class="switch" />
               </label>
             </div>
           </div>
