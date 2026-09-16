@@ -30,7 +30,7 @@ serde は全フィールド `#[serde(default = ...)]` で欠損に耐えるこ�
   "active_mode_id": "polish",
   "paste_mode": "paste",
   "restore_clipboard": true,
-  "autostart": false,
+  "autostart": true,
   "history_limit": 50,
   "stt": {
     "engine": "local",

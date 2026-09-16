@@ -23,7 +23,7 @@ pub struct Settings {
     pub paste_mode: String,
     #[serde(default = "default_true")]
     pub restore_clipboard: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub autostart: bool,
     #[serde(default = "default_history_limit")]
     pub history_limit: usize,
@@ -46,7 +46,7 @@ impl Default for Settings {
             active_mode_id: default_active_mode_id(),
             paste_mode: default_paste_mode(),
             restore_clipboard: true,
-            autostart: false,
+            autostart: true,
             history_limit: default_history_limit(),
             stt: SttSettings::default(),
             llm: LlmSettings::default(),
