@@ -1,7 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-  <!-- fire-speak app icon v3: a burning magic circle (thick ember ring +
-       hexagram) with a flame rising out of it. No dark disc: the ring itself
-       is the silhouette so it still reads at 16–32px. -->
+  <!-- fire-speak app icon v4: the burning magic circle fills the canvas;
+       the flame rises from its centre and licks over the top of the ring. -->
   <defs>
     <linearGradient id="ring" x1="0" y1="1" x2="1" y2="0">
       <stop offset="0" stop-color="#ff3a00"/>
@@ -24,13 +23,13 @@
       <stop offset="0.5" stop-color="#fff6dc"/>
       <stop offset="1" stop-color="#ffffff"/>
     </linearGradient>
-    <radialGradient id="haze" cx="50%" cy="55%" r="50%">
+    <radialGradient id="haze" cx="50%" cy="52%" r="50%">
       <stop offset="0" stop-color="#3a140c" stop-opacity="0.95"/>
-      <stop offset="0.75" stop-color="#1a0806" stop-opacity="0.85"/>
+      <stop offset="0.8" stop-color="#1a0806" stop-opacity="0.9"/>
       <stop offset="1" stop-color="#1a0806" stop-opacity="0"/>
     </radialGradient>
     <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="26"/>
+      <feGaussianBlur stdDeviation="22"/>
     </filter>
     <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
       <feGaussianBlur stdDeviation="9"/>
@@ -40,52 +39,51 @@
     </filter>
   </defs>
 
-  <!-- dark haze only inside the ring, so the flame has contrast; fades out
-       before the edge, so the icon has no hard black disc -->
-  <circle cx="512" cy="540" r="400" fill="url(#haze)"/>
+  <!-- dark haze inside the ring for flame contrast; fades before the rim -->
+  <circle cx="512" cy="520" r="440" fill="url(#haze)"/>
 
-  <!-- ring glow -->
-  <circle cx="512" cy="540" r="372" fill="none" stroke="#ff5a12" stroke-width="120" opacity="0.55" filter="url(#glow)"/>
+  <!-- ring glow (kept inside the canvas) -->
+  <circle cx="512" cy="520" r="436" fill="none" stroke="#ff5a12" stroke-width="90" opacity="0.5" filter="url(#glow)"/>
 
-  <!-- THE magic circle: thick ember ring -->
-  <circle cx="512" cy="540" r="372" fill="none" stroke="url(#ring)" stroke-width="64"/>
-  <!-- thin gold rim lines on both edges of the ring -->
-  <circle cx="512" cy="540" r="410" fill="none" stroke="#ffe29a" stroke-width="6" opacity="0.9"/>
-  <circle cx="512" cy="540" r="334" fill="none" stroke="#ffe29a" stroke-width="6" opacity="0.9"/>
-  <!-- rune notches cut into the ring (dark) -->
-  <g stroke="#2a0d08" stroke-width="14" stroke-linecap="round" opacity="0.9">
-    <line x1="512" y1="150" x2="512" y2="200"/>
-    <line x1="512" y1="880" x2="512" y2="930"/>
-    <line x1="122" y1="540" x2="172" y2="540"/>
-    <line x1="852" y1="540" x2="902" y2="540"/>
-    <line x1="236.3" y1="264.3" x2="271.6" y2="299.6"/>
-    <line x1="787.7" y1="264.3" x2="752.4" y2="299.6"/>
-    <line x1="236.3" y1="815.7" x2="271.6" y2="780.4"/>
-    <line x1="787.7" y1="815.7" x2="752.4" y2="780.4"/>
+  <!-- THE magic circle: thick ember ring, r 436, stroke 72 -> outer edge 984 -->
+  <circle cx="512" cy="520" r="436" fill="none" stroke="url(#ring)" stroke-width="72"/>
+  <!-- gold rim lines -->
+  <circle cx="512" cy="520" r="478" fill="none" stroke="#ffe29a" stroke-width="7" opacity="0.9"/>
+  <circle cx="512" cy="520" r="394" fill="none" stroke="#ffe29a" stroke-width="7" opacity="0.9"/>
+  <!-- rune notches cut into the ring -->
+  <g stroke="#2a0d08" stroke-width="16" stroke-linecap="round" opacity="0.9">
+    <line x1="512" y1="56" x2="512" y2="112"/>
+    <line x1="512" y1="928" x2="512" y2="984"/>
+    <line x1="48" y1="520" x2="104" y2="520"/>
+    <line x1="920" y1="520" x2="976" y2="520"/>
+    <line x1="183.9" y1="191.9" x2="223.5" y2="231.5"/>
+    <line x1="840.1" y1="191.9" x2="800.5" y2="231.5"/>
+    <line x1="183.9" y1="848.1" x2="223.5" y2="808.5"/>
+    <line x1="840.1" y1="848.1" x2="800.5" y2="808.5"/>
   </g>
-  <!-- small gold dots between notches -->
+  <!-- gold dots between notches -->
   <g fill="#fff0b8">
-    <circle cx="655" cy="196" r="9"/>
-    <circle cx="856" cy="397" r="9"/>
-    <circle cx="856" cy="683" r="9"/>
-    <circle cx="655" cy="884" r="9"/>
-    <circle cx="369" cy="884" r="9"/>
-    <circle cx="168" cy="683" r="9"/>
-    <circle cx="168" cy="397" r="9"/>
-    <circle cx="369" cy="196" r="9"/>
+    <circle cx="678.9" cy="117.2" r="10"/>
+    <circle cx="914.8" cy="353.1" r="10"/>
+    <circle cx="914.8" cy="686.9" r="10"/>
+    <circle cx="678.9" cy="922.8" r="10"/>
+    <circle cx="345.1" cy="922.8" r="10"/>
+    <circle cx="109.2" cy="686.9" r="10"/>
+    <circle cx="109.2" cy="353.1" r="10"/>
+    <circle cx="345.1" cy="117.2" r="10"/>
   </g>
 
-  <!-- hexagram, thick and bright so it survives downscaling -->
-  <g fill="none" stroke="#ff6a1a" stroke-width="34" stroke-linejoin="round" opacity="0.6" filter="url(#soft)">
-    <polygon points="512,262 752,678 272,678"/>
-    <polygon points="512,818 272,402 752,402"/>
+  <!-- hexagram (circumradius 330 around 512,520) -->
+  <g fill="none" stroke="#ff6a1a" stroke-width="38" stroke-linejoin="round" opacity="0.6" filter="url(#soft)">
+    <polygon points="512,190 797.8,685 226.2,685"/>
+    <polygon points="512,850 226.2,355 797.8,355"/>
   </g>
-  <g fill="none" stroke="url(#star)" stroke-width="20" stroke-linejoin="round">
-    <polygon points="512,262 752,678 272,678"/>
-    <polygon points="512,818 272,402 752,402"/>
+  <g fill="none" stroke="url(#star)" stroke-width="22" stroke-linejoin="round">
+    <polygon points="512,190 797.8,685 226.2,685"/>
+    <polygon points="512,850 226.2,355 797.8,355"/>
   </g>
 
-  <!-- flame: rises out of the circle, overlapping the top of the ring -->
+  <!-- flame: centred, tip licking over the top of the ring -->
   <path fill="#2a0d08" opacity="0.9" filter="url(#shadow)"
         d="M512 60c-40 130-190 230-190 400 0 120 84 216 190 216s190-96 190-216c0-92-42-152-76-198-10 80-48 108-74 118 18-96-8-228-40-320z"/>
   <path fill="#ff5a12" opacity="0.85" filter="url(#glow)"
@@ -97,10 +95,9 @@
 
   <!-- sparks -->
   <g fill="#ffe8a8">
-    <circle cx="392" cy="150" r="11"/>
-    <circle cx="640" cy="118" r="9"/>
-    <circle cx="700" cy="250" r="7"/>
-    <circle cx="330" cy="290" r="7"/>
-    <circle cx="604" cy="40" r="6"/>
+    <circle cx="392" cy="170" r="11"/>
+    <circle cx="640" cy="150" r="9"/>
+    <circle cx="700" cy="270" r="7"/>
+    <circle cx="330" cy="300" r="7"/>
   </g>
 </svg>
