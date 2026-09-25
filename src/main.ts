@@ -469,6 +469,25 @@ function wireSttSection(): void {
     settings.stt.cloud.model = input("in-cloud-model").value.trim();
     scheduleSave();
   });
+  // Presets fill URL + model only; the API key is provider-specific and
+  // stays for the user to paste (v0.8.1).
+  const STT_PRESETS: Record<string, { base_url: string; model: string }> = {
+    openai: { base_url: "https://api.openai.com/v1", model: "whisper-1" },
+    groq: { base_url: "https://api.groq.com/openai/v1", model: "whisper-large-v3-turbo" },
+  };
+  document.querySelectorAll<HTMLButtonElement>("[data-stt-preset]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      const preset = STT_PRESETS[btn.dataset.sttPreset ?? ""];
+      if (!settings || !preset) return;
+      settings.stt.cloud.base_url = preset.base_url;
+      settings.stt.cloud.model = preset.model;
+      input("in-cloud-base-url").value = preset.base_url;
+      input("in-cloud-model").value = preset.model;
+      scheduleSave();
+    });
+  });
+
   const cloudKey = input("in-cloud-api-key");
   cloudKey.addEventListener("input", () => {
     if (!settings) return;

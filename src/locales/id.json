@@ -47,6 +47,8 @@
   "stt.baseUrl": "Base URL",
   "stt.apiKey": "Kunci API",
   "stt.model": "Model",
+  "stt.preset": "Preset",
+  "stt.presetHint": "Groq menyediakan whisper-large-v3-turbo dengan cepat dan murah",
   "stt.testBtn": "🔌 Tes koneksi",
   "stt.autoModel": "Otomatis (model bawaan yang terpasang)",
   "stt.available": "Tersedia",

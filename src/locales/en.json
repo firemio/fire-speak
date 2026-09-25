@@ -47,6 +47,8 @@
   "stt.baseUrl": "Base URL",
   "stt.apiKey": "API key",
   "stt.model": "Model",
+  "stt.preset": "Preset",
+  "stt.presetHint": "Groq serves whisper-large-v3-turbo fast and at low cost",
   "stt.testBtn": "🔌 Test connection",
   "stt.autoModel": "Auto (default installed model)",
   "stt.available": "Available",

@@ -325,6 +325,12 @@ fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, S
                     if state.server_starting.swap(true, Ordering::SeqCst) {
                         // another caller is starting; wait and re-check
                         None
+                    } else if SERVER_SWAPPING.load(Ordering::SeqCst) {
+                        // a server download is replacing bin/: spawning the
+                        // old exe now would lock it (Windows) and break the
+                        // swap. Back off until the new build is in place.
+                        state.server_starting.store(false, Ordering::SeqCst);
+                        None
                     } else {
                         // we own the start
                         break;
@@ -709,11 +715,98 @@ fn extract_server_archive(archive: &Path, dest: &Path) -> Result<(), String> {
 
 /// Download the latest whisper.cpp server build for this platform and extract it.
 pub async fn download_whisper_server(app: AppHandle) -> Result<(), String> {
-    let result = download_whisper_server_inner(&app).await;
-    if let Err(e) = &result {
-        emit_progress(&app, "server", "whisper-server", 0, 0, true, Some(e));
+    use std::sync::atomic::Ordering;
+    // One download at a time (v0.8.1): the startup GPU upgrade may already be
+    // running when the user presses the install button. The second caller
+    // joins it — progress and the final done/error event come from the
+    // running download, which the frontend listens to either way.
+    if SERVER_DOWNLOADING.swap(true, Ordering::SeqCst) {
+        return Ok(());
+    }
+    let result = {
+        let _reset = FlagReset(&SERVER_DOWNLOADING);
+        download_whisper_server_inner(&app).await
+    };
+    match &result {
+        Ok(()) => prewarm(&app),
+        Err(e) => emit_progress(&app, "server", "whisper-server", 0, 0, true, Some(e)),
     }
     result
+}
+
+static SERVER_DOWNLOADING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Set while `download_whisper_server_inner` kills the running server and
+/// replaces `bin/`. `ensure_server_blocking` does not start a server while it
+/// is set, and the swap waits for an in-flight start to finish first
+/// (both sides store their own flag, then read the other's — SeqCst).
+static SERVER_SWAPPING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Clears a flag on drop, so an early return or panic cannot leave it set.
+struct FlagReset(&'static std::sync::atomic::AtomicBool);
+
+impl Drop for FlagReset {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Start the local whisper-server in the background so the first dictation
+/// does not wait for the model to load (v0.8.1). No-op for the cloud engine
+/// or when the server/model is not installed. Errors are only logged: the
+/// next transcription retries through `ensure_server` and reports them.
+pub fn prewarm(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let (local, installed) = {
+            let state = app.state::<crate::AppState>();
+            let settings = state.settings.lock().unwrap().clone();
+            (
+                settings.stt.engine == "local",
+                resolve_server_path(&app, &settings).is_some()
+                    && resolve_model_path(&app, &settings).is_some(),
+            )
+        };
+        if !local || !installed {
+            return;
+        }
+        if let Err(e) = ensure_server(app).await {
+            eprintln!("whisper-server prewarm failed: {e}");
+        }
+    });
+}
+
+/// The app-managed server is the CPU build although an NVIDIA GPU is present
+/// and the GPU switch is on — typically an install from before v0.8.
+fn needs_gpu_upgrade(app: &AppHandle, settings: &Settings) -> bool {
+    settings.stt.engine == "local"
+        && settings.stt.local.gpu
+        && settings.stt.local.server_path.trim().is_empty()
+        && gpu_available()
+        && resolve_server_path(app, settings)
+            .map(|exe| server_backend(&exe) == "cpu")
+            .unwrap_or(false)
+}
+
+/// Startup work for the local engine (v0.8.1): prewarm the server, and if an
+/// old CPU build sits on a machine with an NVIDIA GPU, replace it with the
+/// CUDA build in the background (staged; the CPU server keeps serving until
+/// the swap) and prewarm again.
+pub fn on_startup(app: &AppHandle) {
+    prewarm(app);
+    let settings = app.state::<crate::AppState>().settings.lock().unwrap().clone();
+    if !needs_gpu_upgrade(app, &settings) {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        // prewarms the new build itself on success
+        if let Err(e) = download_whisper_server(app).await {
+            eprintln!("automatic GPU server upgrade failed: {e}");
+        }
+    });
 }
 
 async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
@@ -814,10 +907,20 @@ async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
 
     // Swap: stop the running server (blocking kill/wait, off the async
     // worker), drop the old install, move the verified one into place.
+    // Block new server starts for the whole swap, and wait out one that is
+    // already spawning (it would otherwise hold the old exe open).
+    SERVER_SWAPPING.store(true, std::sync::atomic::Ordering::SeqCst);
+    let _swapping = FlagReset(&SERVER_SWAPPING);
     let app_kill = app.clone();
-    tokio::task::spawn_blocking(move || crate::setup::kill_server(&app_kill))
-        .await
-        .map_err(|e| format!("ERR_INTERNAL|kill server: {e}"))?;
+    tokio::task::spawn_blocking(move || {
+        let state = app_kill.state::<crate::AppState>();
+        while state.server_starting.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        crate::setup::kill_server(&app_kill)
+    })
+    .await
+    .map_err(|e| format!("ERR_INTERNAL|kill server: {e}"))?;
     if bin.exists() {
         tokio::fs::remove_dir_all(&bin)
             .await
@@ -826,6 +929,7 @@ async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
     tokio::fs::rename(&staging, &bin)
         .await
         .map_err(|e| format!("ERR_FILE_IO|install server: {e}"))?;
+    drop(_swapping);
 
     let Some(server_exe) = find_server_exe(&bin) else {
         return Err("ERR_NO_SERVER_ASSET".to_string());

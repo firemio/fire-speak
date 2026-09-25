@@ -250,8 +250,14 @@ fn apply_settings(app: &AppHandle, new_settings: Settings) -> Result<(), String>
         apply_autostart(app, new_settings.autostart)?;
     }
     if old_settings.stt != new_settings.stt {
-        // restart lazily on the next transcription
-        setup::kill_server(app);
+        if new_settings.stt.engine == "local" {
+            // ensure_server compares the launch signature, so this restarts
+            // the server only when a launch-relevant field changed (v0.8.1)
+            setup::prewarm(app);
+        } else {
+            // cloud engine: free the RAM/VRAM held by the local model
+            setup::kill_server(app);
+        }
     }
     rebuild_tray_menu(app, &new_settings);
     let _ = app.emit("settings-changed", &new_settings);
@@ -409,12 +415,15 @@ fn setup_status(app: AppHandle) -> Result<setup::SetupStatus, String> {
 
 #[tauri::command]
 async fn download_whisper_server(app: AppHandle) -> Result<(), String> {
+    // prewarms itself after a completed download (not when joining one)
     setup::download_whisper_server(app).await
 }
 
 #[tauri::command]
 async fn download_model(app: AppHandle, model: String) -> Result<(), String> {
-    setup::download_model(app, model).await
+    setup::download_model(app.clone(), model).await?;
+    setup::prewarm(&app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -579,6 +588,7 @@ pub fn run() {
                 eprintln!("autostart sync failed: {e}");
             }
             build_tray(&handle, &loaded)?;
+            setup::on_startup(&handle);
 
             // Launched by autostart with --hidden: start minimized to tray.
             if std::env::args().any(|a| a == "--hidden") {

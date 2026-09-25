@@ -773,6 +773,18 @@ select {
   cursor: pointer;
 }
 
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.preset-row .hint {
+  margin: 0;
+}
+
 .test-row {
   display: flex;
   align-items: center;

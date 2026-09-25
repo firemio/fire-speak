@@ -47,6 +47,8 @@
   "stt.baseUrl": "Base URL",
   "stt.apiKey": "API-Schlüssel",
   "stt.model": "Modell",
+  "stt.preset": "Vorlage",
+  "stt.presetHint": "Groq bietet whisper-large-v3-turbo schnell und günstig an",
   "stt.testBtn": "🔌 Verbindung testen",
   "stt.autoModel": "Automatisch (installiertes Standardmodell)",
   "stt.available": "Verfügbar",

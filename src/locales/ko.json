@@ -47,6 +47,8 @@
   "stt.baseUrl": "Base URL",
   "stt.apiKey": "API 키",
   "stt.model": "모델",
+  "stt.preset": "프리셋",
+  "stt.presetHint": "Groq는 whisper-large-v3-turbo를 빠르고 저렴하게 제공합니다",
   "stt.testBtn": "🔌 연결 테스트",
   "stt.autoModel": "자동 (설치된 기본 모델)",
   "stt.available": "사용 가능",

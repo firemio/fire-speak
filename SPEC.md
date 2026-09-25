@@ -518,3 +518,30 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 - ロケール追加(12 言語): `setup.backendCpu` `setup.backendCuda` `setup.gpuHint` `setup.installGpu` `stt.useGpu` `stt.useGpuDesc`。
 - 字幕ループの待機 `CAPTION_PERIOD_MS` を 1200 → 700ms(GPU では 1 リクエスト 1 秒未満なので更新が滑らかになる。CPU では逐次実行なので自然に間引かれる)。
 
+
+# v0.8.1 追加仕様: whisper-server の事前起動・CPU 版の自動 GPU 化・クラウドプリセット
+
+## 背景
+
+- v0.8.0 を入れた実機でも「認識が遅い」「字幕が出ない」: v0.8 以前に入れた **CPU 版 whisper-server が残ったまま**(CUDA 版は新規ダウンロード時しか選ばれない)で、さらにサーバは初回の文字起こし時に起動するため、アプリ起動後最初の発話は large-v3-turbo(1.6GB)の読み込みを待っていた。
+
+## バックエンド (setup.rs / lib.rs)
+
+- `setup::prewarm(app)`: engine=`local` かつサーバ・モデルが解決できるとき、バックグラウンドで `ensure_server` を呼ぶ。失敗はログのみ(次の文字起こしで同じエラーが通常経路で出る)。
+- `setup::on_startup(app)`(`setup()` の最後): `prewarm` した上で、次をすべて満たすとき CUDA 版を**自動でダウンロードして入れ替え**、完了後に再度 `prewarm`:
+  engine=`local`、`stt.local.gpu`=true、`stt.local.server_path` が空(アプリ管理のサーバ)、`gpu_available()`、インストール済みサーバの `server_backend`=`cpu`。
+  ステージング方式(v0.8)なので、ダウンロード中は CPU 版がそのまま使える。進捗・完了/失敗は通常の `download-progress` で通知される(設定画面を開いていればトースト)。
+- `download_whisper_server` は同時に 1 本だけ: 実行中に呼ばれた 2 本目は即 `Ok(())` を返し、進行中のダウンロードに合流する(フロントは `download-progress` の done/error で後処理する)。
+- コマンド `download_whisper_server` / `download_model` は成功後に `prewarm`(サーバは実際にダウンロードした呼び出しだけ。合流した呼び出しはしない)。
+- **入れ替え中は起動しない**: サーバの kill→`bin/` 削除→rename の間は `SERVER_SWAPPING` を立てる。`ensure_server_blocking` は `server_starting` を取った後に `SERVER_SWAPPING` を確認し、立っていれば手放して待つ。入れ替え側はフラグを立てた後、進行中の起動(`server_starting`)が終わるのを待ってから kill する(双方が自分のフラグを書いてから相手のフラグを読む、SeqCst)。古い exe を掴んだまま起動されて Windows で `bin/` が中途半端に消える事故を防ぐ。どちらのフラグも Drop ガードで確実に下ろす。
+- `apply_settings` で `stt` が変わったとき: engine=`local` なら `prewarm`(`ensure_server` の起動シグネチャ比較により、起動に関わる値が変わったときだけ再起動)、`cloud` ならサーバを停止してメモリ/VRAM を解放。
+- トレードオフ: ローカルエンジンではアプリ起動中ずっとモデルが常駐する(large-v3-turbo で RAM または VRAM 約 2GB)。
+
+## フロントエンド
+
+- クラウド STT パネルの先頭に**プリセット**行: `OpenAI`(`https://api.openai.com/v1` / `whisper-1`)、`Groq`(`https://api.groq.com/openai/v1` / `whisper-large-v3-turbo`)。Base URL とモデルだけを埋め、API キーは変更しない。
+- ロケール追加(12 言語): `stt.preset` `stt.presetHint`。
+
+## 今後(v0.9 予定)
+
+- NPU 対応: STT エンジンを ONNX Runtime 系(DirectML / OpenVINO / QNN / VitisAI の EP)に拡張する。whisper.cpp の配布バイナリには NPU 対応が無いため別エンジンとして追加する。

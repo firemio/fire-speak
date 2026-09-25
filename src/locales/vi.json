@@ -47,6 +47,8 @@
   "stt.baseUrl": "Base URL",
   "stt.apiKey": "Khóa API",
   "stt.model": "Mô hình",
+  "stt.preset": "Mẫu có sẵn",
+  "stt.presetHint": "Groq cung cấp whisper-large-v3-turbo nhanh và giá rẻ",
   "stt.testBtn": "🔌 Kiểm tra kết nối",
   "stt.autoModel": "Tự động (mô hình mặc định đã cài)",
   "stt.available": "Khả dụng",

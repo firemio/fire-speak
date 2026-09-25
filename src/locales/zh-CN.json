@@ -47,6 +47,8 @@
   "stt.baseUrl": "Base URL",
   "stt.apiKey": "API 密钥",
   "stt.model": "模型",
+  "stt.preset": "预设",
+  "stt.presetHint": "Groq 以高速、低价提供 whisper-large-v3-turbo",
   "stt.testBtn": "🔌 测试连接",
   "stt.autoModel": "自动（已安装的默认模型）",
   "stt.available": "可用",
