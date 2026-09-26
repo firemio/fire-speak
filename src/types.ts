@@ -115,6 +115,8 @@ export interface SetupStatus {
   npu_cache_ready: boolean;
   /** Model the one-click setup installs for this machine (v0.9.1). */
   recommended_model: string;
+  /** The managed whisper-server is running (model loaded) (v0.9.2). */
+  server_running: boolean;
 }
 
 export interface Hardware {

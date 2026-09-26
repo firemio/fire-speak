@@ -615,3 +615,14 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
   - 主ボタン `onboard.start`(未完了手順の合計サイズ)→ 実行中 `onboard.running`。完了で `onboard.done`(ホットキー名入り)をトーストし、カードが消えてヒーローに戻る。失敗は `onboard.failed`(ダウンロード系エラーは各イベントでトースト済みなので重複させない)。
   - 副ボタン `onboard.useCloud`: engine を cloud にして保存し「音声認識」画面(クラウド設定)へ移動。
 - `msg.ERR_SETUP_REQUIRED` を「ホーム画面の『セットアップを開始』を押してください」に変更(12 言語)。
+
+# v0.9.2 追加仕様: ホームの「動作状況」カード
+
+- 背景: ホームを見ても何がインストール済みで何が未設定か分からない。
+- ホームのヒーローの下に `#home-status`(見出し `sys.heading`)。初回セットアップカードが出ている間は隠す(同じ情報をそちらが出す)。各行 = 状態マーク(✓ ok / ! warn / ✕ missing)+ 項目名 + 値 + 「変更」ボタン(該当画面へ移動)。
+  - ローカル: 音声認識エンジン(`sys.build` のビルド名 + `sys.running` 起動中 / `sys.idle` 停止中、未導入は ✕)、音声モデル(モデル名、未導入は ✕)、処理デバイス(GPU 名 → 解決先。入っているビルドが合わなければ !)、NPU 時は NPU エンコーダ。
+  - クラウド: `sys.cloud`(ホスト / モデル、API キーが空なら ✕)。
+  - 認識言語: 言語名、`auto` は ! `sys.langAuto`(遅い)。
+  - AI整形: アクティブモードが LLM を使わないなら `sys.llmOff`、使えるプロバイダ(`llm::is_configured` と同じ判定をフロントで再現)ならプロバイダ名(モデル)、使えなければ ! `sys.llmNoKey`。
+- `SetupStatus.server_running`(管理中の whisper-server が生存)。バックエンドはサーバ起動成功時と `kill_server` で停止したときに `server-state`(bool)を emit し、フロントは setup_status を取り直す。ホームに切り替えたときも取り直す。
+- ロケール追加(12 言語): `sys.*` 18 キー。

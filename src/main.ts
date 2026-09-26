@@ -198,6 +198,8 @@ function showSection(name: string): void {
   for (const sec of document.querySelectorAll<HTMLElement>(".section")) {
     sec.classList.toggle("is-active", sec.id === `section-${name}`);
   }
+  // settings may have changed on another screen: refresh the status card
+  if (name === "home") void refreshSetupStatus();
   // Keep the data-i18n key in sync so applyDom() re-translates the title on
   // language change.
   const title = $("section-title");
@@ -251,6 +253,7 @@ function renderHome(): void {
   if (!settings) return;
   $("home-hotkey").textContent = displayHotkey(settings.hotkey);
   renderOnboard();
+  renderHomeStatus();
   renderHomeModes();
   renderHomeRecent();
 }
@@ -418,6 +421,123 @@ function wireOnboard(): void {
     renderOnboard();
     showSection("stt");
   });
+}
+
+// ---------------------------------------------------------------------------
+// home: status card — what is installed / configured (v0.9.2)
+// ---------------------------------------------------------------------------
+
+/** Mirror of `llm::is_configured`: a key, or an OpenAI-compatible server on localhost. */
+function providerReady(p: LlmProvider): boolean {
+  if (p.api_key.trim() !== "") return true;
+  if (p.kind === "anthropic") return false;
+  try {
+    const host = new URL(p.base_url).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    return ["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(host);
+  } catch {
+    return false;
+  }
+}
+
+type StatusLevel = "ok" | "warn" | "missing";
+
+function statusRow(level: StatusLevel, label: string, value: string, section: string): HTMLElement {
+  const row = el("div", `sys-row is-${level}`);
+  row.appendChild(el("span", "sys-mark", level === "ok" ? "✓" : level === "warn" ? "!" : "✕"));
+  row.appendChild(el("span", "sys-label", label));
+  row.appendChild(el("span", "sys-value", value));
+  const link = el("button", "btn btn-ghost btn-sm sys-change", t("sys.change")) as HTMLButtonElement;
+  link.type = "button";
+  link.addEventListener("click", () => showSection(section));
+  row.appendChild(link);
+  return row;
+}
+
+/** Model name from a resolved model path (`…/ggml-large-v3-turbo.bin` -> `large-v3-turbo`). */
+function modelNameFromPath(path: string): string {
+  const file = path.split(/[\\/]/).pop() ?? path;
+  return file.replace(/^ggml-/, "").replace(/\.bin$/, "");
+}
+
+function renderHomeStatus(): void {
+  const card = $("home-status");
+  const heading = $("home-status-heading");
+  const s = setupStatus;
+  // While the setup card is up it already lists what is missing.
+  const hidden = !settings || !s || !$("home-setup").hidden;
+  card.hidden = hidden;
+  heading.hidden = hidden;
+  if (hidden || !settings || !s) return;
+
+  card.textContent = "";
+  if (settings.stt.engine === "local") {
+    const backend = s.server_backend || "cpu";
+    const build = t("sys.build", ACCEL_SHORT[backend] ?? "CPU");
+    card.appendChild(
+      s.server_installed
+        ? statusRow("ok", t("sys.engine"), `${build} · ${t(s.server_running ? "sys.running" : "sys.idle")}`, "stt")
+        : statusRow("missing", t("sys.engine"), t("sys.notInstalled"), "stt"),
+    );
+    card.appendChild(
+      s.model_installed
+        ? statusRow("ok", t("sys.model"), modelNameFromPath(s.model_path), "stt")
+        : statusRow("missing", t("sys.model"), t("sys.notInstalled"), "stt"),
+    );
+    const found = s.hw.gpus.length ? s.hw.gpus.join(" / ") : t("stt.noGpu");
+    const mismatch = s.server_installed && !buildSatisfies(backend, s.effective_accel);
+    card.appendChild(
+      statusRow(
+        mismatch ? "warn" : "ok",
+        t("sys.device"),
+        `${found} → ${ACCEL_SHORT[s.effective_accel] ?? "CPU"}`,
+        "stt",
+      ),
+    );
+    if (s.effective_accel === "npu") {
+      card.appendChild(
+        statusRow(
+          s.npu_cache_ready ? "ok" : "missing",
+          t("sys.npu"),
+          t(s.npu_cache_ready ? "common.installed" : "sys.notInstalled"),
+          "stt",
+        ),
+      );
+    }
+  } else {
+    const cloud = settings.stt.cloud;
+    let host = cloud.base_url;
+    try {
+      host = new URL(cloud.base_url).host;
+    } catch {
+      /* keep the raw value */
+    }
+    const hasKey = cloud.api_key.trim() !== "";
+    card.appendChild(
+      statusRow(
+        hasKey ? "ok" : "missing",
+        t("sys.cloud"),
+        hasKey ? t("sys.cloudReady", `${host} / ${cloud.model}`) : t("sys.cloudKeyMissing"),
+        "stt",
+      ),
+    );
+  }
+
+  const lang = STT_LANGS.find((l) => l.code === settings?.language);
+  card.appendChild(
+    lang
+      ? statusRow("ok", t("sys.language"), lang.label, "general")
+      : statusRow("warn", t("sys.language"), t("sys.langAuto"), "general"),
+  );
+
+  const mode = settings.modes.find((m) => m.id === settings?.active_mode_id);
+  const provider = settings.llm.providers.find((p) => p.id === settings?.llm.active_provider_id);
+  if (mode && !mode.use_llm) {
+    card.appendChild(statusRow("ok", t("sys.llm"), t("sys.llmOff", mode.name), "llm"));
+  } else if (provider && providerReady(provider)) {
+    card.appendChild(statusRow("ok", t("sys.llm"), `${provider.name} (${provider.model})`, "llm"));
+  } else {
+    card.appendChild(statusRow("warn", t("sys.llm"), t("sys.llmNoKey", provider?.name ?? "—"), "llm"));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1566,6 +1686,7 @@ async function refreshSetupStatus(): Promise<void> {
   renderServerCard();
   renderSttModelList();
   renderOnboard();
+  renderHomeStatus();
 }
 
 function wireServerCard(): void {
@@ -1874,6 +1995,11 @@ async function setupListeners(): Promise<void> {
 
   await listen<null>("history-updated", () => {
     void refreshHistory();
+  });
+
+  // whisper-server started / stopped: the home status card shows it
+  await listen<boolean>("server-state", () => {
+    void refreshSetupStatus();
   });
 
   await listen<DownloadProgressPayload>("download-progress", (event) => {

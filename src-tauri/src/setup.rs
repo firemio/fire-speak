@@ -117,6 +117,21 @@ pub struct SetupStatus {
     pub npu_cache_ready: bool,
     /// Model the one-click setup installs for this machine (v0.9.1).
     pub recommended_model: String,
+    /// The managed whisper-server process is running (model loaded) (v0.9.2).
+    pub server_running: bool,
+}
+
+/// Whether the managed whisper-server process is alive.
+fn server_running(app: &AppHandle) -> bool {
+    app.try_state::<crate::AppState>()
+        .and_then(|state| {
+            state.server.lock().ok().map(|mut guard| {
+                guard
+                    .as_mut()
+                    .is_some_and(|m| matches!(m.child.try_wait(), Ok(None)))
+            })
+        })
+        .unwrap_or(false)
 }
 
 /// Model for the one-click setup: large-v3-turbo wherever a GPU/NPU runs it
@@ -388,6 +403,7 @@ pub fn get_setup_status(app: &AppHandle, settings: &Settings) -> Result<SetupSta
         effective_accel: effective_accel(settings).to_string(),
         npu_cache_ready: npu_cache_ready(app, settings),
         recommended_model: recommended_model(effective_accel(settings)).to_string(),
+        server_running: server_running(app),
         model_installed: model.is_some(),
         model_path: model
             .map(|p| p.to_string_lossy().to_string())
@@ -495,6 +511,9 @@ fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, S
     match result {
         Ok(managed) => {
             *guard = Some(managed);
+            drop(guard);
+            // the home status card shows whether the engine is loaded
+            let _ = app.emit("server-state", true);
             Ok(port)
         }
         Err(e) => Err(e),
@@ -652,6 +671,7 @@ pub fn kill_server(app: &AppHandle) {
             terminate(&mut managed.child);
             // on Windows, dropping `managed.job` closes the job handle, which
             // also kills the process tree thanks to kill-on-close
+            let _ = app.emit("server-state", false);
         }
     }
 }
