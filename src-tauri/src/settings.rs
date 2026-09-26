@@ -123,6 +123,15 @@ pub struct LocalSttSettings {
     /// (v0.8). Off = CPU build / `--no-gpu`.
     #[serde(default = "default_true")]
     pub gpu: bool,
+    /// Accelerator for the local engine (v0.9): "auto" | "cuda" | "vulkan" |
+    /// "npu" | "cpu". "auto" picks CUDA on NVIDIA, Vulkan on AMD Radeon,
+    /// else CPU — and CPU when the legacy `gpu` switch is off.
+    #[serde(default = "default_accel")]
+    pub accel: String,
+}
+
+fn default_accel() -> String {
+    "auto".to_string()
 }
 
 impl Default for LocalSttSettings {
@@ -132,6 +141,7 @@ impl Default for LocalSttSettings {
             model_path: String::new(),
             server_path: String::new(),
             gpu: true,
+            accel: default_accel(),
             threads: default_threads(),
         }
     }

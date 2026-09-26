@@ -148,7 +148,7 @@ user メッセージ = STTの生テキスト。
 - 管理ディレクトリ: `{app_data_dir}/bin/`(whisper-server) と `{app_data_dir}/models/`
 - **whisper-server ダウンロード**: GitHub API `https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest` → assets から名前に `bin-x64` を含む `.zip`(無ければ `(?i)win.*x64.*\.zip`)を選び、User-Agent必須でDL → zip展開 → `*server*.exe` を探して `server_path` 確定(dll類も同フォルダに展開)。進捗を `download-progress` で送出。
 - **モデルDL**: `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{name}.bin` (リダイレクト追従)。サイズ目安: tiny=78MB, base=148MB, small=488MB, medium=1533MB, large-v3-turbo=1624MB。
-- **サーバ起動**: 初回transcribe時または設定変更時に spawn: `whisper-server.exe -m {model} --port {port} --host 127.0.0.1 -t {threads}`。Windowsでは `creation_flags(0x08000000)` (CREATE_NO_WINDOW)。起動後TCP接続でヘルスチェック(最長20秒リトライ)。アプリ終了時・設定変更時にkill。
+- **サーバ起動**: 初回transcribe時または設定変更時に spawn: `whisper-server.exe -m {model} --port {port} --host 127.0.0.1 -t {threads}`。Windowsでは `creation_flags(0x08000000)` (CREATE_NO_WINDOW)。起動後TCP接続でヘルスチェック(最長20秒リトライ、v0.9 で 60 秒)。アプリ終了時・設定変更時にkill。
 - モデル/サーバ未インストールで engine=local のままtranscribe要求 → エラーメッセージ「セットアップ画面からWhisperサーバとモデルをインストールしてください」。
 
 ## トレイ (Rust)
@@ -542,6 +542,55 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 - クラウド STT パネルの先頭に**プリセット**行: `OpenAI`(`https://api.openai.com/v1` / `whisper-1`)、`Groq`(`https://api.groq.com/openai/v1` / `whisper-large-v3-turbo`)。Base URL とモデルだけを埋め、API キーは変更しない。
 - ロケール追加(12 言語): `stt.preset` `stt.presetHint`。
 
-## 今後(v0.9 予定)
+# v0.9 追加仕様: AMD GPU (Vulkan) / AMD NPU 対応
 
-- NPU 対応: STT エンジンを ONNX Runtime 系(DirectML / OpenVINO / QNN / VitisAI の EP)に拡張する。whisper.cpp の配布バイナリには NPU 対応が無いため別エンジンとして追加する。
+## 背景
+
+- Ryzen AI Max+ 395(Strix Halo: Radeon 8060S iGPU 40CU + XDNA2 NPU 50TOPS)で「遅い」: v0.8 までの GPU 対応は NVIDIA CUDA のみで、AMD 機は CPU 版だった。
+- whisper.cpp 公式リリースに Windows の Vulkan / NPU ビルドは無い。AMD のローカル AI サーバ **Lemonade** が whisper.cpp のフォーク `lemonade-sdk/whisper.cpp-rocm` で `whisper-server` の Vulkan / NPU / ROCm ビルドを配布しており(HTTP API は本家と同じ)、NPU 用のコンパイル済みエンコーダ(`.rai`)を AMD が Hugging Face `amd/whisper-*-onnx-npu` で公開している(Lemonade の `server_models.json` の `npu_cache` と同じ)。これをそのまま使う。
+- 実測(RTX 4070 Ti SUPER, large-v3-turbo, 11 秒の日本語): Vulkan 0.15〜0.2 s / CUDA 0.16 s / CPU 8 スレッド 6.5 s。Vulkan の初回リクエストはシェーダのコンパイルで約 3.5 s → 事前起動時にウォームアップする。
+- NPU ビルドはエンコーダだけを NPU で動かし、デコーダは CPU。8060S の iGPU(Vulkan)はモデル全体を GPU で動かすので、速度は Vulkan の方が有利と見込み、**自動選択では NPU を選ばない**(省電力を求めるユーザーが明示的に選ぶ)。AMD 実機での速度比較は未実施。
+
+## 設定
+
+- `stt.local.accel: "auto" | "cuda" | "vulkan" | "npu" | "cpu"`(既定 `"auto"`)。v0.8 の `stt.local.gpu` は残し、`auto` かつ `gpu=false` なら CPU(既存ユーザーの「GPU オフ」を尊重)。UI で選ぶと `gpu = accel !== "cpu"` に揃える。
+- 解決(`hw::resolve_accel`): 明示値はそのプラットフォームで選べるもの(`hw::supported_accels`: Windows x64 = auto/cuda/vulkan/npu/cpu、Linux x64 = auto/vulkan/cpu、その他 = auto/cpu)ならそのまま。`auto` = NVIDIA ドライバ → `cuda`、**型番付きの AMD Radeon**(8060S / 780M / RX … 名前に数字を含む) + Vulkan ローダ → `vulkan`、それ以外 → `cpu`。デスクトップ Ryzen 内蔵の無印「AMD Radeon(TM) Graphics」(2CU)は CPU より遅いことがあるので対象外。Linux は sysfs で iGPU の規模を判別できないため auto では Vulkan を選ばない(明示選択のみ、実機未検証)。
+
+## ハードウェア検出 (hw.rs)
+
+- Windows: `System32\nvcuda.dll`(NVIDIA)、`System32\vulkan-1.dll`(Vulkan ローダ)、PowerShell(CREATE_NO_WINDOW、8 秒でタイムアウトして kill)で `Win32_VideoController` の名前一覧と `Win32_PnPEntity` の `NPU Compute Accelerator` デバイス数(Lemonade と同じ判定 = ドライバ導入済み NPU)。プロセス内で 1 回だけ実行してキャッシュ。起動時の `sync_server_build` が blocking スレッドで先に叩くので設定画面は通常待たない。
+- `SetupStatus` に `hw`(nvidia/amd_gpu/vulkan/npu/gpus)、`accel_options`、`effective_accel`、`npu_cache_ready` を追加。`server_backend` は `npu`(flexmlrt.dll)> `cuda`(ggml-cuda)> `vulkan`(ggml-vulkan)> `cpu` の順で判定。
+
+## サーバのビルド
+
+- ダウンロード元: `cuda`/`cpu` は従来どおり ggml-org/whisper.cpp の最新リリース。`vulkan`/`npu` は **`lemonade-sdk/whisper.cpp-rocm` の `v1.8.4` に固定**(`whisper-v1.8.4-windows-vulkan-x64.zip` 20MB、`whisper-v1.8.4-windows-npu-x64.zip` 3MB、Linux は `whisper-v1.8.4-linux-vulkan-x86_64.tar.gz`)し、GitHub が公開するアセットの SHA-256 と照合(不一致は `ERR_DOWNLOAD_FAILED`)。展開・ステージング・入れ替えは v0.8/v0.8.1 と同じ。
+- 再利用: `hw::build_satisfies(installed, wanted)` = 同じビルド、または CPU を CUDA/Vulkan ビルドで `--no-gpu` 実行。NPU ビルドは CPU 用に流用しない。
+- 起動引数: CPU が欲しいのに CUDA/Vulkan ビルドなら `--no-gpu`。起動シグネチャに `backend=` と `no_gpu=` を含める(入れ替え直後の旧ビルド起動を次回呼び出しで再起動させる)。
+- ヘルスチェックの上限を 20 → **60 秒**(NPU ビルドは 700MB のエンコーダを読む。子プロセスが死んだ場合は従来どおり即エラー)。
+
+## NPU エンコーダ (.rai)
+
+- 置き場所はモデルと同じフォルダの `ggml-{name}-encoder-vitisai.rai`(NPU ビルドの whisper-server がこの名前で探す)。取得元: tiny/base/small/medium = `amd/whisper-{name}-onnx-npu`、large-v3-turbo = `amd/whisper-large-turbo-onnx-npu`(約 708MB)。`.rai.part` に書いてから rename。
+- NPU ビルドでエンコーダが無いときは起動せず `ERR_NPU_CACHE_MISSING`。管理外モデル(パス上書き)や対応表に無いモデルは `ERR_NPU_NO_CACHE`。
+- コマンド `download_npu_cache`(進捗 `download-progress` の kind=`npu`, name=`npu-encoder`、同時 1 本・合流)。サーバのビルドと同時に走りうるので進捗バーは別(`#npu-progress`)。
+- `setup_status` は async + `spawn_blocking`(初回はハードウェア検出で最大 8 秒かかりうるため、メインスレッドで実行しない)。
+
+## 自動同期 (`setup::sync_server_build`)
+
+- 起動時、`stt` 設定変更時(engine=local)、モデルのダウンロード後に実行。hw を blocking スレッドで確定 → engine=local のときだけ:
+  1. アプリ管理サーバ(server_path 空)がインストール済みで `build_satisfies` を満たさなければ、欲しいビルドをバックグラウンドでダウンロード・入れ替え(未インストールからの初回導入は従来どおりユーザー操作)。実行中のダウンロードに合流した場合はその終了を待ち、改めて `build_satisfies` を確認して満たさなければ終了(後続の同期に任せる)。
+  - 入れ替えが済むまでは旧ビルドがそのまま応答する(旧ビルドの性質で動く。例: NPU→GPU に切り替えた直後はまだ NPU ビルド)。
+  2. NPU で、アクティブモデルのエンコーダが無ければダウンロード。
+  3. `prewarm`。
+- `prewarm` はサーバ起動後、CPU 以外なら 1 秒の無音で 1 回推論してカーネルをコンパイルさせる(結果は捨てる)。
+
+## フロントエンド
+
+- サーバカード: バッジに `setup.backendVulkan` / `setup.backendNpu` を追加。**処理デバイス**セレクタ(`stt.accel`、選択肢 `stt.accelAuto/Cuda/Vulkan/Npu/Cpu`、`accel_options` のものだけ)と検出結果の行(`stt.accelDetected` + `stt.noGpu` / `stt.npuFound` → 解決先の短い名前 CUDA/Vulkan/NPU/CPU)。変更は即保存して setup_status を取り直す。
+- インストール済みビルドが合わないとき `setup.buildHint` と主ボタン `setup.installBuild`(短い名前を埋め込む)。NPU でエンコーダが無いとき `setup.npuCacheHint` + ボタン `setup.npuCacheInstall`。進捗はサーバカードの進捗バーを共用し、完了/失敗は `setup.npuCacheDownloaded` / `setup.npuCacheFailed`。
+- 詳細設定の「GPU を使う」スイッチは廃止(`stt.useGpu` `stt.useGpuDesc` `setup.gpuHint` `setup.installGpu` を 12 言語から削除)。`msg.ERR_NPU_CACHE_MISSING` `msg.ERR_NPU_NO_CACHE` を追加。
+
+## 未検証
+
+- AMD 実機(Vulkan on Radeon / NPU)での動作と速度。開発機(RTX 4070 Ti SUPER)では Lemonade の Vulkan ビルドが NVIDIA 上で動くこと、ハッシュ・URL、UI(スタブで Strix Halo 構成を再現)を確認。
+- NPU には AMD の NPU ドライバ(Ryzen AI 対応ドライバ)が必要。未導入だと検出行に「NPU あり」が出ず、選んでもサーバが起動しない(`ERR_SERVER_DIED`)。

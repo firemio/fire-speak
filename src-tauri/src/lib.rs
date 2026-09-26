@@ -1,5 +1,6 @@
 mod audio;
 mod history;
+mod hw;
 mod hook;
 mod llm;
 mod locale;
@@ -253,7 +254,9 @@ fn apply_settings(app: &AppHandle, new_settings: Settings) -> Result<(), String>
         if new_settings.stt.engine == "local" {
             // ensure_server compares the launch signature, so this restarts
             // the server only when a launch-relevant field changed (v0.8.1)
-            setup::prewarm(app);
+            // downloads a different server build / NPU encoder if the new
+            // settings need one, then prewarms (v0.9)
+            setup::sync_server_build(app);
         } else {
             // cloud engine: free the RAM/VRAM held by the local model
             setup::kill_server(app);
@@ -407,10 +410,16 @@ async fn test_llm(app: AppHandle, provider_id: String) -> Result<String, String>
     llm::test(&provider).await
 }
 
+/// Async + blocking pool: the first call may run the hardware probe
+/// (PowerShell/WMI, up to 8 s), which must never block the main thread.
 #[tauri::command]
-fn setup_status(app: AppHandle) -> Result<setup::SetupStatus, String> {
-    let settings = app.state::<AppState>().settings.lock().unwrap().clone();
-    setup::get_setup_status(&app, &settings)
+async fn setup_status(app: AppHandle) -> Result<setup::SetupStatus, String> {
+    tokio::task::spawn_blocking(move || {
+        let settings = app.state::<AppState>().settings.lock().unwrap().clone();
+        setup::get_setup_status(&app, &settings)
+    })
+    .await
+    .map_err(|e| format!("ERR_INTERNAL|setup status: {e}"))?
 }
 
 #[tauri::command]
@@ -422,6 +431,14 @@ async fn download_whisper_server(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn download_model(app: AppHandle, model: String) -> Result<(), String> {
     setup::download_model(app.clone(), model).await?;
+    // NPU mode: also fetches the new model's compiled encoder; then prewarms
+    setup::sync_server_build(&app);
+    Ok(())
+}
+
+#[tauri::command]
+async fn download_npu_cache(app: AppHandle) -> Result<(), String> {
+    setup::download_npu_cache(app.clone()).await?;
     setup::prewarm(&app);
     Ok(())
 }
@@ -624,6 +641,7 @@ pub fn run() {
             setup_status,
             download_whisper_server,
             download_model,
+            download_npu_cache,
             open_config_dir,
             quit_app,
             check_update,

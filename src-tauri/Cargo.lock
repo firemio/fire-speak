@@ -1370,7 +1370,7 @@ checksum = "d45db016d36b838f563236e9193d0ee6ce38f3f68b6c94e914b4929c96bbb890"
 
 [[package]]
 name = "fire-speak"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "arboard",
  "cpal",
@@ -1378,11 +1378,13 @@ dependencies = [
  "enigo",
  "flate2",
  "futures-util",
+ "hex",
  "hound",
  "libc",
  "reqwest",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "sys-locale",
  "tar",
  "tauri",

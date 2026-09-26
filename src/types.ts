@@ -11,8 +11,11 @@ export interface LocalSttSettings {
   model_path: string;
   server_path: string;
   threads: number;
-  /** Use the GPU (CUDA build) when available (v0.8). */
+  /** Legacy v0.8 GPU switch; "auto" resolves to CPU when false. Kept in sync
+   * with `accel` (accel !== "cpu"). */
   gpu: boolean;
+  /** v0.9: "auto" | "cuda" | "vulkan" | "npu" | "cpu". */
+  accel: string;
 }
 
 export interface CloudSttSettings {
@@ -100,8 +103,24 @@ export interface SetupStatus {
   models: SetupModelInfo[];
   /** NVIDIA driver present: the CUDA whisper-server build can run (v0.8). */
   gpu_available: boolean;
-  /** Installed server build: "cuda" | "cpu" | "" (not installed). */
+  /** Installed server build: "cuda" | "vulkan" | "npu" | "cpu" | "" (not installed). */
   server_backend: string;
+  /** Detected accelerators (v0.9). */
+  hw: Hardware;
+  /** `stt.local.accel` values selectable on this platform. */
+  accel_options: string[];
+  /** What the saved settings resolve to: "cuda" | "vulkan" | "npu" | "cpu". */
+  effective_accel: string;
+  /** NPU mode: the compiled encoder for the active model is on disk. */
+  npu_cache_ready: boolean;
+}
+
+export interface Hardware {
+  nvidia: boolean;
+  amd_gpu: boolean;
+  vulkan: boolean;
+  npu: boolean;
+  gpus: string[];
 }
 
 export type AppStatus =
@@ -148,7 +167,7 @@ export interface UpdateProgressPayload {
 }
 
 export interface DownloadProgressPayload {
-  kind: "server" | "model";
+  kind: "server" | "model" | "npu";
   name: string;
   downloaded: number;
   total: number;

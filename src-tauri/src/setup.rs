@@ -103,40 +103,151 @@ pub struct SetupStatus {
     /// An NVIDIA driver is installed (Windows: nvcuda.dll present), so the
     /// CUDA build of whisper-server can run here (v0.8).
     pub gpu_available: bool,
-    /// Build of the installed server: "cuda" | "cpu" | "" (not installed).
+    /// Build of the installed server: "cuda" | "vulkan" | "npu" | "cpu" | ""
+    /// (not installed).
     pub server_backend: String,
+    /// Detected accelerators (v0.9).
+    pub hw: crate::hw::Hardware,
+    /// Values of `stt.local.accel` selectable on this platform.
+    pub accel_options: Vec<String>,
+    /// What the current settings resolve to: "cuda" | "vulkan" | "npu" | "cpu".
+    pub effective_accel: String,
+    /// NPU mode only: the compiled encoder (.rai) for the active model is on
+    /// disk. Always true outside NPU mode.
+    pub npu_cache_ready: bool,
 }
 
 /// Whether the NVIDIA driver (and therefore CUDA) is present on this machine.
-/// Windows only: the whisper.cpp releases ship CUDA builds for Windows x64
-/// alone, so on other platforms this is always false.
 pub fn gpu_available() -> bool {
-    #[cfg(windows)]
-    {
-        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
-        Path::new(&root).join("System32").join("nvcuda.dll").exists()
-    }
-    #[cfg(not(windows))]
-    {
-        false
-    }
+    crate::hw::get().nvidia
 }
 
-/// "cuda" when the ggml CUDA backend library sits next to the server
-/// executable (whisper.cpp CUDA builds ship ggml-cuda.dll), else "cpu".
+/// The concrete build the current settings ask for (see `hw::resolve_accel`).
+pub fn effective_accel(settings: &Settings) -> &'static str {
+    crate::hw::resolve_accel(
+        &settings.stt.local.accel,
+        settings.stt.local.gpu,
+        crate::hw::get(),
+    )
+}
+
+/// Which build sits next to the server executable, from its backend
+/// libraries: the Lemonade NPU build ships the VitisAI runtime (flexmlrt),
+/// CUDA builds ggml-cuda, Vulkan builds ggml-vulkan; otherwise "cpu".
 /// A heuristic for the app-managed install; a custom `server_path` packaged
 /// differently may be reported as "cpu".
 pub fn server_backend(server_exe: &Path) -> &'static str {
     let dir = server_exe.parent().unwrap_or(server_exe);
-    let cuda = std::fs::read_dir(dir)
+    let names: Vec<String> = std::fs::read_dir(dir)
         .map(|rd| {
-            rd.flatten().any(|e| {
-                let n = e.file_name().to_string_lossy().to_ascii_lowercase();
-                n.starts_with("ggml-cuda") && (n.ends_with(".dll") || n.ends_with(".so"))
-            })
+            rd.flatten()
+                .map(|e| e.file_name().to_string_lossy().to_ascii_lowercase())
+                .collect()
         })
-        .unwrap_or(false);
-    if cuda { "cuda" } else { "cpu" }
+        .unwrap_or_default();
+    let has = |stem: &str| {
+        names
+            .iter()
+            .any(|n| n.contains(stem) && (n.ends_with(".dll") || n.contains(".so")))
+    };
+    if has("flexmlrt") {
+        "npu"
+    } else if has("ggml-cuda") {
+        "cuda"
+    } else if has("ggml-vulkan") {
+        "vulkan"
+    } else {
+        "cpu"
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NPU compiled encoder cache (v0.9)
+// ---------------------------------------------------------------------------
+
+/// AMD publishes a compiled VitisAI encoder per whisper model on Hugging Face
+/// (the files Lemonade uses). The NPU build of whisper-server looks for it
+/// next to the model as `ggml-{name}-encoder-vitisai.rai`.
+fn npu_cache_source(model: &str) -> Option<(&'static str, String)> {
+    let repo = match model {
+        "tiny" => "amd/whisper-tiny-onnx-npu",
+        "base" => "amd/whisper-base-onnx-npu",
+        "small" => "amd/whisper-small-onnx-npu",
+        "medium" => "amd/whisper-medium-onnx-npu",
+        "large-v3-turbo" => "amd/whisper-large-turbo-onnx-npu",
+        _ => return None,
+    };
+    Some((repo, format!("ggml-{model}-encoder-vitisai.rai")))
+}
+
+/// `…/ggml-large-v3-turbo.bin` -> `…/ggml-large-v3-turbo-encoder-vitisai.rai`.
+fn npu_cache_path(model_path: &Path) -> Option<PathBuf> {
+    let stem = model_path.file_stem()?.to_str()?;
+    Some(model_path.with_file_name(format!("{stem}-encoder-vitisai.rai")))
+}
+
+/// Managed model name (`large-v3-turbo`) of a resolved model path.
+fn managed_model_name(model_path: &Path) -> Option<String> {
+    let stem = model_path.file_stem()?.to_str()?;
+    let name = stem.strip_prefix("ggml-")?;
+    MODELS
+        .iter()
+        .any(|(n, _)| *n == name)
+        .then(|| name.to_string())
+}
+
+/// NPU mode: whether the compiled encoder for the active model is on disk.
+fn npu_cache_ready(app: &AppHandle, settings: &Settings) -> bool {
+    if effective_accel(settings) != "npu" {
+        return true;
+    }
+    resolve_model_path(app, settings)
+        .and_then(|m| npu_cache_path(&m))
+        .is_some_and(|p| p.exists())
+}
+
+static NPU_CACHE_DOWNLOADING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Download the compiled NPU encoder for the active managed model (about
+/// 700 MB for large-v3-turbo). Progress is reported as kind `npu`. A call
+/// while another is running joins it (returns Ok at once).
+pub async fn download_npu_cache(app: AppHandle) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    if NPU_CACHE_DOWNLOADING.swap(true, Ordering::SeqCst) {
+        return Ok(());
+    }
+    let result = {
+        let _reset = FlagReset(&NPU_CACHE_DOWNLOADING);
+        download_npu_cache_inner(&app).await
+    };
+    if let Err(e) = &result {
+        emit_progress(&app, "npu", "npu-encoder", 0, 0, true, Some(e));
+    }
+    result
+}
+
+async fn download_npu_cache_inner(app: &AppHandle) -> Result<(), String> {
+    let settings = app.state::<crate::AppState>().settings.lock().unwrap().clone();
+    let model_path =
+        resolve_model_path(app, &settings).ok_or_else(|| SETUP_REQUIRED_MSG.to_string())?;
+    let dest = npu_cache_path(&model_path).ok_or_else(|| "ERR_NPU_NO_CACHE".to_string())?;
+    if dest.exists() {
+        return Ok(());
+    }
+    let (repo, file_name) = managed_model_name(&model_path)
+        .and_then(|m| npu_cache_source(&m))
+        .ok_or_else(|| "ERR_NPU_NO_CACHE".to_string())?;
+    let url = format!("https://huggingface.co/{repo}/resolve/main/{file_name}");
+    let part = dest.with_extension("rai.part");
+    let client = download_client()?;
+    let (downloaded, total) =
+        stream_download(app, &client, &url, &part, "npu", "npu-encoder").await?;
+    tokio::fs::rename(&part, &dest)
+        .await
+        .map_err(|e| format!("ERR_FILE_IO|rename npu cache: {e}"))?;
+    emit_progress(app, "npu", "npu-encoder", downloaded, total.max(downloaded), true, None);
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -256,6 +367,13 @@ pub fn get_setup_status(app: &AppHandle, settings: &Settings) -> Result<SetupSta
             .unwrap_or_default(),
         gpu_available: gpu_available(),
         server_backend,
+        hw: crate::hw::get().clone(),
+        accel_options: crate::hw::supported_accels()
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+        effective_accel: effective_accel(settings).to_string(),
+        npu_cache_ready: npu_cache_ready(app, settings),
         model_installed: model.is_some(),
         model_path: model
             .map(|p| p.to_string_lossy().to_string())
@@ -288,18 +406,29 @@ fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, S
 
     let port = settings.stt.local.server_port;
     let threads = settings.stt.local.threads;
-    let gpu = settings.stt.local.gpu;
+    let accel = effective_accel(settings);
     let server_path =
         resolve_server_path(app, settings).ok_or_else(|| SETUP_REQUIRED_MSG.to_string())?;
     let model_path =
         resolve_model_path(app, settings).ok_or_else(|| SETUP_REQUIRED_MSG.to_string())?;
+    let backend = server_backend(&server_path);
+    if backend == "npu" && !npu_cache_path(&model_path).is_some_and(|p| p.exists()) {
+        // The NPU build cannot run the encoder without AMD's compiled cache.
+        return Err("ERR_NPU_CACHE_MISSING".to_string());
+    }
+    // CPU wanted but a GPU build installed: run it with --no-gpu. Only those
+    // builds get the flag, so a user-supplied older binary keeps working.
+    let no_gpu = accel == "cpu" && matches!(backend, "cuda" | "vulkan");
+    // The build is part of the signature so a server started from the old
+    // build right before a download swap is restarted on the next call.
     let signature = format!(
-        "{}|{}|{}|{}|gpu={}",
+        "{}|{}|{}|{}|backend={}|no_gpu={}",
         server_path.display(),
         model_path.display(),
         port,
         threads,
-        gpu
+        backend,
+        no_gpu
     );
 
     let state = app.state::<crate::AppState>();
@@ -346,7 +475,7 @@ fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, S
     }
 
     // We own `server_starting`: spawn + health-check with no lock held.
-    let result = spawn_and_health_check(&server_path, &model_path, port, threads, gpu, signature);
+    let result = spawn_and_health_check(&server_path, &model_path, port, threads, no_gpu, signature);
     let mut guard = state.server.lock().unwrap();
     state.server_starting.store(false, Ordering::SeqCst);
     match result {
@@ -363,7 +492,7 @@ fn spawn_and_health_check(
     model_path: &Path,
     port: u16,
     threads: u32,
-    gpu: bool,
+    no_gpu: bool,
     signature: String,
 ) -> Result<ManagedServer, String> {
     // Refuse to spawn onto a port something already listens on (e.g. an
@@ -386,10 +515,7 @@ fn spawn_and_health_check(
         .arg("127.0.0.1")
         .arg("-t")
         .arg(threads.to_string());
-    if !gpu && server_backend(server_path) == "cuda" {
-        // CUDA build with the GPU switched off in settings: stay on the CPU.
-        // Only the CUDA build gets the flag, so a user-supplied server_path
-        // pointing at an older binary that lacks `--no-gpu` keeps working.
+    if no_gpu {
         cmd.arg("--no-gpu");
     }
     cmd.stdin(Stdio::null())
@@ -457,8 +583,9 @@ fn spawn_and_health_check(
         }
     };
 
-    // health check: retry TCP connect for up to 20 seconds
-    let deadline = Instant::now() + Duration::from_secs(20);
+    // health check: retry TCP connect for up to 60 seconds (v0.9: the NPU build
+    // loads a ~700 MB compiled encoder first; a dead child still fails fast)
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         if let Ok(Some(status)) = child.try_wait() {
             eprintln!("whisper-server exited immediately (exit: {status})");
@@ -469,7 +596,7 @@ fn spawn_and_health_check(
         }
         if Instant::now() >= deadline {
             terminate(&mut child);
-            return Err("ERR_SERVER_START|health check timeout (20s)".to_string());
+            return Err("ERR_SERVER_START|health check timeout (60s)".to_string());
         }
         std::thread::sleep(Duration::from_millis(500));
     }
@@ -772,45 +899,165 @@ pub fn prewarm(app: &AppHandle) {
         if !local || !installed {
             return;
         }
-        if let Err(e) = ensure_server(app).await {
+        if let Err(e) = ensure_server(app.clone()).await {
             eprintln!("whisper-server prewarm failed: {e}");
+            return;
+        }
+        // GPU/NPU builds compile their kernels on the first inference (about
+        // 3.5 s with Vulkan); pay that now with a second of silence instead
+        // of on the user's first dictation (v0.9).
+        let settings = app.state::<crate::AppState>().settings.lock().unwrap().clone();
+        if effective_accel(&settings) != "cpu" {
+            if let Ok(wav) = crate::audio::wav_bytes(&[0i16; 16000]) {
+                let _ = crate::stt::transcribe_local(&app, &settings, wav).await;
+            }
         }
     });
 }
 
-/// The app-managed server is the CPU build although an NVIDIA GPU is present
-/// and the GPU switch is on — typically an install from before v0.8.
-fn needs_gpu_upgrade(app: &AppHandle, settings: &Settings) -> bool {
-    settings.stt.engine == "local"
-        && settings.stt.local.gpu
-        && settings.stt.local.server_path.trim().is_empty()
-        && gpu_available()
-        && resolve_server_path(app, settings)
-            .map(|exe| server_backend(&exe) == "cpu")
-            .unwrap_or(false)
-}
-
-/// Startup work for the local engine (v0.8.1): prewarm the server, and if an
-/// old CPU build sits on a machine with an NVIDIA GPU, replace it with the
-/// CUDA build in the background (staged; the CPU server keeps serving until
-/// the swap) and prewarm again.
-pub fn on_startup(app: &AppHandle) {
-    prewarm(app);
-    let settings = app.state::<crate::AppState>().settings.lock().unwrap().clone();
-    if !needs_gpu_upgrade(app, &settings) {
-        return;
-    }
+/// Bring the local engine in line with the settings (v0.9; v0.8.1 did only
+/// the CPU -> CUDA case): when the app-managed server build cannot serve the
+/// wanted accelerator (e.g. CPU build on an AMD Radeon, or NPU selected),
+/// download the right one in the background — staged, so the old server
+/// keeps serving until the swap. In NPU mode also fetch the compiled encoder
+/// for the active model. Then prewarm. Nothing is downloaded when the server
+/// or model was never installed (first setup stays an explicit user action)
+/// or a custom `server_path` is set.
+pub fn sync_server_build(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        // prewarms the new build itself on success
-        if let Err(e) = download_whisper_server(app).await {
-            eprintln!("automatic GPU server upgrade failed: {e}");
+        // The first hardware probe takes about a second (WMI).
+        let _ = tokio::task::spawn_blocking(crate::hw::get).await;
+        let settings = app.state::<crate::AppState>().settings.lock().unwrap().clone();
+        if settings.stt.engine != "local" {
+            return;
         }
+        let wanted = effective_accel(&settings);
+        let managed = settings.stt.local.server_path.trim().is_empty();
+        let installed = resolve_server_path(&app, &settings).map(|exe| server_backend(&exe));
+        if let (true, Some(installed)) = (managed, installed) {
+            if !crate::hw::build_satisfies(installed, wanted) {
+                // prewarms on success; with NPU the encoder is still missing
+                // and ensure_server says so — fetched right below
+                if let Err(e) = download_whisper_server(app.clone()).await {
+                    eprintln!("automatic {wanted} server install failed: {e}");
+                    return;
+                }
+                // Ok also means "joined a download already running" (maybe
+                // for an older choice): wait for it, then re-check.
+                while SERVER_DOWNLOADING.load(std::sync::atomic::Ordering::SeqCst) {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                let now = app.state::<crate::AppState>().settings.lock().unwrap().clone();
+                let ok = resolve_server_path(&app, &now)
+                    .is_some_and(|exe| crate::hw::build_satisfies(server_backend(&exe), effective_accel(&now)));
+                if !ok {
+                    // superseded or failed; a later sync (settings change,
+                    // next launch) retries
+                    return;
+                }
+            }
+        }
+        if wanted == "npu" && !npu_cache_ready(&app, &settings) {
+            if let Err(e) = download_npu_cache(app.clone()).await {
+                eprintln!("NPU encoder download failed: {e}");
+                return;
+            }
+        }
+        prewarm(&app);
     });
+}
+
+/// Startup work for the local engine: match the server build to the
+/// hardware and prewarm it.
+pub fn on_startup(app: &AppHandle) {
+    sync_server_build(app);
+}
+
+/// Vulkan and NPU builds come from Lemonade's whisper.cpp fork (AMD's local
+/// AI server), pinned to one release and verified against the SHA-256 digests
+/// GitHub publishes for these assets (v0.9).
+const LEMONADE_WHISPER_REPO: &str = "lemonade-sdk/whisper.cpp-rocm";
+const LEMONADE_WHISPER_TAG: &str = "v1.8.4";
+
+fn lemonade_asset(accel: &str) -> Option<(&'static str, &'static str)> {
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    {
+        match accel {
+            "vulkan" => Some((
+                "whisper-v1.8.4-windows-vulkan-x64.zip",
+                "e0d20a0f92e31b98adc0faf71172efc810b701e6391a9d858ca045bff26f77cd",
+            )),
+            "npu" => Some((
+                "whisper-v1.8.4-windows-npu-x64.zip",
+                "7e191e6dc9a2407b4cb55df49f2582afba51d417b3409edf22552047d4f9b177",
+            )),
+            _ => None,
+        }
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        match accel {
+            "vulkan" => Some((
+                "whisper-v1.8.4-linux-vulkan-x86_64.tar.gz",
+                "55d0bdf9be7092ed8148b27d26353f5755446381eb9e1e5b6b00d5c761d813b1",
+            )),
+            _ => None,
+        }
+    }
+    #[cfg(not(any(
+        all(windows, target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "x86_64")
+    )))]
+    {
+        let _ = accel;
+        None
+    }
+}
+
+fn sha256_file(path: &Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let mut file = std::fs::File::open(path).map_err(|e| format!("ERR_FILE_IO|open: {e}"))?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = std::io::Read::read(&mut file, &mut buf)
+            .map_err(|e| format!("ERR_FILE_IO|read: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex::encode(hasher.finalize()))
 }
 
 async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
     let client = download_client()?;
+    let accel = {
+        let settings = app.state::<crate::AppState>().settings.lock().unwrap().clone();
+        effective_accel(&settings)
+    };
+    let (name, url, sha256) = match lemonade_asset(accel) {
+        Some((asset, digest)) => (
+            asset.to_string(),
+            format!(
+                "https://github.com/{LEMONADE_WHISPER_REPO}/releases/download/{LEMONADE_WHISPER_TAG}/{asset}"
+            ),
+            Some(digest),
+        ),
+        None => {
+            let (name, url) = pick_ggml_release(&client, accel == "cuda").await?;
+            (name, url, None)
+        }
+    };
+    install_server_archive(app, &client, &name, &url, sha256).await
+}
+
+/// Latest official whisper.cpp build (CPU, or CUDA when `want_cuda`).
+async fn pick_ggml_release(
+    client: &reqwest::Client,
+    want_cuda: bool,
+) -> Result<(String, String), String> {
     // Newest releases first. `releases/latest` alone is not enough: whisper.cpp
     // sometimes tags a release before CI has uploaded its binaries (v1.9.4 had
     // no assets at all), and not every release carries the CUDA build.
@@ -826,17 +1073,6 @@ async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
         .await
         .map_err(|e| format!("ERR_DOWNLOAD_FAILED|parse releases: {e}"))?;
 
-    let want_cuda = {
-        let gpu_setting = app
-            .state::<crate::AppState>()
-            .settings
-            .lock()
-            .unwrap()
-            .stt
-            .local
-            .gpu;
-        gpu_setting && gpu_available()
-    };
     let empty = Vec::new();
     let picked = releases
         .iter()
@@ -859,7 +1095,18 @@ async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
         .as_str()
         .ok_or_else(|| "ERR_NO_SERVER_ASSET".to_string())?
         .to_string();
+    Ok((name, url))
+}
 
+/// Download `url` into a staging directory, verify (`sha256`) and extract
+/// it, then swap it in for the installed server.
+async fn install_server_archive(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    name: &str,
+    url: &str,
+    sha256: Option<&str>,
+) -> Result<(), String> {
     let bin = bin_dir(app)?;
     // Stage the new build in a sibling directory and only replace the
     // existing install once the download extracted and contains a server
@@ -878,7 +1125,17 @@ async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
 
     let staged = async {
         let (downloaded, total) =
-            stream_download(app, &client, &url, &archive_path, "server", &name).await?;
+            stream_download(app, client, url, &archive_path, "server", name).await?;
+        if let Some(expected) = sha256 {
+            let archive = archive_path.clone();
+            let actual = tokio::task::spawn_blocking(move || sha256_file(&archive))
+                .await
+                .map_err(|e| format!("ERR_INTERNAL|hash: {e}"))??;
+            if actual != expected {
+                let _ = tokio::fs::remove_file(&archive_path).await;
+                return Err(format!("ERR_DOWNLOAD_FAILED|checksum mismatch for {name}"));
+            }
+        }
 
         // extract in a blocking thread; the temp archive is removed on every outcome
         let staging2 = staging.clone();
@@ -949,7 +1206,7 @@ async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
     emit_progress(
         app,
         "server",
-        &name,
+        name,
         downloaded,
         total.max(downloaded),
         true,

@@ -995,6 +995,31 @@ input.switch:focus-visible {
   gap: 16px;
 }
 
+.accel-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 16px;
+  margin-top: 14px;
+}
+
+.accel-row .field {
+  min-width: 220px;
+}
+
+.accel-row .hint {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+
+#npu-cache-row {
+  margin-top: 12px;
+}
+
+#npu-cache-row .hint {
+  margin: 0;
+}
+
 .setup-info {
   min-width: 0;
 }

@@ -120,9 +120,24 @@
                 <div class="setup-info">
                   <div class="setup-name">whisper-server <span class="badge" id="server-badge">未インストール</span> <span class="badge" id="server-backend-badge" hidden></span></div>
                   <div class="setup-path mono" id="server-path">—</div>
-                  <div class="hint" id="server-gpu-hint" hidden data-i18n="setup.gpuHint">NVIDIA GPU を検出しました。GPU 版の whisper-server にすると認識が数倍速くなります（約 670 MB）</div>
+                  <div class="hint" id="server-build-hint" hidden></div>
                 </div>
                 <button class="btn btn-primary btn-sm" id="btn-install-server">インストール</button>
+              </div>
+              <div class="accel-row">
+                <label class="field">
+                  <span class="field-label" data-i18n="stt.accel">処理デバイス</span>
+                  <select id="in-local-accel"></select>
+                </label>
+                <div class="hint" id="accel-hint"></div>
+              </div>
+              <div class="setup-row" id="npu-cache-row" hidden>
+                <div class="hint" data-i18n="setup.npuCacheHint">NPU で動かすには、モデルごとに AMD がコンパイルしたエンコーダ（large-v3-turbo で約 700 MB）が必要です</div>
+                <button class="btn btn-primary btn-sm" id="btn-install-npu" data-i18n="setup.npuCacheInstall">NPU エンコーダをダウンロード</button>
+              </div>
+              <div class="progress" id="npu-progress" hidden>
+                <div class="progress-bar"></div>
+                <span class="progress-text"></span>
               </div>
               <div class="progress" id="server-progress" hidden>
                 <div class="progress-bar" id="server-progress-bar"></div>
@@ -147,15 +162,6 @@
                   <span class="field-label" data-i18n="stt.threads">スレッド数</span>
                   <input type="number" id="in-local-threads" min="1" max="64" />
                 </label>
-                <div class="switch-rows field-wide">
-                  <label class="switch-row">
-                    <span>
-                      <span class="switch-title" data-i18n="stt.useGpu">GPU を使う（NVIDIA CUDA）</span>
-                      <span class="switch-desc" data-i18n="stt.useGpuDesc">オフにすると CPU で処理します。GPU 版の whisper-server が必要です</span>
-                    </span>
-                    <input type="checkbox" id="in-local-gpu" class="switch" />
-                  </label>
-                </div>
                 <label class="field field-wide">
                   <span class="field-label" data-i18n="stt.modelPathOverride">モデルパス上書き (空 = 既定)</span>
                   <input type="text" id="in-local-model-path" placeholder="C:\...\ggml-base.bin" spellcheck="false" />

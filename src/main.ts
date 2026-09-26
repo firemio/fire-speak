@@ -312,7 +312,6 @@ function renderSttSection(): void {
 
   input("in-local-port").value = String(settings.stt.local.server_port);
   input("in-local-threads").value = String(settings.stt.local.threads);
-  input("in-local-gpu").checked = settings.stt.local.gpu;
   input("in-local-model-path").value = settings.stt.local.model_path;
   input("in-local-server-path").value = settings.stt.local.server_path;
 
@@ -432,12 +431,6 @@ function wireSttSection(): void {
       settings.stt.local.server_port = v;
       scheduleSave();
     }
-  });
-  input("in-local-gpu").addEventListener("change", () => {
-    if (!settings) return;
-    settings.stt.local.gpu = input("in-local-gpu").checked;
-    renderServerCard();
-    scheduleSave();
   });
   input("in-local-threads").addEventListener("input", () => {
     if (!settings) return;
@@ -1198,20 +1191,66 @@ function downloadKey(kind: string, name: string): string {
   return `${kind}:${name}`;
 }
 
+const ACCEL_LABEL_KEYS: Record<string, string> = {
+  auto: "stt.accelAuto",
+  cuda: "stt.accelCuda",
+  vulkan: "stt.accelVulkan",
+  npu: "stt.accelNpu",
+  cpu: "stt.accelCpu",
+};
+
+/** Short, untranslated build names for buttons and the resolved-device line. */
+const ACCEL_SHORT: Record<string, string> = { cuda: "CUDA", vulkan: "Vulkan", npu: "NPU", cpu: "CPU" };
+
+const BACKEND_BADGE_KEYS: Record<string, string> = {
+  cuda: "setup.backendCuda",
+  vulkan: "setup.backendVulkan",
+  npu: "setup.backendNpu",
+  cpu: "setup.backendCpu",
+};
+
+/** Mirror of `hw::build_satisfies`: CPU runs on the CUDA/Vulkan builds too. */
+function buildSatisfies(installed: string, wanted: string): boolean {
+  return installed === wanted || (wanted === "cpu" && (installed === "cuda" || installed === "vulkan"));
+}
+
+/** Accelerator selector + detected-hardware line inside the server card (v0.9). */
+function renderAccel(s: SetupStatus): void {
+  const select = $("in-local-accel") as HTMLSelectElement;
+  const current = settings?.stt.local.accel || "auto";
+  const options = s.accel_options.length ? s.accel_options : ["auto", "cpu"];
+  select.replaceChildren(
+    ...options.map((v) => {
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = t(ACCEL_LABEL_KEYS[v] ?? "stt.accelAuto");
+      return opt;
+    }),
+  );
+  select.value = options.includes(current) ? current : "auto";
+
+  const found: string[] = s.hw.gpus.length ? [...s.hw.gpus] : [t("stt.noGpu")];
+  if (s.hw.npu) found.push(t("stt.npuFound"));
+  const resolved = ACCEL_SHORT[s.effective_accel] ?? "CPU";
+  $("accel-hint").textContent = `${t("stt.accelDetected", found.join(" / "))} → ${resolved}`;
+}
+
 /** whisper-server card at the top of the local STT panel (was the Setup section). */
 function renderServerCard(): void {
   const s = setupStatus;
   const serverBadge = $("server-badge");
   const backendBadge = $("server-backend-badge");
-  const gpuHint = $("server-gpu-hint");
+  const buildHint = $("server-build-hint");
   const serverPath = $("server-path");
   const installBtn = $("btn-install-server") as HTMLButtonElement;
+  const npuRow = $("npu-cache-row");
 
   if (!s) {
     serverBadge.textContent = t("setup.checking");
     serverBadge.className = "badge";
     backendBadge.hidden = true;
-    gpuHint.hidden = true;
+    buildHint.hidden = true;
+    npuRow.hidden = true;
     serverPath.textContent = "—";
     installBtn.disabled = true;
     return;
@@ -1220,23 +1259,51 @@ function renderServerCard(): void {
   serverBadge.textContent = s.server_installed ? t("common.installed") : t("common.notInstalled");
   serverBadge.className = `badge${s.server_installed ? " ok" : ""}`;
   serverPath.textContent = s.server_path || "—";
+  renderAccel(s);
 
-  // Which build is installed, and whether a faster one is available (v0.8):
-  // an NVIDIA driver + the GPU switch on, but a CPU build (or nothing) on disk.
-  const wantGpu = (settings?.stt.local.gpu ?? true) && s.gpu_available;
-  const hasCuda = s.server_backend === "cuda";
+  // Which build is installed, and whether the selected accelerator needs a
+  // different one (the backend also fetches it on its own after a change).
+  const wanted = s.effective_accel;
+  const backend = s.server_backend || "cpu";
   backendBadge.hidden = !s.server_installed;
-  backendBadge.textContent = hasCuda ? t("setup.backendCuda") : t("setup.backendCpu");
-  backendBadge.className = `badge${hasCuda ? " accent" : ""}`;
-  const offerGpu = wantGpu && !hasCuda;
-  gpuHint.hidden = !offerGpu;
-  installBtn.textContent = offerGpu
-    ? t("setup.installGpu")
+  backendBadge.textContent = t(BACKEND_BADGE_KEYS[backend] ?? "setup.backendCpu");
+  backendBadge.className = `badge${backend !== "cpu" ? " accent" : ""}`;
+  const offerBuild = s.server_installed && !buildSatisfies(backend, wanted);
+  const wantedLabel = ACCEL_SHORT[wanted] ?? "CPU";
+  buildHint.hidden = !offerBuild;
+  buildHint.textContent = offerBuild ? t("setup.buildHint", wantedLabel) : "";
+  installBtn.textContent = offerBuild
+    ? t("setup.installBuild", wantedLabel)
     : s.server_installed
       ? t("setup.reinstall")
       : t("setup.install");
-  installBtn.className = `btn btn-sm${offerGpu || !s.server_installed ? " btn-primary" : ""}`;
+  installBtn.className = `btn btn-sm${offerBuild || !s.server_installed ? " btn-primary" : ""}`;
   installBtn.disabled = activeDownloads.has(downloadKey("server", "whisper-server"));
+
+  npuRow.hidden = !(wanted === "npu" && s.model_installed && !s.npu_cache_ready);
+  ($("btn-install-npu") as HTMLButtonElement).disabled = activeDownloads.has(
+    downloadKey("npu", "npu-encoder"),
+  );
+}
+
+async function startNpuCacheDownload(): Promise<void> {
+  const key = downloadKey("npu", "npu-encoder");
+  activeDownloads.set(key, { kind: "npu", name: "npu-encoder", downloaded: 0, total: 0, done: false });
+  const wrap = $("npu-progress");
+  wrap.hidden = false;
+  wrap.classList.add("indeterminate");
+  ($("btn-install-npu") as HTMLButtonElement).disabled = true;
+  try {
+    await invoke("download_npu_cache");
+  } catch (e: unknown) {
+    // If the key is gone, a download-progress done/error event already
+    // handled (and toasted) this failure — don't toast twice.
+    const stillPending = activeDownloads.has(key);
+    activeDownloads.delete(key);
+    wrap.hidden = true;
+    ($("btn-install-npu") as HTMLButtonElement).disabled = false;
+    if (stillPending) toast(t("setup.npuCacheFailed", errText(e)), true);
+  }
 }
 
 function buildProgressEl(key: string): HTMLElement {
@@ -1323,24 +1390,33 @@ function onDownloadProgress(p: DownloadProgressPayload): void {
       toast(
         p.kind === "server"
           ? t("setup.serverInstallFailed", tMsg(p.error))
-          : t("setup.modelDownloadFailed", p.name, tMsg(p.error)),
+          : p.kind === "npu"
+            ? t("setup.npuCacheFailed", tMsg(p.error))
+            : t("setup.modelDownloadFailed", p.name, tMsg(p.error)),
         true,
       );
     } else {
       toast(
-        p.kind === "server" ? t("setup.serverInstalled") : t("setup.modelDownloaded", p.name),
+        p.kind === "server"
+          ? t("setup.serverInstalled")
+          : p.kind === "npu"
+            ? t("setup.npuCacheDownloaded")
+            : t("setup.modelDownloaded", p.name),
       );
     }
-    if (p.kind === "server") {
-      $("server-progress").hidden = true;
+    if (p.kind === "server" || p.kind === "npu") {
+      $(p.kind === "server" ? "server-progress" : "npu-progress").hidden = true;
     }
     void refreshSetupStatus();
     return;
   }
   activeDownloads.set(key, p);
-  if (p.kind === "server") {
-    applyProgress($("server-progress"), p);
-    ($("btn-install-server") as HTMLButtonElement).disabled = true;
+  if (p.kind === "server" || p.kind === "npu") {
+    // the server build and the NPU encoder can download at the same time,
+    // each with its own bar
+    applyProgress($(p.kind === "server" ? "server-progress" : "npu-progress"), p);
+    const btn = p.kind === "server" ? "btn-install-server" : "btn-install-npu";
+    ($(btn) as HTMLButtonElement).disabled = true;
   } else {
     const wrap = document.querySelector<HTMLElement>(
       `#stt-model-list .progress[data-download-key="${key}"]`,
@@ -1365,6 +1441,21 @@ async function refreshSetupStatus(): Promise<void> {
 
 function wireServerCard(): void {
   $("btn-install-server").addEventListener("click", () => void startServerDownload());
+  $("btn-install-npu").addEventListener("click", () => void startNpuCacheDownload());
+  // Save right away (not debounced) so setup_status reflects the choice and
+  // the backend starts fetching a matching build if one is needed (v0.9).
+  $("in-local-accel").addEventListener("change", async () => {
+    if (!settings) return;
+    const v = ($("in-local-accel") as HTMLSelectElement).value;
+    settings.stt.local.accel = v;
+    settings.stt.local.gpu = v !== "cpu";
+    try {
+      await persistSettings();
+    } catch (e: unknown) {
+      toast(errText(e), true);
+    }
+    void refreshSetupStatus();
+  });
   $("btn-open-config").addEventListener("click", async () => {
     try {
       await invoke("open_config_dir");
