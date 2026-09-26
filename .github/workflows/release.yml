@@ -28,8 +28,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Create (or reuse) the draft release ONCE, before the matrix starts. When
+  # every build job let tauri-action create the release by tag, two jobs that
+  # finished at the same moment each created one: v0.9.2 ended up with two
+  # releases for the same tag and the Windows installers in an unpublished
+  # duplicate. The build jobs now upload to this release by id.
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      id: ${{ steps.release.outputs.id }}
+    steps:
+      - id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -n 1)
+          if [ -z "$id" ]; then
+            id=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$TAG" \
+              -f name="fire-speak $TAG" \
+              -f body='See the assets below to download and install this version.' \
+              -F draft=true -F prerelease=false --jq .id)
+          fi
+          echo "release id: $id"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
   build:
     name: ${{ matrix.label }}
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -122,11 +150,10 @@ jobs:
           # Explicit so the local @tauri-apps/cli from package.json is used
           # rather than a globally installed one.
           tauriScript: npm run tauri
+          # Upload into the draft created by the create-release job (never
+          # create a release here — parallel jobs would race).
+          releaseId: ${{ needs.create-release.outputs.id }}
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
-          releaseName: 'fire-speak ${{ github.event.inputs.tag || github.ref_name }}'
-          releaseBody: 'See the assets below to download and install this version.'
-          releaseDraft: true
-          prerelease: false
           # latest.json for tauri-plugin-updater. Each matrix job merges its
           # platform entry into the same asset. The installed app came from the
           # NSIS setup.exe, so windows-x86_64 must point at the NSIS bundle,
