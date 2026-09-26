@@ -86,7 +86,18 @@
             <button class="icon-btn" id="btn-banner-close" data-i18n-title="common.close" title="閉じる">✕</button>
           </div>
 
-          <div class="hero-card">
+          <div class="card onboard-card" id="home-setup" hidden>
+            <div class="onboard-title" data-i18n="onboard.title">はじめに：音声認識の準備</div>
+            <div class="hint" data-i18n="onboard.desc">このPCに合わせた音声認識エンジンとモデルをダウンロードします。最初に一度だけ必要です。</div>
+            <div class="hint onboard-detected" id="onboard-detected"></div>
+            <ol class="onboard-steps" id="onboard-steps"></ol>
+            <div class="onboard-actions">
+              <button class="btn btn-primary" id="btn-quick-setup">セットアップを開始</button>
+              <button class="btn btn-ghost btn-sm" id="btn-onboard-cloud" data-i18n="onboard.useCloud">ダウンロードせずクラウドの API を使う</button>
+            </div>
+          </div>
+
+          <div class="hero-card" id="home-hero">
             <div class="hero-left">
               <div class="hero-title" data-i18n="home.heroTitle">音声入力の準備ができています</div>
               <div class="hero-sub">

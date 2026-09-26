@@ -115,6 +115,19 @@ pub struct SetupStatus {
     /// NPU mode only: the compiled encoder (.rai) for the active model is on
     /// disk. Always true outside NPU mode.
     pub npu_cache_ready: bool,
+    /// Model the one-click setup installs for this machine (v0.9.1).
+    pub recommended_model: String,
+}
+
+/// Model for the one-click setup: large-v3-turbo wherever a GPU/NPU runs it
+/// (0.2 s for 11 s of speech on a GPU), `small` on the CPU, where the turbo
+/// model takes about 6 s for the same clip.
+pub fn recommended_model(accel: &str) -> &'static str {
+    if accel == "cpu" {
+        "small"
+    } else {
+        "large-v3-turbo"
+    }
 }
 
 /// Whether the NVIDIA driver (and therefore CUDA) is present on this machine.
@@ -374,6 +387,7 @@ pub fn get_setup_status(app: &AppHandle, settings: &Settings) -> Result<SetupSta
             .collect(),
         effective_accel: effective_accel(settings).to_string(),
         npu_cache_ready: npu_cache_ready(app, settings),
+        recommended_model: recommended_model(effective_accel(settings)).to_string(),
         model_installed: model.is_some(),
         model_path: model
             .map(|p| p.to_string_lossy().to_string())
@@ -968,6 +982,65 @@ pub fn sync_server_build(app: &AppHandle) {
     });
 }
 
+static QUICK_SETUP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// One-click first-run setup from the home screen (v0.9.1): install the
+/// server build for this machine's accelerator, the recommended model if no
+/// model is installed, and in NPU mode the compiled encoder — in that order —
+/// then prewarm. Steps already satisfied are skipped. Progress arrives as the
+/// usual `download-progress` events (kinds server / model / npu). A second
+/// call while one runs returns Ok at once (the first one's events continue).
+pub async fn quick_setup(app: AppHandle) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    if QUICK_SETUP.swap(true, Ordering::SeqCst) {
+        return Ok(());
+    }
+    let _reset = FlagReset(&QUICK_SETUP);
+    let _ = tokio::task::spawn_blocking(crate::hw::get).await;
+    let current = |app: &AppHandle| app.state::<crate::AppState>().settings.lock().unwrap().clone();
+    let settings = current(&app);
+    let accel = effective_accel(&settings);
+
+    let server_ok = |app: &AppHandle, s: &Settings| {
+        resolve_server_path(app, s).is_some_and(|exe| {
+            !s.stt.local.server_path.trim().is_empty()
+                || crate::hw::build_satisfies(server_backend(&exe), effective_accel(s))
+        })
+    };
+    if !server_ok(&app, &settings) {
+        download_whisper_server(app.clone()).await?;
+        // Ok may mean "joined a running download": wait for it to finish
+        while SERVER_DOWNLOADING.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        // a joined download may have failed or been for another choice
+        if !server_ok(&app, &current(&app)) {
+            return Err(SETUP_REQUIRED_MSG.to_string());
+        }
+    }
+
+    if resolve_model_path(&app, &current(&app)).is_none() {
+        let model = recommended_model(accel);
+        download_model(app.clone(), model.to_string()).await?;
+        while model_downloading(model) {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        if resolve_model_path(&app, &current(&app)).is_none() {
+            return Err(SETUP_REQUIRED_MSG.to_string());
+        }
+    }
+
+    let settings = current(&app);
+    if effective_accel(&settings) == "npu" && !npu_cache_ready(&app, &settings) {
+        download_npu_cache(app.clone()).await?;
+        while NPU_CACHE_DOWNLOADING.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    }
+    prewarm(&app);
+    Ok(())
+}
+
 /// Startup work for the local engine: match the server build to the
 /// hardware and prewarm it.
 pub fn on_startup(app: &AppHandle) {
@@ -1318,11 +1391,42 @@ fn extract_tar_gz(archive_path: &Path, dest: &Path) -> Result<(), String> {
 }
 
 /// Download a whisper.cpp GGML model from Hugging Face.
+/// Models currently downloading. Two downloads of one model would write the
+/// same `.part` file (quick_setup can start one while the user clicks the
+/// model's download button), so a second call joins the first instead.
+static MODEL_DOWNLOADS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+fn model_downloading(model: &str) -> bool {
+    MODEL_DOWNLOADS.lock().unwrap().iter().any(|m| m == model)
+}
+
+/// Removes the model from `MODEL_DOWNLOADS` on drop (also on panic).
+struct ModelDownloadGuard(String);
+
+impl Drop for ModelDownloadGuard {
+    fn drop(&mut self) {
+        if let Ok(mut list) = MODEL_DOWNLOADS.lock() {
+            list.retain(|m| m != &self.0);
+        }
+    }
+}
+
 pub async fn download_model(app: AppHandle, model: String) -> Result<(), String> {
     if !MODELS.iter().any(|(n, _)| *n == model) {
         return Err(format!("ERR_INTERNAL|unknown model: {model}"));
     }
-    let result = download_model_inner(&app, &model).await;
+    {
+        let mut list = MODEL_DOWNLOADS.lock().unwrap();
+        if list.contains(&model) {
+            // joined: the running download's events report the outcome
+            return Ok(());
+        }
+        list.push(model.clone());
+    }
+    let result = {
+        let _guard = ModelDownloadGuard(model.clone());
+        download_model_inner(&app, &model).await
+    };
     if let Err(e) = &result {
         emit_progress(&app, "model", &model, 0, 0, true, Some(e));
     }

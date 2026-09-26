@@ -594,3 +594,24 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 
 - AMD 実機(Vulkan on Radeon / NPU)での動作と速度。開発機(RTX 4070 Ti SUPER)では Lemonade の Vulkan ビルドが NVIDIA 上で動くこと、ハッシュ・URL、UI(スタブで Strix Halo 構成を再現)を確認。
 - NPU には AMD の NPU ドライバ(Ryzen AI 対応ドライバ)が必要。未導入だと検出行に「NPU あり」が出ず、選んでもサーバが起動しない(`ERR_SERVER_DIED`)。
+
+# v0.9.1 追加仕様: 初回セットアップカード(ホーム)
+
+## 背景
+
+- インストール直後にウィンドウを開いても何をすればいいか分からない: ホームは「音声入力の準備ができています」と表示するのに、実際は「音声認識」画面で whisper-server とモデルを別々にインストールしないと動かなかった。
+
+## バックエンド
+
+- `setup::recommended_model(accel)`: GPU/NPU(`cuda`/`vulkan`/`npu`)は `large-v3-turbo`、CPU は `small`(turbo は CPU だと 11 秒の音声に約 6 秒)。`SetupStatus.recommended_model` で返す。
+- コマンド `quick_setup`: ハードウェア検出(blocking スレッド)→ 必要なら (1) この PC の処理デバイスに合うサーバビルド(未インストール、または `build_satisfies` を満たさない場合。server_path 上書き時は存在すれば可) → (2) モデルが 1 つも無ければ推奨モデル → (3) NPU ならエンコーダ、の順に実行して `prewarm`。済んでいる手順は飛ばす。進捗は既存の `download-progress`(kind server / model / npu)。実行中の 2 回目の呼び出しは即 `Ok`。実行中のダウンロードに合流した場合はその終了を待ち、サーバは `build_satisfies`・モデルは存在を再確認して、満たさなければ `ERR_SETUP_REQUIRED`。失敗時はそのダウンロードのエラーを返す(`download-progress` の error でトースト済みなので、フロントは `ERR_SETUP_REQUIRED` のときだけ `onboard.failed` を出す)。
+- `download_model` も同じモデルの同時ダウンロードを合流させる(同じ `.part` への同時書き込み防止。`MODEL_DOWNLOADS`)。
+
+## フロントエンド
+
+- ホーム先頭に `#home-setup` カード。engine=`local` で手順のどれかが未完了のあいだ、ヒーロー(`#home-hero`)の代わりに表示する。
+  - タイトル `onboard.title`、説明 `onboard.desc`、検出行 `onboard.detected`(GPU 名 → 短いビルド名)。
+  - 手順リスト: `onboard.stepServer`(ビルド名)/ `onboard.stepModel`(推奨モデル名)/ NPU 時 `onboard.stepNpu`。各行に ✓/○、サイズ(サーバの概算: cuda 643MB, vulkan 20MB, npu 3MB, cpu 8MB。NPU エンコーダは large-v3-turbo のみ 708MB)、実行中は進捗バー(`activeDownloads` と同じキー)。
+  - 主ボタン `onboard.start`(未完了手順の合計サイズ)→ 実行中 `onboard.running`。完了で `onboard.done`(ホットキー名入り)をトーストし、カードが消えてヒーローに戻る。失敗は `onboard.failed`(ダウンロード系エラーは各イベントでトースト済みなので重複させない)。
+  - 副ボタン `onboard.useCloud`: engine を cloud にして保存し「音声認識」画面(クラウド設定)へ移動。
+- `msg.ERR_SETUP_REQUIRED` を「ホーム画面の『セットアップを開始』を押してください」に変更(12 言語)。

@@ -250,6 +250,7 @@ function setStatusPill(payload: StatusChangedPayload): void {
 function renderHome(): void {
   if (!settings) return;
   $("home-hotkey").textContent = displayHotkey(settings.hotkey);
+  renderOnboard();
   renderHomeModes();
   renderHomeRecent();
 }
@@ -295,6 +296,128 @@ function renderHomeRecent(): void {
   for (const entry of recent) {
     host.appendChild(buildHistoryItem(entry, false));
   }
+}
+
+// ---------------------------------------------------------------------------
+// home: first-run setup card (v0.9.1)
+// ---------------------------------------------------------------------------
+
+/** Approximate download size of each server build (MB), for the setup total. */
+const SERVER_BUILD_MB: Record<string, number> = { cuda: 643, vulkan: 20, npu: 3, cpu: 8 };
+/** AMD's compiled NPU encoder; only large-v3-turbo's size is known here. */
+const NPU_ENCODER_MB: Record<string, number> = { "large-v3-turbo": 708 };
+
+let quickSetupRunning = false;
+
+interface OnboardStep {
+  key: string;
+  label: string;
+  sizeMb: number;
+  done: boolean;
+}
+
+/** Steps of the one-click setup for the current machine, or null if the local engine is not in use. */
+function onboardSteps(s: SetupStatus): OnboardStep[] | null {
+  if (!settings || settings.stt.engine !== "local") return null;
+  const accel = s.effective_accel;
+  const customServer = settings.stt.local.server_path.trim() !== "";
+  const model = s.recommended_model;
+  const steps: OnboardStep[] = [
+    {
+      key: downloadKey("server", "whisper-server"),
+      label: t("onboard.stepServer", ACCEL_SHORT[accel] ?? "CPU"),
+      sizeMb: SERVER_BUILD_MB[accel] ?? 8,
+      done: s.server_installed && (customServer || buildSatisfies(s.server_backend || "cpu", accel)),
+    },
+    {
+      key: downloadKey("model", model),
+      label: t("onboard.stepModel", model),
+      sizeMb: s.models.find((m) => m.name === model)?.size_mb ?? 0,
+      done: s.model_installed,
+    },
+  ];
+  if (accel === "npu") {
+    steps.push({
+      key: downloadKey("npu", "npu-encoder"),
+      label: t("onboard.stepNpu"),
+      sizeMb: NPU_ENCODER_MB[model] ?? 0,
+      done: s.npu_cache_ready,
+    });
+  }
+  return steps;
+}
+
+/** Show the setup card instead of the "ready" hero until the local engine can run. */
+function renderOnboard(): void {
+  const card = $("home-setup");
+  const hero = $("home-hero");
+  const s = setupStatus;
+  const steps = s ? onboardSteps(s) : null;
+  const pending = steps?.filter((st) => !st.done) ?? [];
+  const show = !!s && !!steps && pending.length > 0;
+  card.hidden = !show;
+  hero.hidden = show;
+  if (!show || !s || !steps) return;
+
+  const found = s.hw.gpus.length ? s.hw.gpus.join(" / ") : t("stt.noGpu");
+  $("onboard-detected").textContent = t("onboard.detected", found, ACCEL_SHORT[s.effective_accel] ?? "CPU");
+
+  const list = $("onboard-steps");
+  list.textContent = "";
+  for (const st of steps) {
+    const li = el("li", `onboard-step${st.done ? " is-done" : ""}`);
+    li.appendChild(el("span", "onboard-mark", st.done ? "✓" : "○"));
+    const body = el("div", "onboard-body");
+    const line = el("div", "onboard-line");
+    line.appendChild(el("span", "onboard-label", st.label));
+    if (st.sizeMb > 0) line.appendChild(el("span", "onboard-size", formatBytes(st.sizeMb * 1024 * 1024)));
+    body.appendChild(line);
+    if (!st.done) body.appendChild(buildProgressEl(st.key));
+    li.appendChild(body);
+    list.appendChild(li);
+  }
+
+  const totalMb = pending.reduce((sum, st) => sum + st.sizeMb, 0);
+  const btn = $("btn-quick-setup") as HTMLButtonElement;
+  btn.disabled = quickSetupRunning;
+  btn.textContent = quickSetupRunning
+    ? t("onboard.running")
+    : t("onboard.start", formatBytes(totalMb * 1024 * 1024));
+}
+
+async function runQuickSetup(): Promise<void> {
+  if (quickSetupRunning) return;
+  quickSetupRunning = true;
+  renderOnboard();
+  try {
+    await invoke("quick_setup");
+    toast(t("onboard.done", settings ? displayHotkey(settings.hotkey) : ""));
+  } catch (e: unknown) {
+    // Every download error was already toasted by its download-progress
+    // event; only the "still not ready" result comes from quick_setup itself.
+    if (String(e).startsWith("ERR_SETUP_REQUIRED")) {
+      toast(t("onboard.failed", errText(e)), true);
+    }
+  } finally {
+    quickSetupRunning = false;
+    await refreshSetupStatus();
+  }
+}
+
+function wireOnboard(): void {
+  $("btn-quick-setup").addEventListener("click", () => void runQuickSetup());
+  $("btn-onboard-cloud").addEventListener("click", async () => {
+    if (!settings) return;
+    settings.stt.engine = "cloud";
+    try {
+      await persistSettings();
+    } catch (e: unknown) {
+      toast(errText(e), true);
+    }
+    renderSttSection();
+    renderOnboard();
+    showSection("stt");
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1411,6 +1534,11 @@ function onDownloadProgress(p: DownloadProgressPayload): void {
     return;
   }
   activeDownloads.set(key, p);
+  // the home setup card shows the same downloads as its steps
+  const onboardBar = document.querySelector<HTMLElement>(
+    `#onboard-steps .progress[data-download-key="${key}"]`,
+  );
+  if (onboardBar) applyProgress(onboardBar, p);
   if (p.kind === "server" || p.kind === "npu") {
     // the server build and the NPU encoder can download at the same time,
     // each with its own bar
@@ -1437,6 +1565,7 @@ async function refreshSetupStatus(): Promise<void> {
   }
   renderServerCard();
   renderSttModelList();
+  renderOnboard();
 }
 
 function wireServerCard(): void {
@@ -1760,6 +1889,7 @@ async function init(): Promise<void> {
   wireHistorySection();
   wireGeneralSection();
   wireServerCard();
+  wireOnboard();
   wireUpdateSection();
 
   $("btn-record-test").addEventListener("click", async () => {

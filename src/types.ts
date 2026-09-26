@@ -113,6 +113,8 @@ export interface SetupStatus {
   effective_accel: string;
   /** NPU mode: the compiled encoder for the active model is on disk. */
   npu_cache_ready: boolean;
+  /** Model the one-click setup installs for this machine (v0.9.1). */
+  recommended_model: string;
 }
 
 export interface Hardware {

@@ -437,6 +437,11 @@ async fn download_model(app: AppHandle, model: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn quick_setup(app: AppHandle) -> Result<(), String> {
+    setup::quick_setup(app).await
+}
+
+#[tauri::command]
 async fn download_npu_cache(app: AppHandle) -> Result<(), String> {
     setup::download_npu_cache(app.clone()).await?;
     setup::prewarm(&app);
@@ -642,6 +647,7 @@ pub fn run() {
             download_whisper_server,
             download_model,
             download_npu_cache,
+            quick_setup,
             open_config_dir,
             quit_app,
             check_update,
