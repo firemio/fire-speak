@@ -1,0 +1,190 @@
+name: whisper-openvino
+
+# Builds the Intel NPU (OpenVINO) flavour of whisper-server and the per-model
+# OpenVINO encoder IRs that fire-speak downloads for the "openvino" processing
+# device (v0.10). whisper.cpp publishes no OpenVINO binaries, so this is our
+# own build: whisper.cpp at a pinned tag + the official OpenVINO Runtime
+# archive, packaged with every runtime DLL the NPU plugin needs.
+#
+# Output: a prerelease on THIS repo named by `release_tag` carrying
+#   whisper-<tag>-windows-openvino-x64.zip   (server + OpenVINO runtime)
+#   ggml-<model>-encoder-openvino.zip        (FP16 encoder IR, xml + bin)
+#   SHA256SUMS.txt
+# The app pins the tag and the digests (setup.rs `openvino_assets`). Marked
+# prerelease so the in-app updater (releases/latest) never sees it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      whisper_tag:
+        description: whisper.cpp tag to build
+        default: v1.9.4
+      openvino_url:
+        description: OpenVINO Runtime archive (Windows x86_64)
+        default: https://storage.openvinotoolkit.org/repositories/openvino/packages/2026.4/windows/openvino_toolkit_windows_2026.4.0.22959.99c81491cc3_x86_64.zip
+      release_tag:
+        description: Release tag to create or update on this repo
+        default: whisper-openvino-v1.9.4-ov2026.4
+      models:
+        description: Space-separated whisper models to convert
+        default: tiny base small medium large-v3-turbo
+
+permissions:
+  contents: write
+
+jobs:
+  server:
+    name: whisper-server (OpenVINO, Windows x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: ${{ github.event.inputs.whisper_tag }}
+          path: whisper.cpp
+
+      - name: Download OpenVINO Runtime
+        shell: pwsh
+        env:
+          OV_URL: ${{ github.event.inputs.openvino_url }}
+        run: |
+          curl -sSL -o ov.zip "$env:OV_URL"
+          curl -sSL -o ov.zip.sha256 "$env:OV_URL.sha256"
+          $expected = (Get-Content ov.zip.sha256 -Raw).Trim().Split(' ')[0].ToLower()
+          $actual = (Get-FileHash ov.zip -Algorithm SHA256).Hash.ToLower()
+          if ($expected -ne $actual) { throw "OpenVINO archive checksum mismatch: $actual != $expected" }
+          Expand-Archive ov.zip -DestinationPath ov
+          $root = (Get-ChildItem ov -Directory | Select-Object -First 1).FullName
+          "OV_ROOT=$root" >> $env:GITHUB_ENV
+          Get-ChildItem $root
+          Get-ChildItem "$root\runtime\bin\intel64\Release" | Select-Object Name, Length
+
+      - name: Build whisper-server
+        shell: pwsh
+        run: |
+          cd whisper.cpp
+          cmake -B build `
+            -DWHISPER_OPENVINO=1 `
+            -DOpenVINO_DIR="$env:OV_ROOT\runtime\cmake" `
+            -DBUILD_SHARED_LIBS=OFF `
+            -DWHISPER_BUILD_TESTS=OFF `
+            -DWHISPER_BUILD_EXAMPLES=ON `
+            -DGGML_NATIVE=OFF `
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release --target whisper-server -j 4
+          Get-ChildItem build\bin\Release
+
+      - name: Package
+        shell: pwsh
+        env:
+          TAG: ${{ github.event.inputs.whisper_tag }}
+        run: |
+          $name = "whisper-$env:TAG-windows-openvino-x64"
+          New-Item -ItemType Directory -Force "pkg\Release" | Out-Null
+          # server (and any DLL the build produced next to it)
+          Copy-Item whisper.cpp\build\bin\Release\* pkg\Release\ -Recurse
+          # OpenVINO runtime: core + every device plugin (CPU / GPU / NPU / AUTO…) + TBB
+          Copy-Item "$env:OV_ROOT\runtime\bin\intel64\Release\*" pkg\Release\ -Recurse
+          Copy-Item "$env:OV_ROOT\runtime\3rdparty\tbb\bin\*.dll" pkg\Release\
+          Get-ChildItem "$env:OV_ROOT" -Filter LICENSE* | Copy-Item -Destination pkg\OPENVINO-LICENSE.txt -ErrorAction SilentlyContinue
+          Get-ChildItem pkg\Release | Select-Object Name, Length
+          Compress-Archive -Path pkg\* -DestinationPath "$name.zip"
+          $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
+          Get-Item "$name.zip" | Select-Object Name, Length
+          Get-Content "$name.zip.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server
+          path: |
+            whisper-*-windows-openvino-x64.zip
+            whisper-*-windows-openvino-x64.zip.sha256
+
+  encoders:
+    name: encoder IR (${{ matrix.model }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        model: [tiny, base, small, medium, large-v3-turbo]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: ${{ github.event.inputs.whisper_tag }}
+          path: whisper.cpp
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install conversion dependencies (CPU torch)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r whisper.cpp/models/requirements-openvino.txt
+
+      - name: Convert encoder
+        env:
+          MODEL: ${{ matrix.model }}
+        run: |
+          cd whisper.cpp/models
+          python convert-whisper-to-openvino.py --model "$MODEL"
+          ls -la ggml-"$MODEL"-encoder-openvino.*
+          # The script writes FP32. Re-save compressed to FP16: half the
+          # download and what the NPU/GPU plugins run anyway.
+          python - <<'EOF'
+          import os, openvino as ov
+          m = os.environ["MODEL"]
+          xml = f"ggml-{m}-encoder-openvino.xml"
+          core = ov.Core()
+          model = core.read_model(xml)
+          os.makedirs("fp16", exist_ok=True)
+          ov.save_model(model, os.path.join("fp16", xml), compress_to_fp16=True)
+          EOF
+          ls -la fp16
+          cd fp16 && zip -9 "../../../ggml-$MODEL-encoder-openvino.zip" ggml-"$MODEL"-encoder-openvino.xml ggml-"$MODEL"-encoder-openvino.bin
+          cd ../../..
+          sha256sum "ggml-$MODEL-encoder-openvino.zip" | tee "ggml-$MODEL-encoder-openvino.zip.sha256"
+          ls -la ggml-*.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: encoder-${{ matrix.model }}
+          path: |
+            ggml-*-encoder-openvino.zip
+            ggml-*-encoder-openvino.zip.sha256
+
+  release:
+    name: publish prerelease
+    needs: [server, encoders]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd assets
+          cat *.sha256 > SHA256SUMS.txt
+          rm -f *.sha256
+          cat SHA256SUMS.txt
+          ls -la
+
+      - name: Create or update the prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.release_tag }}
+          WHISPER_TAG: ${{ github.event.inputs.whisper_tag }}
+          OV_URL: ${{ github.event.inputs.openvino_url }}
+        run: |
+          notes="whisper-server built from ggml-org/whisper.cpp $WHISPER_TAG with WHISPER_OPENVINO=1 and the OpenVINO Runtime from $OV_URL, plus FP16 OpenVINO encoder IRs for the whisper models fire-speak manages. Downloaded by fire-speak for the Intel NPU processing device; not an app release."
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" assets/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" assets/* --repo "$GITHUB_REPOSITORY" --prerelease \
+              --title "whisper-server OpenVINO build ($WHISPER_TAG)" --notes "$notes"
+          fi
