@@ -53,6 +53,8 @@
   "sys.langAuto": "自动检测（较慢，建议选择语言）",
   "sys.llmOff": "不使用（模式“{0}”）",
   "sys.llmNoKey": "{0}: 未设置 API 密钥（将直接输入未润色的文本）",
+  "sys.save": "设置保存",
+  "sys.saveFailed": "失败：{0}（退出时设置将丢失；请查看设置文件夹中的 fire-speak.log）",
   "onboard.title": "开始使用：准备语音识别",
   "onboard.desc": "下载适合这台电脑的语音识别引擎和模型。只需一次。",
   "onboard.detected": "这台电脑: {0} → 使用 {1} 处理",

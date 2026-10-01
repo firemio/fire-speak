@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Mutex;
 use tauri::Manager;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -356,15 +357,21 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
             s.hotkey = "Ctrl+Alt+Space".to_string();
         }
         if persist {
-            let _ = save(app, &s);
+            if let Err(e) = save(app, &s) {
+                log_line(app, &format!("first-run save failed: {e}"));
+            }
         }
         s
     };
 
     let path = match settings_path(app) {
         Ok(p) => p,
-        Err(_) => return first_run_defaults(false, app),
+        Err(e) => {
+            log_line(app, &format!("settings path unavailable, running on defaults: {e}"));
+            return first_run_defaults(false, app);
+        }
     };
+    log_line(app, &format!("startup: settings file {}", path.display()));
     if let Ok(text) = std::fs::read_to_string(&path) {
         if let Ok(mut s) = serde_json::from_str::<Settings>(&text) {
             if s.modes_version < MODES_VERSION {
@@ -392,14 +399,75 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
                     }
                 }
                 s.modes_version = MODES_VERSION;
-                let _ = save(app, &s);
+                if let Err(e) = save(app, &s) {
+                    log_line(app, &format!("migration save failed: {e}"));
+                }
             }
             return s;
+        } else {
+            log_line(app, "settings file could not be parsed; recreating with defaults");
         }
     }
     first_run_defaults(true, app)
 }
 
+/// Error text of the most recent failed save (`None` once a save succeeds).
+/// Surfaced in `SetupStatus.last_save_error` so the home card can show that
+/// settings are NOT being persisted (v0.9.5 — a machine lost every save for
+/// weeks and nothing in the UI said so).
+static LAST_SAVE_ERROR: Mutex<Option<String>> = Mutex::new(None);
+
+pub fn last_save_error() -> Option<String> {
+    LAST_SAVE_ERROR.lock().ok().and_then(|g| g.clone())
+}
+
+fn set_last_save_error(err: Option<String>) {
+    if let Ok(mut g) = LAST_SAVE_ERROR.lock() {
+        *g = err;
+    }
+}
+
+/// Append one line to `{app_config_dir}/fire-speak.log` (best effort). Used
+/// for settings persistence diagnostics only; never for transcripts or keys.
+pub fn log_line(app: &tauri::AppHandle, msg: &str) {
+    let Ok(dir) = config_dir(app) else { return };
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("fire-speak.log");
+    // Keep the log small: start over past 256 KB.
+    if path.metadata().map(|m| m.len() > 256 * 1024).unwrap_or(false) {
+        let _ = std::fs::remove_file(&path);
+    }
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "{} v{} {}", timestamp(), env!("CARGO_PKG_VERSION"), msg);
+    }
+}
+
+/// `YYYY-MM-DD HH:MM:SS` in UTC (no date crate in the tree).
+fn timestamp() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let days = secs / 86_400;
+    let (h, m, s) = ((secs % 86_400) / 3600, (secs % 3600) / 60, secs % 60);
+    // civil-from-days (Howard Hinnant), valid for the unix era
+    let z = days as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + if mo <= 2 { 1 } else { 0 };
+    format!("{y:04}-{mo:02}-{d:02} {h:02}:{m:02}:{s:02}Z")
+}
+
+/// Persist settings atomically: write `settings.json.tmp`, then rename it
+/// over `settings.json`, retrying a few times (transient sharing violations
+/// from scanners/sync tools). The result is read back and compared; any
+/// failure is logged, remembered for the home card, and returned.
 pub fn save(app: &tauri::AppHandle, settings: &Settings) -> Result<(), String> {
     let path = settings_path(app)?;
     if let Some(parent) = path.parent() {
@@ -408,5 +476,38 @@ pub fn save(app: &tauri::AppHandle, settings: &Settings) -> Result<(), String> {
     }
     let text = serde_json::to_string_pretty(settings)
         .map_err(|e| format!("ERR_SAVE_SETTINGS|serialize: {e}"))?;
-    std::fs::write(&path, text).map_err(|e| format!("ERR_SAVE_SETTINGS|{e}"))
+    let tmp = path.with_extension("json.tmp");
+    let mut last_err = String::new();
+    for attempt in 1..=5u32 {
+        let result = std::fs::write(&tmp, &text)
+            .map_err(|e| format!("write tmp: {e}"))
+            .and_then(|_| std::fs::rename(&tmp, &path).map_err(|e| format!("rename: {e}")))
+            .and_then(|_| match std::fs::read_to_string(&path) {
+                Ok(back) if back == text => Ok(()),
+                Ok(back) => Err(format!(
+                    "verify: file holds {} bytes, expected {}",
+                    back.len(),
+                    text.len()
+                )),
+                Err(e) => Err(format!("verify: {e}")),
+            });
+        match result {
+            Ok(()) => {
+                if attempt > 1 {
+                    log_line(app, &format!("settings saved after {attempt} attempts"));
+                }
+                set_last_save_error(None);
+                return Ok(());
+            }
+            Err(e) => {
+                last_err = e;
+                std::thread::sleep(std::time::Duration::from_millis(120 * attempt as u64));
+            }
+        }
+    }
+    let _ = std::fs::remove_file(&tmp);
+    let msg = format!("ERR_SAVE_SETTINGS|{last_err}");
+    log_line(app, &format!("settings save FAILED ({}): {last_err}", path.display()));
+    set_last_save_error(Some(last_err));
+    Err(msg)
 }

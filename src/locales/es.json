@@ -53,6 +53,8 @@
   "sys.langAuto": "Detección automática (más lenta; se recomienda elegir un idioma)",
   "sys.llmOff": "desactivado (modo «{0}»)",
   "sys.llmNoKey": "{0}: sin clave API (el texto se inserta sin pulir)",
+  "sys.save": "Guardado de ajustes",
+  "sys.saveFailed": "Falla: {0} (los ajustes se perderán al salir; revisa fire-speak.log en la carpeta de ajustes)",
   "onboard.title": "Primeros pasos: preparar el reconocimiento de voz",
   "onboard.desc": "Descarga el motor de voz y el modelo adecuados para este PC. Solo hace falta una vez.",
   "onboard.detected": "Este PC: {0} → se procesa con {1}",

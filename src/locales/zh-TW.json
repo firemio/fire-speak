@@ -53,6 +53,8 @@
   "sys.langAuto": "自動偵測（較慢，建議選擇語言）",
   "sys.llmOff": "不使用（模式「{0}」）",
   "sys.llmNoKey": "{0}: 未設定 API 金鑰（將直接輸入未潤飾的文字）",
+  "sys.save": "設定儲存",
+  "sys.saveFailed": "失敗：{0}（結束時設定將遺失；請查看設定資料夾中的 fire-speak.log）",
   "onboard.title": "開始使用：準備語音辨識",
   "onboard.desc": "下載適合這台電腦的語音辨識引擎和模型。只需一次。",
   "onboard.detected": "這台電腦: {0} → 使用 {1} 處理",

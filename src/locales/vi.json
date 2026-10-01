@@ -53,6 +53,8 @@
   "sys.langAuto": "Tự nhận diện (chậm hơn; nên chọn ngôn ngữ)",
   "sys.llmOff": "tắt (chế độ \"{0}\")",
   "sys.llmNoKey": "{0}: chưa đặt khóa API (văn bản được nhập nguyên bản)",
+  "sys.save": "Lưu cài đặt",
+  "sys.saveFailed": "Thất bại: {0} (cài đặt sẽ mất khi thoát; xem fire-speak.log trong thư mục cài đặt)",
   "onboard.title": "Bắt đầu: chuẩn bị nhận dạng giọng nói",
   "onboard.desc": "Tải bộ nhận dạng giọng nói và mô hình phù hợp với máy này. Chỉ cần làm một lần.",
   "onboard.detected": "Máy này: {0} → xử lý bằng {1}",

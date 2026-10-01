@@ -83,7 +83,7 @@ function toast(message: string, isError = false): void {
     t.style.opacity = "0";
     t.style.transition = "opacity 0.25s";
     window.setTimeout(() => t.remove(), 300);
-  }, 2600);
+  }, isError ? 6000 : 2600);
 }
 
 /**
@@ -206,6 +206,8 @@ async function doSave(): Promise<void> {
     await persistSettings();
   } catch (e: unknown) {
     toast(t("err.saveFailed", errText(e)), true);
+    // The home card shows a persistent "settings not saved" row (v0.9.5).
+    void refreshSetupStatus();
   }
 }
 
@@ -526,6 +528,10 @@ function renderHomeStatus(): void {
   if (hidden || !settings || !s) return;
 
   card.textContent = "";
+  if (s.last_save_error) {
+    // Settings are not reaching disk: everything below would be lost at exit.
+    card.appendChild(statusRow("missing", t("sys.save"), t("sys.saveFailed", s.last_save_error), "stt"));
+  }
   if (settings.stt.engine === "local") {
     const backend = s.server_backend || "cpu";
     const build = t("sys.build", ACCEL_SHORT[backend] ?? "CPU");

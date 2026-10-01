@@ -662,3 +662,13 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 
 - 起動時の自動チェック(`autoCheckUpdate`)で新版を検出したら、従来のホームのバナーに加えて `<dialog id="update-dialog">` を**モーダルで表示**(`update.modalTitle`、`update.available`、リリースノートを `textContent` で、ボタン「後で」`update.later` / 「今すぐアップデート」`update.install`)。「今すぐアップデート」は `startInstallUpdate()`(進捗はバナーとアップデート画面に出る)。同じバージョンについてはセッション中 1 回だけ。手動チェックではモーダルを出さない(結果はアップデート画面に出る)。
 - ロケール追加: `update.modalTitle` `update.later`。
+
+# v0.9.5 追加仕様: 設定保存の堅牢化と可視化
+
+- 背景: あるマシンで `settings.json` が 9/8 から一度も更新されず(API キーを含む全設定が再起動のたびに失われる)、UI には 2.6 秒のトーストしか出ていなかった。原因は再現できていないため、保存を堅牢にし、失敗を見える化してログに残す。
+- `settings::save`: `settings.json.tmp` に書いて `rename` で置き換える(アトミック)。失敗(書き込み / rename / 読み戻し検証の不一致)は 120ms×試行回数の待ちで最大 5 回まで再試行。最終的に失敗したら `ERR_SAVE_SETTINGS|{detail}` を返し、`LAST_SAVE_ERROR` に記録してログに書く。成功で `LAST_SAVE_ERROR` をクリア。
+- `settings::log_line(app, msg)`: `{app_config_dir}/fire-speak.log` に `YYYY-MM-DD HH:MM:SSZ vX.Y.Z msg` を追記(256KB を超えたら作り直し)。起動時に解決した設定ファイルのパス、初回作成 / 移行時の保存失敗、パース失敗による既定値再作成を記録する。転写テキストやキーは書かない。
+- `SetupStatus.last_save_error: String`(空 = 直近の保存成功)。
+- ホームの動作状況カードの先頭に、`last_save_error` が空でないとき ✕ 行 `sys.save` / `sys.saveFailed`(エラー文言入り、「変更」は音声認識画面 = 設定フォルダを開くボタンがある)。フロントは保存失敗のトースト後に `refreshSetupStatus()` を呼んで行を出す。
+- エラートーストの表示時間を 6 秒に延長(通常は 2.6 秒のまま)。
+- ロケール追加(12 言語): `sys.save` `sys.saveFailed`。

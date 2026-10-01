@@ -53,6 +53,8 @@
   "sys.langAuto": "Automatisch (langsamer – eine Sprache zu wählen wird empfohlen)",
   "sys.llmOff": "aus (Modus „{0}“)",
   "sys.llmNoKey": "{0}: kein API-Schlüssel (Text wird unbearbeitet eingefügt)",
+  "sys.save": "Einstellungen speichern",
+  "sys.saveFailed": "Schlägt fehl: {0} (Einstellungen gehen beim Beenden verloren; siehe fire-speak.log im Einstellungsordner)",
   "onboard.title": "Erste Schritte: Spracherkennung einrichten",
   "onboard.desc": "Lädt die zu diesem PC passende Sprach-Engine und das Modell herunter. Nur einmal nötig.",
   "onboard.detected": "Dieser PC: {0} → läuft auf {1}",

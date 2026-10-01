@@ -53,6 +53,8 @@
   "sys.langAuto": "Auto-detect (slower — picking a language is recommended)",
   "sys.llmOff": "off (mode \"{0}\")",
   "sys.llmNoKey": "{0}: API key not set (text is inserted unpolished)",
+  "sys.save": "Settings save",
+  "sys.saveFailed": "Failing: {0} (settings will be lost on exit; see fire-speak.log in the settings folder)",
   "onboard.title": "Getting started: set up speech recognition",
   "onboard.desc": "Downloads the speech engine and model that suit this PC. Needed only once.",
   "onboard.detected": "This PC: {0} → runs on {1}",

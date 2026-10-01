@@ -53,6 +53,8 @@
   "sys.langAuto": "Deteksi otomatis (lebih lambat; sebaiknya pilih bahasa)",
   "sys.llmOff": "mati (mode \"{0}\")",
   "sys.llmNoKey": "{0}: kunci API belum diatur (teks dimasukkan tanpa dirapikan)",
+  "sys.save": "Penyimpanan pengaturan",
+  "sys.saveFailed": "Gagal: {0} (pengaturan akan hilang saat keluar; lihat fire-speak.log di folder pengaturan)",
   "onboard.title": "Mulai: siapkan pengenalan suara",
   "onboard.desc": "Mengunduh mesin pengenalan suara dan model yang cocok untuk PC ini. Cukup sekali.",
   "onboard.detected": "PC ini: {0} → diproses dengan {1}",

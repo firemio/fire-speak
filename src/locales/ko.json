@@ -53,6 +53,8 @@
   "sys.langAuto": "자동 감지 (느림, 언어 선택 권장)",
   "sys.llmOff": "사용 안 함 (모드 \"{0}\")",
   "sys.llmNoKey": "{0}: API 키 미설정 (다듬지 않고 그대로 입력됨)",
+  "sys.save": "설정 저장",
+  "sys.saveFailed": "실패: {0} (종료 시 설정이 사라집니다. 설정 폴더의 fire-speak.log를 확인하세요)",
   "onboard.title": "시작하기: 음성 인식 준비",
   "onboard.desc": "이 PC에 맞는 음성 인식 엔진과 모델을 다운로드합니다. 처음 한 번만 필요합니다.",
   "onboard.detected": "이 PC: {0} → {1}(으)로 처리",

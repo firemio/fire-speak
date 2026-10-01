@@ -118,6 +118,7 @@ export interface SetupStatus {
   recommended_model: string;
   /** The managed whisper-server is running (model loaded) (v0.9.2). */
   server_running: boolean;
+  last_save_error: string; // "" = last save succeeded (v0.9.5)
 }
 
 export interface Hardware {

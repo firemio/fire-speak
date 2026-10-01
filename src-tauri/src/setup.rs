@@ -119,6 +119,9 @@ pub struct SetupStatus {
     pub recommended_model: String,
     /// The managed whisper-server process is running (model loaded) (v0.9.2).
     pub server_running: bool,
+    /// Error of the most recent failed settings save, "" when the last save
+    /// succeeded (v0.9.5). The home card shows it as a ✕ row.
+    pub last_save_error: String,
 }
 
 /// Whether the managed whisper-server process is alive.
@@ -404,6 +407,7 @@ pub fn get_setup_status(app: &AppHandle, settings: &Settings) -> Result<SetupSta
         npu_cache_ready: npu_cache_ready(app, settings),
         recommended_model: recommended_model(effective_accel(settings)).to_string(),
         server_running: server_running(app),
+        last_save_error: crate::settings::last_save_error().unwrap_or_default(),
         model_installed: model.is_some(),
         model_path: model
             .map(|p| p.to_string_lossy().to_string())
