@@ -44,6 +44,98 @@ const CAPTION_SILENCE_PEAK: f32 = 0.01;
 /// STT failures (e.g. server not installed) instead of retrying forever.
 const CAPTION_MAX_FAILURES: u32 = 2;
 
+// Speech gate (v0.10.1): whisper hallucinates on silence and clicks
+// ("ご視聴ありがとうございました", "Thanks for watching"…). A recording is
+// only sent to STT when it holds some audio that could be speech.
+/// 16 kHz samples per gate frame (20 ms).
+const GATE_FRAME: usize = 320;
+/// A frame counts as active when its peak exceeds this fraction of full scale.
+const GATE_FRAME_PEAK: f32 = 0.015;
+/// Minimum active audio (seconds) for a recording to be transcribed.
+const MIN_SPEECH_SECS: f32 = 0.25;
+/// Recordings shorter than this with no speech end silently (the hotkey was
+/// used as a modifier); longer silent ones show ERR_NO_SPEECH.
+const SILENT_SKIP_SECS: f32 = 1.5;
+/// Internal result of the gate for short silent recordings; never emitted.
+const SILENT_SKIP: &str = "SILENT_SKIP";
+
+/// Seconds of 20 ms frames whose peak is above `GATE_FRAME_PEAK`.
+fn speech_seconds(samples: &[i16]) -> f32 {
+    let threshold = (GATE_FRAME_PEAK * i16::MAX as f32) as i32;
+    let active = samples
+        .chunks(GATE_FRAME)
+        .filter(|frame| frame.iter().any(|s| (*s as i32).abs() > threshold))
+        .count();
+    active as f32 * GATE_FRAME as f32 / 16_000.0
+}
+
+/// Text whisper produces for silence or background noise rather than for
+/// speech: video sign-offs, subtitle credits, bracketed sound tags. Compared
+/// after lowercasing and stripping whitespace and punctuation. Only phrases
+/// that practically never occur in dictation are matched (a plain
+/// "ありがとうございました" is legitimate input; the speech gate handles the
+/// silent case that produces it).
+fn is_hallucination(text: &str) -> bool {
+    let norm: String = text
+        .chars()
+        .filter(|c| !c.is_whitespace() && !is_strip_punct(*c))
+        .flat_map(|c| c.to_lowercase())
+        .collect();
+    if norm.is_empty() {
+        return true;
+    }
+    let t = text.trim();
+    let bracketed = [('[', ']'), ('(', ')'), ('（', '）'), ('【', '】'), ('「', '」')]
+        .iter()
+        .any(|(o, c)| t.starts_with(*o) && t.ends_with(*c) && t.matches(*o).count() == 1);
+    if bracketed {
+        return true;
+    }
+    // Sign-offs are short; a real sentence that happens to mention subtitles
+    // or a channel must not be dropped.
+    if norm.chars().count() > 40 {
+        return false;
+    }
+    const MARKERS: &[&str] = &[
+        // ja
+        "ご視聴", "視聴ありがとう", "チャンネル登録", "字幕by", "字幕提供", "字幕作成", "字幕制作",
+        "次回の動画", "最後までご覧", "ご覧いただきありがとう", "ご覧くださりありがとう", "動画をご覧",
+        // en
+        "thanksforwatching", "thankyouforwatching", "subtitlesby", "subtitledby", "captionsby",
+        "transcribedby", "andsubscribe", "pleasesubscribe", "subscribetomychannel",
+        "subscribetothechannel", "seeyouinthenext",
+        "amara.org", "likeandshare",
+        // zh
+        "谢谢观看", "謝謝觀看", "感谢观看", "感謝觀看", "字幕由", "明镜与点点", "点赞订阅", "點贊訂閱",
+        "订阅转发", "訂閱轉發",
+        // ko
+        "시청해주셔서", "구독과좋아요", "좋아요와구독", "구독버튼",
+        // de / fr / es / pt / ru / vi / id
+        "untertitelvon", "untertiteldurch", "untertitelimauftrag", "dankefürszuschauen",
+        "vielendankfürszuschauen",
+        "soustitrespar", "soustitresréalisés", "soustitrage", "mercidavoirregardé", "abonnezvous",
+        "subtítulospor", "subtituladopor", "subtítulosrealizados", "graciasporver", "suscríbete",
+        "suscribete",
+        "legendaspela", "legendaspor", "legendadopor", "obrigadoporassistir", "obrigadaporassistir",
+        "inscrevase",
+        "субтитрысделал", "субтитрыот", "редакторсубтитров", "спасибозапросмотр", "подписывайтесь",
+        "cảmơncácbạnđãtheodõi", "cảmơnđãtheodõi", "đăngkýkênh", "hẹngặplại",
+        "terimakasihtelahmenonton", "terimakasihsudahmenonton",
+        // whisper special tokens (bracketed tags are caught above)
+        "blank_audio", "blankaudio",
+    ];
+    MARKERS.iter().any(|m| norm.contains(m))
+}
+
+fn is_strip_punct(c: char) -> bool {
+    c.is_ascii_punctuation()
+        || matches!(
+            c,
+            '。' | '、' | '！' | '？' | '…' | '「' | '」' | '『' | '』' | '【' | '】' | '（' | '）'
+                | '・' | '〜' | '～' | '，' | '．' | '：' | '；' | '\u{201C}' | '\u{201D}' | '\u{2018}' | '\u{2019}'
+        )
+}
+
 pub fn set_hotkey_suspended(suspended: bool) {
     HOTKEY_SUSPENDED.store(suspended, Ordering::SeqCst);
 }
@@ -78,6 +170,8 @@ pub fn hotkey_pressed(app: &AppHandle) {
     match current {
         Status::Idle => {
             *PRESS_AT.lock().unwrap() = Some(Instant::now());
+            #[cfg(windows)]
+            spawn_modifier_use_watch(app.clone());
             start_recording(app);
         }
         // recording (tap-locked, or started elsewhere): press confirms
@@ -122,6 +216,63 @@ pub fn hotkey_released(app: &AppHandle) {
         stop_and_process(app);
     }
     // else: tap-lock — keep recording; the next press confirms
+}
+
+/// Hold mode with a bare modifier hotkey (RAlt…): while the key is held, a
+/// mouse click or any other key means the user is using it as a modifier
+/// (Alt+click, Alt+Tab…), not talking — cancel the recording silently
+/// (v0.10.1). Polls GetAsyncKeyState every 20 ms until the key is released,
+/// the recording ends, or it is canceled. Keys already down at the press do
+/// not count.
+#[cfg(windows)]
+fn spawn_modifier_use_watch(app: AppHandle) {
+    let special = {
+        let state = app.state::<AppState>();
+        let settings = state.settings.lock().unwrap();
+        crate::hook::is_special_token(&settings.hotkey)
+    };
+    if !special {
+        return;
+    }
+    // start_recording (called right after) bumps the generation once
+    let expected_gen = app.state::<AppState>().generation.load(Ordering::SeqCst) + 1;
+    std::thread::spawn(move || {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+        let is_down = |vk: i32| (unsafe { GetAsyncKeyState(vk) } as u16) & 0x8000 != 0;
+        // modifiers (generic and L/R) never count; neither does the hotkey itself
+        let ignored = |vk: i32| matches!(vk, 0x10..=0x12 | 0xA0..=0xA5 | 0xE7 | 0xFF);
+        let mut baseline = [false; 256];
+        for (vk, slot) in baseline.iter_mut().enumerate().skip(1) {
+            *slot = is_down(vk as i32);
+        }
+        let started = Instant::now();
+        loop {
+            std::thread::sleep(Duration::from_millis(20));
+            if !HOTKEY_HELD.load(Ordering::SeqCst) {
+                return; // released: tap-lock or confirm, no longer a modifier
+            }
+            let state = app.state::<AppState>();
+            let gen = state.generation.load(Ordering::SeqCst);
+            if gen > expected_gen {
+                return; // canceled or superseded
+            }
+            if gen == expected_gen && *state.status.lock().unwrap() != Status::Recording {
+                return;
+            }
+            if gen < expected_gen && started.elapsed() > Duration::from_secs(10) {
+                return; // the recording never started
+            }
+            for vk in 1..256usize {
+                if ignored(vk as i32) || baseline[vk] {
+                    continue;
+                }
+                if is_down(vk as i32) {
+                    cancel(&app);
+                    return;
+                }
+            }
+        }
+    });
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -360,6 +511,9 @@ fn spawn_live_captions(app: AppHandle, gen: u64) {
             if !is_recording(&app, gen) {
                 return; // recording ended while the request was in flight
             }
+            if is_hallucination(&text) {
+                continue; // noise window: keep the caption as it was
+            }
             let combined = join_caption(&committed, &text);
             let _ = app.emit("caption", serde_json::json!({ "text": combined }));
             if snap.end - window_start >= window_limit {
@@ -412,7 +566,13 @@ pub fn stop_and_process(app: &AppHandle) {
                 }
             };
             if notify {
-                error_flow(&app2, e);
+                if e == SILENT_SKIP {
+                    // modifier tap / click only: no message, just go idle
+                    hide_overlay(&app2);
+                    emit_status(&app2, "idle", None);
+                } else {
+                    error_flow(&app2, e);
+                }
             }
         }
     });
@@ -440,6 +600,16 @@ async fn run_pipeline(
     if samples.is_empty() {
         return Err("ERR_NO_SPEECH".to_string());
     }
+    // Speech gate: a click or a modifier tap holds no speech; sending it
+    // would only get a hallucinated sign-off back.
+    if speech_seconds(&samples) < MIN_SPEECH_SECS {
+        let total_secs = samples.len() as f32 / 16_000.0;
+        return Err(if total_secs < SILENT_SKIP_SECS {
+            SILENT_SKIP.to_string()
+        } else {
+            "ERR_NO_SPEECH".to_string()
+        });
+    }
     let wav = crate::audio::wav_bytes(&samples)?;
 
     // 2. STT
@@ -448,7 +618,7 @@ async fn run_pipeline(
         return Ok(());
     }
     let raw_text = raw_text.trim().to_string();
-    if raw_text.is_empty() {
+    if raw_text.is_empty() || is_hallucination(&raw_text) {
         return Err("ERR_NO_SPEECH".to_string());
     }
 
@@ -591,4 +761,64 @@ pub fn error_flow(app: &AppHandle, message: String) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+
+    #[test]
+    fn hallucinations() {
+        for t in [
+            "ご視聴ありがとうございました",
+            "ご視聴ありがとうございました。",
+            " チャンネル登録お願いします ",
+            "Thanks for watching!",
+            "Thank you for watching.",
+            "Subtitles by the Amara.org community",
+            "[BLANK_AUDIO]",
+            "(拍手)",
+            "[Music]",
+            "字幕由Amara.org社区提供",
+            "시청해주셔서 감사합니다",
+            "",
+            "。",
+        ] {
+            assert!(is_hallucination(t), "{t:?} should be dropped");
+        }
+    }
+
+    #[test]
+    fn real_speech_passes() {
+        for t in [
+            "ありがとうございました",
+            "はい",
+            "明日の会議は10時からです",
+            "The quarterly numbers look good, thank you.",
+            "この動画の字幕を日本語に翻訳して、タイトルは変えずに保存してください。全部で三つのファイルがあります。",
+            "(仮)のタイトルで保存",
+            "字幕を付けて",
+            "play some music",
+            "구독 취소해 줘",
+            "subscribe to the newsletter",
+        ] {
+            assert!(!is_hallucination(t), "{t:?} should pass");
+        }
+    }
+
+    #[test]
+    fn speech_gate() {
+        // 2 s of silence with a 30 ms click: no speech
+        let mut click = vec![0i16; 32_000];
+        for s in click.iter_mut().skip(8_000).take(480) {
+            *s = 12_000;
+        }
+        assert!(speech_seconds(&click) < MIN_SPEECH_SECS);
+        // 0.5 s of quiet tone (peak ~ 3% of full scale) counts as speech
+        let tone: Vec<i16> = (0..8_000)
+            .map(|i| (1000.0 * (i as f32 * 0.3).sin()) as i16)
+            .collect();
+        assert!(speech_seconds(&tone) >= MIN_SPEECH_SECS);
+        assert_eq!(speech_seconds(&[0i16; 16_000]), 0.0);
+    }
 }

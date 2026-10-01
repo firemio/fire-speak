@@ -715,3 +715,16 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 
 - Intel NPU 上での実行そのもの(OpenVINO NPU プラグインが whisper エンコーダ IR をコンパイルできるか、large-v3-turbo のコンパイル時間とメモリ)。動かない場合は `ERR_SERVER_DIED` か 600 秒のタイムアウトになる。その場合の代替は処理デバイスを CPU / Vulkan にすること。
 - Intel NPU ドライバ未導入だと検出行に「Intel NPU あり」が出ず、選んでもサーバが起動しない。
+
+# v0.10.1 追加仕様: 無音・誤操作で「ご視聴ありがとうございました」が入力される問題
+
+## 背景
+
+- 右Alt(hold モード)を Alt+クリック等の**修飾キーとして**押すと録音が始まり、離した瞬間にクリック音だけの短い音声が STT に送られる。Whisper は無音・雑音に対して「ご視聴ありがとうございました」「ありがとうございました」「はい」などを幻聴し、それが貼り付いていた。
+
+## 対策 (pipeline.rs)
+
+1. **修飾キー利用のキャンセル(Windows)**: hold モードかつホットキーが単体修飾キー(`hook::is_special_token`)のとき、押下で `spawn_modifier_use_watch` を起動。キーが押されている間 20ms ごとに `GetAsyncKeyState` を見て、押下時点で押されていなかった**マウスボタンまたは修飾キー以外のキー**(VK 0x10-0x12 / 0xA0-0xA5 / 0xE7 / 0xFF 以外)が押されたら `cancel`(オーバーレイを閉じて idle、エラー表示なし)。キーを離した(タップロック/確定)・録音終了・キャンセル・10 秒経っても録音が始まらない、のいずれかで終了。Linux では無効。
+2. **発話ゲート**: 16kHz サンプルを 20ms フレームに分け、ピークが full scale の 1.5% を超えるフレームの合計が **0.25 秒未満**なら STT に送らない。録音全体が 1.5 秒未満なら内部結果 `SILENT_SKIP`(status-changed は出さず、オーバーレイを閉じて idle)、1.5 秒以上なら従来の `ERR_NO_SPEECH`。
+3. **幻聴フィルタ** `is_hallucination(text)`: 空白と句読点を除き小文字化した文字列が、空 / 全体が括弧(`[]` `()` `（）` `【】` `「」`)/ 40 文字以内で既知マーカー(「ご視聴」「チャンネル登録」「字幕提供」「thanksforwatching」「subtitlesby」「pleasesubscribe」「谢谢观看」「시청해주셔서」「untertitelvon」「soustitrespar」「subtítulospor」「legendaspela」「субтитрыот」「cảmơncácbạnđãtheodõi」「terimakasihtelahmenonton」「blank_audio」等 12 言語分。「字幕」「subscribe」「music」のような単語単体は正当な入力に出るので使わない)を含む、のいずれかなら真。最終結果なら `ERR_NO_SPEECH`、字幕ウィンドウならそのウィンドウを捨てる。**「ありがとうございました」「はい」単体は正当な入力なので対象外**(無音由来のものは 2 で止まる)。
+- 単体テスト `gate_tests`(幻聴判定の正例/負例、発話ゲート)。
