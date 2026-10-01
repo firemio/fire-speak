@@ -761,6 +761,9 @@ function wireSttSection(): void {
 // llm section (provider CRUD)
 // ---------------------------------------------------------------------------
 
+/** Provider cards start collapsed (v0.9.3); only ids in this set show the editor. */
+const expandedProviders = new Set<string>();
+
 function renderProviderList(): void {
   if (!settings) return;
   const host = $("provider-list");
@@ -781,6 +784,8 @@ function buildProviderCard(provider: LlmProvider): HTMLElement {
   const card = el("div", "entity-card");
   const isActive = settings?.llm.active_provider_id === provider.id;
   if (isActive) card.classList.add("is-active-entity");
+  const expanded = expandedProviders.has(provider.id);
+  if (!expanded) card.classList.add("is-collapsed");
 
   // head: active radio + name + delete
   const head = el("div", "entity-head");
@@ -820,10 +825,24 @@ function buildProviderCard(provider: LlmProvider): HTMLElement {
     scheduleSave();
   });
 
-  head.append(radioLabel, nameInput, delBtn);
+  // collapsed summary: model + key state, and the expand toggle
+  const summary = el("span", "entity-summary", provider.model || "—");
+  summary.title = provider.base_url;
+  if (!providerReady(provider)) summary.appendChild(el("span", "badge warn", t("llm.noKey")));
+  const toggleBtn = el("button", "icon-btn", expanded ? "▾" : "▸") as HTMLButtonElement;
+  toggleBtn.type = "button";
+  toggleBtn.title = t("llm.edit");
+  toggleBtn.setAttribute("aria-expanded", String(expanded));
+  toggleBtn.addEventListener("click", () => {
+    if (expandedProviders.has(provider.id)) expandedProviders.delete(provider.id);
+    else expandedProviders.add(provider.id);
+    renderProviderList();
+  });
 
-  // form grid
-  const grid = el("div", "form-grid");
+  head.append(radioLabel, nameInput, summary, toggleBtn, delBtn);
+
+  // form grid: one field per row, label beside the input (v0.9.3)
+  const grid = el("div", "form-grid form-grid-inline");
 
   const kindField = el("label", "field");
   kindField.appendChild(el("span", "field-label", t("llm.kind")));
@@ -917,25 +936,50 @@ function buildProviderCard(provider: LlmProvider): HTMLElement {
   });
   testRow.append(testBtn, testResult);
 
-  card.append(head, grid, testRow);
+  card.appendChild(head);
+  if (expanded) card.append(grid, testRow);
   return card;
+}
+
+// Presets add a new provider with name / kind / URL / model filled in; the
+// API key stays empty for the user to paste (v0.9.3, same idea as the STT
+// presets). Ollama mirrors `settings::ollama_provider` in the backend.
+const LLM_PRESETS: Record<string, Omit<LlmProvider, "id" | "api_key">> = {
+  poolside: { name: "Laguna S 2.1 (Poolside)", kind: "openai", base_url: "https://inference.poolside.ai/v1", model: "poolside/laguna-s-2.1" },
+  anthropic: { name: "Claude (Anthropic)", kind: "anthropic", base_url: "https://api.anthropic.com", model: "claude-haiku-4-5" },
+  openai: { name: "OpenAI", kind: "openai", base_url: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+  openrouter: { name: "Laguna S 2.1 (OpenRouter free)", kind: "openai", base_url: "https://openrouter.ai/api/v1", model: "poolside/laguna-s-2.1:free" },
+  groq: { name: "Groq", kind: "openai", base_url: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
+  ollama: { name: "Ollama (local, free)", kind: "openai", base_url: "http://localhost:11434/v1", model: "qwen2.5:7b" },
+};
+
+function addProvider(preset: Omit<LlmProvider, "id" | "api_key">): void {
+  if (!settings) return;
+  const id = `provider_${Date.now().toString(36)}`;
+  settings.llm.providers.push({ id, api_key: "", ...preset });
+  if (!settings.llm.active_provider_id) settings.llm.active_provider_id = id;
+  expandedProviders.add(id); // the new card opens so the key can be pasted right away
+  renderProviderList();
+  scheduleSave();
+  const cards = $("provider-list").children;
+  cards[cards.length - 1]?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function wireLlmSection(): void {
   $("btn-add-provider").addEventListener("click", () => {
-    if (!settings) return;
-    const id = `provider_${Date.now().toString(36)}`;
-    settings.llm.providers.push({
-      id,
+    addProvider({
       name: t("llm.newProviderName"),
       kind: "openai",
       base_url: "https://api.openai.com/v1",
-      api_key: "",
       model: "",
     });
-    if (!settings.llm.active_provider_id) settings.llm.active_provider_id = id;
-    renderProviderList();
-    scheduleSave();
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-llm-preset]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      const preset = LLM_PRESETS[btn.dataset.llmPreset ?? ""];
+      if (preset) addProvider(preset);
+    });
   });
 }
 

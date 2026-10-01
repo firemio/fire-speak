@@ -6,6 +6,10 @@ Genspark Speakly 代替の常駐型AI音声入力アプリ（Windows 11 / Linux 
 
 **ホットキー → 話す → 文字起こし → AI整形 → アクティブなアプリに自動貼り付け。**
 
+> **English:** A resident AI voice-input app for your desktop (Windows 11 / Linux, Tauri v2, a Genspark Speakly alternative).
+> **Hotkey → speak → Whisper speech-to-text → LLM polishing → auto-paste into the active app.**
+> Speech recognition runs locally with whisper.cpp (free, offline; one-click install of the server and model from the home screen) or through any OpenAI-compatible cloud API (OpenAI, Groq). Polishing uses Poolside (Laguna S 2.1), Anthropic Claude, or any OpenAI-compatible chat/completions endpoint (OpenRouter, Groq, Ollama). Modes (polish / raw / translate to English or Japanese / terminal command / business tone / custom), a focus-free recording HUD with live captions, 12 UI languages, and signed one-click auto-update.
+
 ## 📥 ダウンロード
 
 **[最新版をダウンロード](https://github.com/firemio/fire-speak/releases/latest)**
@@ -30,7 +34,7 @@ Linux は[Linux でのインストール](#linux-でのインストール)を必
   - クラウド: OpenAI互換 `audio/transcriptions` API（OpenAI / Groq など）
 - **AI整形プロバイダ切替**
   - Anthropic API（Claude Haiku 等）
-  - OpenAI互換 chat/completions（OpenRouter の Laguna S 2.1 無料枠、Groq、Ollama ローカル等）
+  - OpenAI互換 chat/completions（Poolside の Laguna S 2.1、OpenRouter 無料枠、Groq、Ollama ローカル等）。プリセットからワンクリック追加
 - **モード**: 整形 / そのまま / 英語に翻訳 / 日本語に翻訳 / ターミナルコマンド / ビジネス文体 + カスタム追加可。トレイメニューからワンクリック切替
 - **録音HUD**: フォーカスを奪わない波形オーバーレイ。**リアルタイム字幕**で話している途中のテキストが流れます（設定でオフ可）
 - **認識言語は OS の言語に固定が既定**（自動判定は短い発話で誤判定しやすいため）。設定で 11 言語から変更可
@@ -149,13 +153,13 @@ npm run tauri build
 
 ## 初回セットアップ
 
-1. アプリ起動 → 設定画面「**セットアップ**」タブ
-2. **Whisperサーバをインストール**（whisper.cpp 公式リリースを自動DL・展開）
-3. **モデルをダウンロード**（推奨: `small`＝488MB で日本語実用、精度重視なら `large-v3-turbo`＝1.6GB）
-4. 「**AI整形**」タブでプロバイダにAPIキーを設定
+1. アプリ起動 → ホーム画面の「**セットアップを開始**」を押す（この PC の GPU / NPU に合う whisper-server ビルドと推奨モデルを自動で導入。進み具合は手順ごとに ✓ で表示）
+2. 導入後はホームの「**動作状況**」カードで、音声認識エンジン・モデル・処理デバイス・API キー・認識言語が ✓ / ! / ✕ で確認できます（各行の「変更」で該当画面へ）
+3. 「**AI整形**」タブのプリセット（Poolside / Claude / OpenAI / OpenRouter / Groq / Ollama）でプロバイダを追加し、APIキーを貼り付け
+   - Poolside（Laguna S 2.1）: [Poolside](https://poolside.ai/) でキー発行（`https://inference.poolside.ai/v1` / `poolside/laguna-s-2.1`）
    - Claude: [Anthropic Console](https://console.anthropic.com/) でキー発行
    - Laguna S 2.1 無料枠: [OpenRouter](https://openrouter.ai/) でキー発行（`poolside/laguna-s-2.1:free`）
-5. どこかテキスト入力欄にカーソルを置いて `Ctrl+Alt+Space` → 話す → もう一度押す → 貼り付き完了
+4. どこかテキスト入力欄にカーソルを置いて **右Alt を押しながら話す** → 離す → 貼り付き完了
 
 APIキーなし・完全ローカルでも「そのまま」モード（整形なし）で動作します。
 

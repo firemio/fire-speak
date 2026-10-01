@@ -269,6 +269,14 @@ fn default_update_repo() -> String {
 fn default_providers() -> Vec<LlmProvider> {
     vec![
         LlmProvider {
+            id: "poolside".to_string(),
+            name: "Laguna S 2.1 (Poolside)".to_string(),
+            kind: "openai".to_string(),
+            base_url: "https://inference.poolside.ai/v1".to_string(),
+            api_key: String::new(),
+            model: "poolside/laguna-s-2.1".to_string(),
+        },
+        LlmProvider {
             id: "anthropic".to_string(),
             name: "Claude (Anthropic)".to_string(),
             kind: "anthropic".to_string(),

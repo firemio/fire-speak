@@ -626,3 +626,13 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
   - AI整形: アクティブモードが LLM を使わないなら `sys.llmOff`、使えるプロバイダ(`llm::is_configured` と同じ判定をフロントで再現)ならプロバイダ名(モデル)、使えなければ ! `sys.llmNoKey`。
 - `SetupStatus.server_running`(管理中の whisper-server が生存)。バックエンドはサーバ起動成功時と `kill_server` で停止したときに `server-state`(bool)を emit し、フロントは setup_status を取り直す。ホームに切り替えたときも取り直す。
 - ロケール追加(12 言語): `sys.*` 18 キー。
+
+# v0.9.3 追加仕様: AI整形プロバイダのプリセット / Poolside / 畳んだカード
+
+- 背景: Poolside の API(`https://inference.poolside.ai/v1`、OpenAI 互換 chat/completions、モデル `poolside/laguna-s-2.1`)を直接使いたい。プロバイダを手で追加すると URL とモデル名を打ち込む必要があった。また各プロバイダカードが常に全項目を開いていて縦に長く、並ぶと見づらい。
+- 「AI整形」セクションの見出し直下に**プリセット**行(`llm.preset`、クラウド STT と同じ `.preset-row`)。並び順は **Poolside** / Claude / OpenAI / OpenRouter / Groq / Ollama。押すと名前・種別・Base URL・モデルを埋めた**新しいプロバイダを追加**し(API キーは空)、アクティブが無ければそれをアクティブにし、そのカードを開いた状態で末尾に追加してスクロール。「＋ プロバイダを追加」も同じ `addProvider` を通る。ヒント `llm.presetHint`。
+  - 値: Poolside = `https://inference.poolside.ai/v1` / `poolside/laguna-s-2.1`、Claude = anthropic / `https://api.anthropic.com` / `claude-haiku-4-5`、OpenAI = `https://api.openai.com/v1` / `gpt-4o-mini`、OpenRouter = `https://openrouter.ai/api/v1` / `poolside/laguna-s-2.1:free`、Groq = `https://api.groq.com/openai/v1` / `llama-3.3-70b-versatile`、Ollama = `settings::ollama_provider` と同じ。
+- **プロバイダカードは既定で畳む**(`.entity-card.is-collapsed`、メモリ上の `expandedProviders` 集合に入っている id だけ開く。再起動で全部畳む)。畳んだ状態は 1 行 = アクティブのラジオ + 名前(編集可) + `entity-summary`(モデル名、title に Base URL。`providerReady` でなければバッジ `llm.noKey`)+ 開閉ボタン(▸/▾、title `llm.edit`)+ 削除。開くと種別/モデル/URL/API キーのグリッドとテスト行が出る。グリッドは `form-grid-inline`(1 列、各行はラベル 96px + 入力欄の横並び)で縦を詰める。
+- 初回起動の既定プロバイダ(`default_providers`)の**先頭**に `poolside`(Laguna S 2.1 (Poolside))を追加(Poolside / Claude / OpenRouter / Ollama の 4 件)。既存ユーザーの設定は変更しない(プリセットから追加できる)。
+- ロケール追加(12 言語): `llm.preset` `llm.presetHint` `llm.edit` `llm.noKey`。
+- README: 先頭に英語の紹介文、初回セットアップ手順をホームのセットアップカード前提に更新、Poolside のキー発行先を追記。

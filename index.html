@@ -232,6 +232,16 @@
           <div class="hint" data-i18n="llm.hint">
             アクティブに設定したプロバイダが、モードの整形指示の実行に使われます。
           </div>
+          <div class="preset-row">
+            <span class="field-label" data-i18n="llm.preset">プリセット</span>
+            <button class="btn btn-sm" data-llm-preset="poolside">Poolside</button>
+            <button class="btn btn-sm" data-llm-preset="anthropic">Claude</button>
+            <button class="btn btn-sm" data-llm-preset="openai">OpenAI</button>
+            <button class="btn btn-sm" data-llm-preset="openrouter">OpenRouter</button>
+            <button class="btn btn-sm" data-llm-preset="groq">Groq</button>
+            <button class="btn btn-sm" data-llm-preset="ollama">Ollama</button>
+            <span class="hint" data-i18n="llm.presetHint">URL とモデルを埋めたプロバイダを追加します。API キーは各サービスで発行して貼り付けてください</span>
+          </div>
           <div id="provider-list" class="stack"></div>
         </section>
 
