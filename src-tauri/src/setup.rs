@@ -267,6 +267,73 @@ fn openvino_release_url(asset: &str) -> String {
     format!("https://github.com/{OPENVINO_RELEASE_REPO}/releases/download/{OPENVINO_RELEASE_TAG}/{asset}")
 }
 
+// ---------------------------------------------------------------------------
+// Silero VAD for whisper-server (v0.10.2)
+// ---------------------------------------------------------------------------
+
+/// whisper.cpp's built-in VAD (`--vad`) drops non-speech before decoding,
+/// which is what stops "ご視聴ありがとうございました" on clicks and room
+/// noise. The model is ~0.9 MB from ggml-org; kept next to the whisper models.
+const VAD_MODEL_FILE: &str = "ggml-silero-v5.1.2.bin";
+const VAD_MODEL_URL: &str =
+    "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin";
+/// Padding around detected speech so word edges are not clipped (ms).
+const VAD_SPEECH_PAD_MS: &str = "120";
+
+/// Set once a managed server refused the `--vad` flags (older build): the
+/// server is then started without VAD for the rest of the session.
+static VAD_UNSUPPORTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Whether the server currently running was started with `--vad`. The STT
+/// client asks for plain `json` then: whisper-server (1.9.x) crashes building
+/// a `verbose_json` response when VAD left no speech segments (observed with
+/// silence, noise and a pure tone), while `json` returns `{"text": ""}`.
+static SERVER_VAD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn server_vad_active() -> bool {
+    SERVER_VAD.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+pub fn vad_model_path(app: &AppHandle) -> Option<PathBuf> {
+    models_dir(app).ok().map(|d| d.join(VAD_MODEL_FILE))
+}
+
+/// Download the VAD model if it is not there yet (quiet, no progress events:
+/// it is under a megabyte). Failures only log — the server runs without VAD.
+pub async fn ensure_vad_model(app: &AppHandle) {
+    let Some(dest) = vad_model_path(app) else { return };
+    if dest.exists() {
+        return;
+    }
+    let result: Result<(), String> = async {
+        if let Some(parent) = dest.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| format!("create models dir: {e}"))?;
+        }
+        let bytes = download_client()?
+            .get(VAD_MODEL_URL)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .error_for_status()
+            .map_err(|e| e.to_string())?
+            .bytes()
+            .await
+            .map_err(|e| e.to_string())?;
+        if bytes.len() < 100_000 {
+            return Err(format!("unexpected size {}", bytes.len()));
+        }
+        let part = dest.with_extension("bin.part");
+        tokio::fs::write(&part, &bytes).await.map_err(|e| e.to_string())?;
+        tokio::fs::rename(&part, &dest).await.map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    .await;
+    if let Err(e) = result {
+        eprintln!("VAD model download failed (server runs without VAD): {e}");
+    }
+}
+
 /// Managed model name (`large-v3-turbo`) of a resolved model path.
 fn managed_model_name(model_path: &Path) -> Option<String> {
     let stem = model_path.file_stem()?.to_str()?;
@@ -559,17 +626,25 @@ fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, S
     // CPU wanted but a GPU build installed: run it with --no-gpu. Only those
     // builds get the flag, so a user-supplied older binary keeps working.
     let no_gpu = accel == "cpu" && matches!(backend, "cuda" | "vulkan");
+    // Server-side VAD (v0.10.2): only for the app-managed build (a custom
+    // server_path may predate `--vad`) and only once the model is on disk.
+    let managed_server = settings.stt.local.server_path.trim().is_empty();
+    let vad_model = (managed_server && !VAD_UNSUPPORTED.load(Ordering::SeqCst))
+        .then(|| vad_model_path(app))
+        .flatten()
+        .filter(|p| p.exists());
     // The build is part of the signature so a server started from the old
     // build right before a download swap is restarted on the next call.
     let signature = format!(
-        "{}|{}|{}|{}|backend={}|no_gpu={}|ov={}",
+        "{}|{}|{}|{}|backend={}|no_gpu={}|ov={}|vad={}",
         server_path.display(),
         model_path.display(),
         port,
         threads,
         backend,
         no_gpu,
-        ov_device.unwrap_or("")
+        ov_device.unwrap_or(""),
+        vad_model.is_some()
     );
 
     let state = app.state::<crate::AppState>();
@@ -616,10 +691,37 @@ fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, S
     }
 
     // We own `server_starting`: spawn + health-check with no lock held.
-    let result =
-        spawn_and_health_check(&server_path, &model_path, port, threads, no_gpu, ov_device, signature);
+    let mut vad_used = vad_model.is_some();
+    let mut result = spawn_and_health_check(
+        &server_path,
+        &model_path,
+        port,
+        threads,
+        no_gpu,
+        ov_device,
+        vad_model.as_deref(),
+        signature.clone(),
+    );
+    if matches!(&result, Err(e) if e == "ERR_SERVER_DIED") && vad_model.is_some() {
+        // A build that does not know `--vad` exits at once: run without it
+        // from now on rather than leaving the user with no engine.
+        eprintln!("whisper-server rejected the VAD flags; restarting without VAD");
+        VAD_UNSUPPORTED.store(true, Ordering::SeqCst);
+        vad_used = false;
+        result = spawn_and_health_check(
+            &server_path,
+            &model_path,
+            port,
+            threads,
+            no_gpu,
+            ov_device,
+            None,
+            signature,
+        );
+    }
     let mut guard = state.server.lock().unwrap();
     state.server_starting.store(false, Ordering::SeqCst);
+    SERVER_VAD.store(result.is_ok() && vad_used, Ordering::SeqCst);
     match result {
         Ok(managed) => {
             *guard = Some(managed);
@@ -639,6 +741,7 @@ fn spawn_and_health_check(
     threads: u32,
     no_gpu: bool,
     ov_device: Option<&str>,
+    vad_model: Option<&Path>,
     signature: String,
 ) -> Result<ManagedServer, String> {
     // Refuse to spawn onto a port something already listens on (e.g. an
@@ -666,6 +769,13 @@ fn spawn_and_health_check(
     }
     if let Some(device) = ov_device {
         cmd.arg("--ov-e-device").arg(device);
+    }
+    if let Some(vad) = vad_model {
+        cmd.arg("--vad")
+            .arg("--vad-model")
+            .arg(vad)
+            .arg("--vad-speech-pad-ms")
+            .arg(VAD_SPEECH_PAD_MS);
     }
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -1117,6 +1227,7 @@ pub fn sync_server_build(app: &AppHandle) {
                 return;
             }
         }
+        ensure_vad_model(&app).await;
         prewarm(&app);
     });
 }
@@ -1176,6 +1287,7 @@ pub async fn quick_setup(app: AppHandle) -> Result<(), String> {
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
     }
+    ensure_vad_model(&app).await;
     prewarm(&app);
     Ok(())
 }

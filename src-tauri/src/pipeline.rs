@@ -93,6 +93,9 @@ fn is_hallucination(text: &str) -> bool {
     }
     // Sign-offs are short; a real sentence that happens to mention subtitles
     // or a channel must not be dropped.
+    if is_repetition(&norm) {
+        return true;
+    }
     if norm.chars().count() > 40 {
         return false;
     }
@@ -125,6 +128,20 @@ fn is_hallucination(text: &str) -> bool {
         "blank_audio", "blankaudio",
     ];
     MARKERS.iter().any(|m| norm.contains(m))
+}
+
+/// The same fragment three or more times and nothing else
+/// ("ありがとうございましたありがとうございましたありがとうございました"):
+/// whisper looping on noise. Short strings are left alone ("ははは").
+fn is_repetition(norm: &str) -> bool {
+    let chars: Vec<char> = norm.chars().collect();
+    let n = chars.len();
+    if n < 6 {
+        return false;
+    }
+    (1..=n / 3)
+        .filter(|len| n % len == 0)
+        .any(|len| chars.chunks(len).all(|c| c == &chars[..len]))
 }
 
 fn is_strip_punct(c: char) -> bool {
@@ -170,8 +187,6 @@ pub fn hotkey_pressed(app: &AppHandle) {
     match current {
         Status::Idle => {
             *PRESS_AT.lock().unwrap() = Some(Instant::now());
-            #[cfg(windows)]
-            spawn_modifier_use_watch(app.clone());
             start_recording(app);
         }
         // recording (tap-locked, or started elsewhere): press confirms
@@ -216,63 +231,6 @@ pub fn hotkey_released(app: &AppHandle) {
         stop_and_process(app);
     }
     // else: tap-lock — keep recording; the next press confirms
-}
-
-/// Hold mode with a bare modifier hotkey (RAlt…): while the key is held, a
-/// mouse click or any other key means the user is using it as a modifier
-/// (Alt+click, Alt+Tab…), not talking — cancel the recording silently
-/// (v0.10.1). Polls GetAsyncKeyState every 20 ms until the key is released,
-/// the recording ends, or it is canceled. Keys already down at the press do
-/// not count.
-#[cfg(windows)]
-fn spawn_modifier_use_watch(app: AppHandle) {
-    let special = {
-        let state = app.state::<AppState>();
-        let settings = state.settings.lock().unwrap();
-        crate::hook::is_special_token(&settings.hotkey)
-    };
-    if !special {
-        return;
-    }
-    // start_recording (called right after) bumps the generation once
-    let expected_gen = app.state::<AppState>().generation.load(Ordering::SeqCst) + 1;
-    std::thread::spawn(move || {
-        use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
-        let is_down = |vk: i32| (unsafe { GetAsyncKeyState(vk) } as u16) & 0x8000 != 0;
-        // modifiers (generic and L/R) never count; neither does the hotkey itself
-        let ignored = |vk: i32| matches!(vk, 0x10..=0x12 | 0xA0..=0xA5 | 0xE7 | 0xFF);
-        let mut baseline = [false; 256];
-        for (vk, slot) in baseline.iter_mut().enumerate().skip(1) {
-            *slot = is_down(vk as i32);
-        }
-        let started = Instant::now();
-        loop {
-            std::thread::sleep(Duration::from_millis(20));
-            if !HOTKEY_HELD.load(Ordering::SeqCst) {
-                return; // released: tap-lock or confirm, no longer a modifier
-            }
-            let state = app.state::<AppState>();
-            let gen = state.generation.load(Ordering::SeqCst);
-            if gen > expected_gen {
-                return; // canceled or superseded
-            }
-            if gen == expected_gen && *state.status.lock().unwrap() != Status::Recording {
-                return;
-            }
-            if gen < expected_gen && started.elapsed() > Duration::from_secs(10) {
-                return; // the recording never started
-            }
-            for vk in 1..256usize {
-                if ignored(vk as i32) || baseline[vk] {
-                    continue;
-                }
-                if is_down(vk as i32) {
-                    cancel(&app);
-                    return;
-                }
-            }
-        }
-    });
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -497,7 +455,10 @@ fn spawn_live_captions(app: AppHandle, gen: u64) {
             let text = match crate::stt::transcribe(&app, &settings, wav).await {
                 Ok(t) => {
                     failures = 0;
-                    t.trim().to_string()
+                    if t.no_speech {
+                        continue; // whisper itself says this window held no speech
+                    }
+                    t.text.trim().to_string()
                 }
                 Err(e) => {
                     failures += 1;
@@ -613,12 +574,12 @@ async fn run_pipeline(
     let wav = crate::audio::wav_bytes(&samples)?;
 
     // 2. STT
-    let raw_text = crate::stt::transcribe(&app, &settings, wav).await?;
+    let transcript = crate::stt::transcribe(&app, &settings, wav).await?;
     if is_canceled(&app, gen) {
         return Ok(());
     }
-    let raw_text = raw_text.trim().to_string();
-    if raw_text.is_empty() || is_hallucination(&raw_text) {
+    let raw_text = transcript.text.trim().to_string();
+    if raw_text.is_empty() || transcript.no_speech || is_hallucination(&raw_text) {
         return Err("ERR_NO_SPEECH".to_string());
     }
 
@@ -783,6 +744,8 @@ mod gate_tests {
             "시청해주셔서 감사합니다",
             "",
             "。",
+            "ありがとうございました ありがとうございました ありがとうございました",
+            "はいはいはいはいはい",
         ] {
             assert!(is_hallucination(t), "{t:?} should be dropped");
         }
@@ -801,6 +764,8 @@ mod gate_tests {
             "play some music",
             "구독 취소해 줘",
             "subscribe to the newsletter",
+            "ははは",
+            "はいはい、わかりました",
         ] {
             assert!(!is_hallucination(t), "{t:?} should pass");
         }

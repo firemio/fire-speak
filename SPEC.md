@@ -728,3 +728,26 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 2. **発話ゲート**: 16kHz サンプルを 20ms フレームに分け、ピークが full scale の 1.5% を超えるフレームの合計が **0.25 秒未満**なら STT に送らない。録音全体が 1.5 秒未満なら内部結果 `SILENT_SKIP`(status-changed は出さず、オーバーレイを閉じて idle)、1.5 秒以上なら従来の `ERR_NO_SPEECH`。
 3. **幻聴フィルタ** `is_hallucination(text)`: 空白と句読点を除き小文字化した文字列が、空 / 全体が括弧(`[]` `()` `（）` `【】` `「」`)/ 40 文字以内で既知マーカー(「ご視聴」「チャンネル登録」「字幕提供」「thanksforwatching」「subtitlesby」「pleasesubscribe」「谢谢观看」「시청해주셔서」「untertitelvon」「soustitrespar」「subtítulospor」「legendaspela」「субтитрыот」「cảmơncácbạnđãtheodõi」「terimakasihtelahmenonton」「blank_audio」等 12 言語分。「字幕」「subscribe」「music」のような単語単体は正当な入力に出るので使わない)を含む、のいずれかなら真。最終結果なら `ERR_NO_SPEECH`、字幕ウィンドウならそのウィンドウを捨てる。**「ありがとうございました」「はい」単体は正当な入力なので対象外**(無音由来のものは 2 で止まる)。
 - 単体テスト `gate_tests`(幻聴判定の正例/負例、発話ゲート)。
+
+# v0.10.2 追加仕様: VAD と no_speech_prob による幻聴対策(v0.10.1 の見直し)
+
+- v0.10.1 の「Alt 押下中のクリック/他キーで録音キャンセル」は**廃止**。Alt を押したままクリックで入力欄にカーソルを置いてから話す、という使い方を壊すため。発話ゲートと幻聴フィルタは維持。
+- 参考: https://qiita.com/mtoyopet/items/407df09e6b2edfe35684 (`no_speech_prob` 0.5 判定 + 定型句 + 3 回以上の繰り返し)。
+
+## サーバ側 VAD (setup.rs)
+
+- whisper.cpp 内蔵の Silero VAD を使う。モデル `ggml-silero-v5.1.2.bin`(約 0.9 MB、`https://huggingface.co/ggml-org/whisper-vad/resolve/main/`)を `models/` に置く。`ensure_vad_model` が `sync_server_build`(起動・設定変更)と `quick_setup` の prewarm 直前に無ければ黙って取得(進捗イベント無し、失敗はログのみ)。
+- 起動引数: **アプリ管理のサーバ**(server_path 空)でモデルがあるとき `--vad --vad-model <path> --vad-speech-pad-ms 120`。起動シグネチャに `vad=`。カスタム server_path には付けない(古いバイナリ対策)。
+- 管理ビルドでも `--vad` を知らない古いビルドが即終了したら(`ERR_SERVER_DIED`)、`VAD_UNSUPPORTED` を立てて VAD 無しで即再起動(セッション中は VAD 無し)。
+
+## no_speech_prob (stt.rs)
+
+- ローカル/クラウドとも `response_format=verbose_json` で要求し、`stt::Transcript { text, no_speech }` を返す。`no_speech` = `segments` が 1 件以上あり、**全セグメント**の `no_speech_prob > 0.5`。`segments` の無い応答(OpenAI 互換の簡易実装)は false。
+- 最終結果が `no_speech` なら `ERR_NO_SPEECH`。字幕ウィンドウが `no_speech` ならそのウィンドウを捨てる。`test_stt` は text を捨てる。
+- **例外**: VAD 付きで起動した whisper-server(1.9.x)は、VAD が発話区間を 1 つも見つけなかった音声に `verbose_json` を返そうとして落ちる(無音・ノイズ・純音で再現。`json` なら `{"text":""}` を返す)。そのため `setup::server_vad_active()`(直近の起動が `--vad` 付きで成功したか)が真のときローカルは `json` で要求する。VAD が非発話を落とすので `no_speech_prob` は不要。VAD 無し(カスタム server_path / 古いビルド)とクラウドは `verbose_json`。
+- 検証(2026-10-01、インストール済み ggml ビルド + tiny + Silero): 無音/ノイズ/純音 → VAD 0 区間 → `json` で空文字、サーバ生存。TTS 音声 → VAD 1 区間 → 文字起こし、`verbose_json` でも no_speech_prob 0.0 で生存。
+
+## 繰り返し検出 (pipeline.rs)
+
+- `is_hallucination` に `is_repetition`: 正規化後 6 文字以上で、同じ断片の 3 回以上の繰り返しだけで構成される(「ありがとうございました×3」「はいはいはいはいはい」)なら幻聴。「ははは」「はいはい、わかりました」は対象外。
+- テスト追加(stt::tests、pipeline::gate_tests)。

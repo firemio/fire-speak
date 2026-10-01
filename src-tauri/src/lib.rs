@@ -401,7 +401,7 @@ async fn test_stt(app: AppHandle) -> Result<String, String> {
     if settings.stt.engine == "cloud" {
         // half a second of silence to verify credentials & endpoint
         let wav = audio::wav_bytes(&vec![0i16; 8000])?;
-        stt::transcribe_cloud(&settings, wav).await?;
+        let _ = stt::transcribe_cloud(&settings, wav).await?;
         Ok("OK_STT".to_string())
     } else {
         setup::ensure_server(app.clone()).await?;
