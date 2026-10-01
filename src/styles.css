@@ -1087,6 +1087,124 @@ input.switch:focus-visible {
   white-space: nowrap;
 }
 
+/* disabled mode (v0.9.4): greyed, not selectable */
+.entity-card.is-disabled {
+  opacity: 0.5;
+}
+
+.entity-card.is-disabled .name-input,
+.entity-card.is-disabled textarea {
+  color: var(--text-dim);
+}
+
+.mode-chip-btn.is-disabled,
+.mode-chip-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.mode-chip-btn.is-disabled:hover {
+  border-color: var(--border);
+  background: var(--bg-raise);
+}
+
+/* fixed "none" row in the mode list */
+.none-card {
+  padding: 10px 18px;
+}
+
+.none-card .entity-head {
+  margin-bottom: 0;
+}
+
+.none-card.is-clickable {
+  cursor: pointer;
+}
+
+.none-card.is-clickable:hover {
+  border-color: var(--border-strong);
+}
+
+.none-name {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.none-hint {
+  margin: 0;
+  flex: 1;
+}
+
+/* ---------- modals (v0.9.4) ---------- */
+
+dialog.modal {
+  background: var(--bg-raise-2);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 0;
+  width: min(440px, calc(100vw - 48px));
+  box-shadow: var(--shadow);
+}
+
+dialog.modal::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+}
+
+dialog.modal[open] {
+  animation: toast-in 0.16s ease;
+}
+
+.modal-body {
+  margin: 0;
+  padding: 22px 24px 18px;
+}
+
+.modal-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.modal-icon {
+  font-size: 22px;
+}
+
+.modal-message {
+  margin: 0 0 18px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.modal-notes {
+  margin: -8px 0 18px;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.modal-update .modal-message {
+  font-weight: 600;
+}
+
 /* ---------- history ---------- */
 
 .history-item {

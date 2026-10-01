@@ -132,15 +132,29 @@ fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
 
 fn build_tray_menu(app: &AppHandle, settings: &Settings) -> tauri::Result<Menu<Wry>> {
     let lang = locale::resolve_ui_lang_setting(&settings.ui_lang);
-    let (open_settings_label, quit_label) = locale::tray_labels(&lang);
+    let (open_settings_label, quit_label, none_label) = locale::tray_labels(&lang);
     let mut builder = MenuBuilder::new(app);
+    // Built-in "none" first; a missing or disabled active mode counts as none.
+    let active_is_none = !settings
+        .modes
+        .iter()
+        .any(|m| m.enabled && m.id == settings.active_mode_id);
+    let none_item = CheckMenuItem::with_id(
+        app,
+        format!("mode::{}", settings::NONE_MODE_ID),
+        none_label,
+        true,
+        active_is_none,
+        None::<&str>,
+    )?;
+    builder = builder.item(&none_item);
     for mode in &settings.modes {
         let item = CheckMenuItem::with_id(
             app,
             format!("mode::{}", mode.id),
             &mode.name,
-            true,
-            mode.id == settings.active_mode_id,
+            mode.enabled, // disabled modes are greyed out
+            mode.enabled && mode.id == settings.active_mode_id,
             None::<&str>,
         )?;
         builder = builder.item(&item);
@@ -218,7 +232,9 @@ fn do_set_active_mode(app: &AppHandle, mode_id: String) -> Result<(), String> {
     let state = app.state::<AppState>();
     let new_settings = {
         let mut guard = state.settings.lock().unwrap();
-        if !guard.modes.iter().any(|m| m.id == mode_id) {
+        let known = mode_id == settings::NONE_MODE_ID
+            || guard.modes.iter().any(|m| m.id == mode_id && m.enabled);
+        if !known {
             return Err(format!("ERR_INTERNAL|mode not found: {mode_id}"));
         }
         guard.active_mode_id = mode_id;

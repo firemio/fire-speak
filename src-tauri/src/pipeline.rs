@@ -456,13 +456,15 @@ async fn run_pipeline(
     let mode = settings
         .modes
         .iter()
-        .find(|m| m.id == settings.active_mode_id)
+        .find(|m| m.id == settings.active_mode_id && m.enabled)
         .cloned()
+        // "none", a deleted mode, or a disabled one: paste the transcript as-is.
         .unwrap_or(Mode {
-            id: "raw".to_string(),
-            name: "そのまま".to_string(),
+            id: crate::settings::NONE_MODE_ID.to_string(),
+            name: String::new(),
             instruction: String::new(),
             use_llm: false,
+            enabled: true,
         });
     let provider = settings
         .llm

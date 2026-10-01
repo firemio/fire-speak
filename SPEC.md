@@ -636,3 +636,29 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 - 初回起動の既定プロバイダ(`default_providers`)の**先頭**に `poolside`(Laguna S 2.1 (Poolside))を追加(Poolside / Claude / OpenRouter / Ollama の 4 件)。既存ユーザーの設定は変更しない(プリセットから追加できる)。
 - ロケール追加(12 言語): `llm.preset` `llm.presetHint` `llm.edit` `llm.noKey`。
 - README: 先頭に英語の紹介文、初回セットアップ手順をホームのセットアップカード前提に更新、Poolside のキー発行先を追記。
+
+# v0.9.4 追加仕様: モードの有効/無効と組み込み「なし」、HTML モーダル、アップデートのモーダル表示
+
+## モード
+
+- `Mode.enabled: bool`(serde default true)。モードカードの「AI整形を使う」トグルを**「有効」トグル**に置き換える(`modes.enabled`)。すべてのモードは LLM を使う(`use_llm` はフィールドとして残すが UI から消え、常に true)。
+- **組み込みの「なし」モード**(`settings::NONE_MODE_ID` = `"none"`、`modes` には保存しない)。`active_mode_id` が `"none"`、存在しない id、または `enabled=false` のモードを指すとき、パイプラインは LLM を使わず文字起こしをそのまま貼り付ける(`pipeline` の fallback)。
+  - ホームのチップ列とモード管理の先頭に「なし」(`modes.none`)を固定表示。モード管理の行は編集・無効化・削除できず、クリックで選択(`modes.activateHint`)。
+  - トレイメニューの先頭に「なし」の CheckMenuItem(`locale::tray_labels` の 3 つ目)。
+- 無効にしたモードは**グレーアウト**: モードカード `.entity-card.is-disabled`、ホームのチップ `.mode-chip-btn.is-disabled`(押せない、title `modes.disabledHint`)、トレイ項目は enabled=false。アクティブなモードを無効にすると `active_mode_id = "none"`。削除時も同じ(以前は先頭のモードへ)。「最後のモードは削除できません」の制限と `modes.lastModeError` は廃止。
+- `set_active_mode` は `"none"` または enabled なモードだけ受け付ける(他は `ERR_INTERNAL|mode not found`)。
+- 既定モードから `raw`(そのまま)を外す(6 件: polish / to_en / to_ja / terminal / business / ninja)。
+- 移行(`modes_version` 4): `use_llm=false` かつ指示が空のモード(既定の `raw`)を削除、残りは `use_llm=true` に揃える。`active_mode_id` が存在しないモードを指していたら `"none"`。
+- ホームの動作状況カード: アクティブが「なし」/無効/削除済みなら `sys.llmOff` にモード名「なし」を入れる。
+- ロケール: 追加 `modes.enabled` `modes.none` `modes.disabledHint` `modes.activateHint`、`modes.hint` を更新、削除 `modes.useLlm` `modes.lastModeError`。
+
+## HTML モーダル(JS ダイアログ全廃)
+
+- `window.confirm` / `alert` / `prompt` は使わない。`<dialog class="modal" id="confirm-dialog">`(`<form method="dialog">`、メッセージ + キャンセル(`common.cancel`)+ 主ボタン)を `confirmDialog(message, okLabel = common.ok, danger = false): Promise<boolean>` で開く。Esc / 背景クリックは false。
+- 置き換え箇所: プロバイダ削除(主ボタン `common.delete`、danger)、モード削除(同)、履歴の全削除(同)、終了(`sidebar.quit`、danger)。
+- ロケール追加: `common.ok` `common.cancel`。
+
+## アップデートのモーダル表示
+
+- 起動時の自動チェック(`autoCheckUpdate`)で新版を検出したら、従来のホームのバナーに加えて `<dialog id="update-dialog">` を**モーダルで表示**(`update.modalTitle`、`update.available`、リリースノートを `textContent` で、ボタン「後で」`update.later` / 「今すぐアップデート」`update.install`)。「今すぐアップデート」は `startInstallUpdate()`(進捗はバナーとアップデート画面に出る)。同じバージョンについてはセッション中 1 回だけ。手動チェックではモーダルを出さない(結果はアップデート画面に出る)。
+- ロケール追加: `update.modalTitle` `update.later`。

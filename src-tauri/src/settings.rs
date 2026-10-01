@@ -45,7 +45,12 @@ pub struct Settings {
 }
 
 /// Current defaults version (see `Settings::modes_version`).
-pub const MODES_VERSION: u32 = 3;
+pub const MODES_VERSION: u32 = 4;
+
+/// The built-in "no mode" entry (v0.9.4): not stored in `modes`; when
+/// `active_mode_id` is this (or names a missing/disabled mode) the transcript
+/// is pasted as-is without the LLM.
+pub const NONE_MODE_ID: &str = "none";
 
 impl Default for Settings {
     fn default() -> Self {
@@ -210,6 +215,9 @@ pub struct Mode {
     pub instruction: String,
     #[serde(default)]
     pub use_llm: bool,
+    /// Disabled modes stay in the list greyed out and cannot be activated (v0.9.4).
+    #[serde(default = "default_true")]
+    pub enabled: bool,
 }
 
 fn default_hotkey() -> String {
@@ -368,6 +376,20 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
                 }
                 if s.modes_version < 3 && !s.llm.providers.iter().any(|p| p.id == "ollama") {
                     s.llm.providers.push(ollama_provider());
+                }
+                if s.modes_version < 4 {
+                    // v0.9.4: the built-in "none" entry replaces no-LLM modes.
+                    // Drop the ones that were pure pass-through (the default
+                    // `raw`); a no-LLM mode that has an instruction was meant
+                    // to use it, so it becomes an LLM mode.
+                    s.modes
+                        .retain(|m| m.use_llm || !m.instruction.trim().is_empty());
+                    for m in &mut s.modes {
+                        m.use_llm = true;
+                    }
+                    if !s.modes.iter().any(|m| m.id == s.active_mode_id) {
+                        s.active_mode_id = NONE_MODE_ID.to_string();
+                    }
                 }
                 s.modes_version = MODES_VERSION;
                 let _ = save(app, &s);

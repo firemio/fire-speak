@@ -49,6 +49,7 @@ export interface Mode {
   name: string;
   instruction: string;
   use_llm: boolean;
+  enabled: boolean; // disabled = greyed out, cannot be the active mode (v0.9.4)
 }
 
 export interface UpdateSettings {

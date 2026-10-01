@@ -108,25 +108,27 @@ pub fn map_locale(raw: &str) -> String {
 }
 
 /// Fixed tray menu labels: (open settings, quit).
-pub fn tray_labels(lang: &str) -> (&'static str, &'static str) {
+/// (open settings, quit, "none" mode) labels for the tray menu.
+pub fn tray_labels(lang: &str) -> (&'static str, &'static str, &'static str) {
     match lang {
-        "ja" => ("設定を開く", "終了"),
-        "zh-CN" => ("打开设置", "退出"),
-        "zh-TW" => ("開啟設定", "結束"),
-        "ko" => ("설정 열기", "종료"),
-        "es" => ("Abrir configuración", "Salir"),
-        "fr" => ("Ouvrir les paramètres", "Quitter"),
-        "de" => ("Einstellungen öffnen", "Beenden"),
-        "pt-BR" => ("Abrir configurações", "Sair"),
-        "ru" => ("Открыть настройки", "Выход"),
-        "vi" => ("Mở cài đặt", "Thoát"),
-        "id" => ("Buka Pengaturan", "Keluar"),
-        _ => ("Open Settings", "Quit"),
+        "ja" => ("設定を開く", "終了", "なし（そのまま入力）"),
+        "zh-CN" => ("打开设置", "退出", "无（原样输入）"),
+        "zh-TW" => ("開啟設定", "結束", "無（原樣輸入）"),
+        "ko" => ("설정 열기", "종료", "없음 (그대로 입력)"),
+        "es" => ("Abrir configuración", "Salir", "Ninguno (texto tal cual)"),
+        "fr" => ("Ouvrir les paramètres", "Quitter", "Aucun (texte brut)"),
+        "de" => ("Einstellungen öffnen", "Beenden", "Keiner (Text unverändert)"),
+        "pt-BR" => ("Abrir configurações", "Sair", "Nenhum (texto como está)"),
+        "ru" => ("Открыть настройки", "Выход", "Нет (текст как есть)"),
+        "vi" => ("Mở cài đặt", "Thoát", "Không (giữ nguyên)"),
+        "id" => ("Buka Pengaturan", "Keluar", "Tidak ada (apa adanya)"),
+        _ => ("Open Settings", "Quit", "None (raw text)"),
     }
 }
 
-/// Build the 7 default modes (polish, raw, to_en, to_ja, terminal, business,
-/// ninja) with name and instruction in `lang`. Used only at first run; the
+/// Build the 6 default modes (polish, to_en, to_ja, terminal, business,
+/// ninja) with name and instruction in `lang`. `raw` is no longer created:
+/// the built-in "none" entry covers it (v0.9.4). Used only at first run; the
 /// ninja mode is also back-filled once into existing settings
 /// (`settings::load`, modes_version 2).
 pub fn default_modes_for(lang: &str) -> Vec<Mode> {
@@ -142,7 +144,9 @@ pub fn default_modes_for(lang: &str) -> Vec<Mode> {
             name: (*name).to_string(),
             instruction: (*instruction).to_string(),
             use_llm: *use_llm,
+            enabled: true,
         })
+        .filter(|m| m.id != "raw")
         .collect();
     modes.push(ninja_mode_for(lang));
     modes
@@ -170,6 +174,7 @@ pub fn ninja_mode_for(lang: &str) -> Mode {
         name: name.to_string(),
         instruction: instruction.to_string(),
         use_llm: true,
+        enabled: true,
     }
 }
 

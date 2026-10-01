@@ -86,6 +86,39 @@ function toast(message: string, isError = false): void {
   }, 2600);
 }
 
+/**
+ * In-app replacement for window.confirm (v0.9.4): resolves true when the
+ * primary button was pressed. Esc / backdrop click resolve false.
+ */
+function confirmDialog(message: string, okLabel = t("common.ok"), danger = false): Promise<boolean> {
+  const dlg = $("confirm-dialog") as HTMLDialogElement;
+  const ok = $("btn-confirm-ok") as HTMLButtonElement;
+  $("confirm-message").textContent = message;
+  ok.textContent = okLabel;
+  ok.classList.toggle("btn-danger", danger);
+  ok.classList.toggle("btn-primary", !danger);
+  return new Promise((resolve) => {
+    dlg.addEventListener("close", () => resolve(dlg.returnValue === "ok"), { once: true });
+    dlg.returnValue = "";
+    dlg.showModal();
+    ok.focus();
+  });
+}
+
+/** Closes a modal when the backdrop (outside the body) is clicked. */
+function wireDialogs(): void {
+  for (const id of ["confirm-dialog", "update-dialog"]) {
+    const dlg = $(id) as HTMLDialogElement;
+    dlg.addEventListener("click", (e) => {
+      if (e.target === dlg) dlg.close("");
+    });
+  }
+  const upd = $("update-dialog") as HTMLDialogElement;
+  upd.addEventListener("close", () => {
+    if (upd.returnValue === "install") void startInstallUpdate();
+  });
+}
+
 function formatBytes(n: number): string {
   if (n >= 1024 * 1024 * 1024) return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
   if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
@@ -258,16 +291,39 @@ function renderHome(): void {
   renderHomeRecent();
 }
 
+/** Built-in "no mode" id (mirrors `settings::NONE_MODE_ID`). */
+const NONE_MODE_ID = "none";
+
+/** The active mode, or null when it is "none", deleted, or disabled. */
+function activeMode(): Mode | null {
+  if (!settings) return null;
+  const id = settings.active_mode_id;
+  return settings.modes.find((m) => m.id === id && m.enabled) ?? null;
+}
+
 function renderHomeModes(): void {
   if (!settings) return;
   const host = $("home-modes");
   host.textContent = "";
+  const current = activeMode();
+  const none = el("button", "mode-chip-btn", t("modes.none"));
+  none.type = "button";
+  none.title = t("home.noLlm");
+  if (!current) none.classList.add("is-active");
+  none.addEventListener("click", () => void activateMode(NONE_MODE_ID));
+  host.appendChild(none);
   for (const mode of settings.modes) {
     const chip = el("button", "mode-chip-btn", mode.name);
     chip.type = "button";
     // The instruction is long; keep it as a tooltip rather than on the card.
-    chip.title = mode.use_llm ? mode.instruction || t("home.llmDefault") : t("home.noLlm");
-    if (mode.id === settings.active_mode_id) chip.classList.add("is-active");
+    chip.title = mode.instruction || t("home.llmDefault");
+    if (!mode.enabled) {
+      chip.classList.add("is-disabled");
+      chip.disabled = true;
+      chip.title = t("modes.disabledHint");
+    } else if (mode.id === current?.id) {
+      chip.classList.add("is-active");
+    }
     chip.addEventListener("click", () => void activateMode(mode.id));
     host.appendChild(chip);
   }
@@ -529,10 +585,10 @@ function renderHomeStatus(): void {
       : statusRow("warn", t("sys.language"), t("sys.langAuto"), "general"),
   );
 
-  const mode = settings.modes.find((m) => m.id === settings?.active_mode_id);
+  const mode = activeMode();
   const provider = settings.llm.providers.find((p) => p.id === settings?.llm.active_provider_id);
-  if (mode && !mode.use_llm) {
-    card.appendChild(statusRow("ok", t("sys.llm"), t("sys.llmOff", mode.name), "llm"));
+  if (!mode) {
+    card.appendChild(statusRow("ok", t("sys.llm"), t("sys.llmOff", t("modes.none")), "llm"));
   } else if (provider && providerReady(provider)) {
     card.appendChild(statusRow("ok", t("sys.llm"), `${provider.name} (${provider.model})`, "llm"));
   } else {
@@ -814,9 +870,9 @@ function buildProviderCard(provider: LlmProvider): HTMLElement {
 
   const delBtn = el("button", "icon-btn danger", "🗑");
   delBtn.title = t("common.delete");
-  delBtn.addEventListener("click", () => {
+  delBtn.addEventListener("click", async () => {
     if (!settings) return;
-    if (!window.confirm(t("llm.deleteConfirm", provider.name))) return;
+    if (!(await confirmDialog(t("llm.deleteConfirm", provider.name), t("common.delete"), true))) return;
     settings.llm.providers = settings.llm.providers.filter((p) => p.id !== provider.id);
     if (settings.llm.active_provider_id === provider.id) {
       settings.llm.active_provider_id = settings.llm.providers[0]?.id ?? "";
@@ -991,6 +1047,7 @@ function renderModeList(): void {
   if (!settings) return;
   const host = $("mode-list");
   host.textContent = "";
+  host.appendChild(buildNoneCard());
   if (settings.modes.length === 0) {
     const empty = el("div", "empty-state");
     empty.appendChild(el("span", "empty-icon", "🧩"));
@@ -1003,10 +1060,29 @@ function renderModeList(): void {
   }
 }
 
+/** The fixed "none" row: always present, cannot be edited, disabled or deleted. */
+function buildNoneCard(): HTMLElement {
+  const card = el("div", "entity-card none-card");
+  const isActive = activeMode() === null;
+  if (isActive) card.classList.add("is-active-entity");
+  const head = el("div", "entity-head");
+  if (isActive) head.appendChild(el("span", "badge accent", t("common.active")));
+  head.appendChild(el("span", "none-name", t("modes.none")));
+  head.appendChild(el("span", "hint none-hint", t("home.noLlm")));
+  card.appendChild(head);
+  if (!isActive) {
+    card.classList.add("is-clickable");
+    card.title = t("modes.activateHint");
+    card.addEventListener("click", () => void activateMode(NONE_MODE_ID));
+  }
+  return card;
+}
+
 function buildModeCard(mode: Mode): HTMLElement {
   const card = el("div", "entity-card");
-  const isActive = settings?.active_mode_id === mode.id;
+  const isActive = mode.enabled && settings?.active_mode_id === mode.id;
   if (isActive) card.classList.add("is-active-entity");
+  if (!mode.enabled) card.classList.add("is-disabled");
 
   const head = el("div", "entity-head");
 
@@ -1020,47 +1096,47 @@ function buildModeCard(mode: Mode): HTMLElement {
     scheduleSave();
   });
 
-  const useLlmLabel = el("label", "use-llm-row");
-  const useLlm = el("input", "switch") as HTMLInputElement;
-  useLlm.type = "checkbox";
-  useLlm.checked = mode.use_llm;
-  useLlmLabel.append(el("span", undefined, t("modes.useLlm")), useLlm);
-
-  const delBtn = el("button", "icon-btn danger", "🗑");
-  delBtn.title = t("common.delete");
-  delBtn.addEventListener("click", () => {
+  // enabled switch (v0.9.4, replaces "use LLM": every mode uses the LLM,
+  // "none" is the no-LLM choice). Disabling the active mode falls back to none.
+  const enabledLabel = el("label", "use-llm-row");
+  const enabledSw = el("input", "switch") as HTMLInputElement;
+  enabledSw.type = "checkbox";
+  enabledSw.checked = mode.enabled;
+  enabledLabel.append(el("span", undefined, t("modes.enabled")), enabledSw);
+  enabledSw.addEventListener("change", () => {
     if (!settings) return;
-    if (settings.modes.length <= 1) {
-      toast(t("modes.lastModeError"), true);
-      return;
-    }
-    if (!window.confirm(t("modes.deleteConfirm", mode.name))) return;
-    settings.modes = settings.modes.filter((m) => m.id !== mode.id);
-    if (settings.active_mode_id === mode.id) {
-      settings.active_mode_id = settings.modes[0]?.id ?? "";
+    mode.enabled = enabledSw.checked;
+    if (!mode.enabled && settings.active_mode_id === mode.id) {
+      settings.active_mode_id = NONE_MODE_ID;
     }
     renderModeList();
     renderHomeModes();
+    renderHomeStatus();
+    scheduleSave();
+  });
+
+  const delBtn = el("button", "icon-btn danger", "🗑");
+  delBtn.title = t("common.delete");
+  delBtn.addEventListener("click", async () => {
+    if (!settings) return;
+    if (!(await confirmDialog(t("modes.deleteConfirm", mode.name), t("common.delete"), true))) return;
+    settings.modes = settings.modes.filter((m) => m.id !== mode.id);
+    if (settings.active_mode_id === mode.id) settings.active_mode_id = NONE_MODE_ID;
+    renderModeList();
+    renderHomeModes();
+    renderHomeStatus();
     scheduleSave();
   });
 
   if (isActive) head.appendChild(el("span", "badge accent", t("common.active")));
-  head.append(nameInput, useLlmLabel, delBtn);
+  head.append(nameInput, enabledLabel, delBtn);
 
   const instr = el("textarea") as HTMLTextAreaElement;
   instr.value = mode.instruction;
   instr.placeholder = t("modes.instructionPlaceholder");
   instr.rows = 3;
-  instr.disabled = !mode.use_llm;
   instr.addEventListener("input", () => {
     mode.instruction = instr.value;
-    scheduleSave();
-  });
-
-  useLlm.addEventListener("change", () => {
-    mode.use_llm = useLlm.checked;
-    instr.disabled = !mode.use_llm;
-    renderHomeModes();
     scheduleSave();
   });
 
@@ -1076,6 +1152,7 @@ function wireModesSection(): void {
       name: t("modes.newModeName"),
       instruction: "",
       use_llm: true,
+      enabled: true,
     });
     renderModeList();
     renderHomeModes();
@@ -1088,6 +1165,7 @@ function wireModesSection(): void {
 // ---------------------------------------------------------------------------
 
 function modeNameFor(modeId: string): string {
+  if (modeId === NONE_MODE_ID || modeId === "") return t("modes.none");
   return settings?.modes.find((m) => m.id === modeId)?.name ?? modeId;
 }
 
@@ -1162,7 +1240,7 @@ async function refreshHistory(): Promise<void> {
 
 function wireHistorySection(): void {
   $("btn-clear-history").addEventListener("click", async () => {
-    if (!window.confirm(t("history.clearConfirm"))) return;
+    if (!(await confirmDialog(t("history.clearConfirm"), t("common.delete"), true))) return;
     try {
       await invoke("clear_history");
       historyEntries = [];
@@ -1938,10 +2016,27 @@ async function autoCheckUpdate(): Promise<void> {
     const info = await invoke<UpdateInfo>("check_update");
     updateInfo = info;
     renderUpdateResult();
-    if (info.update_available) showUpdateBanner(info);
+    if (info.update_available) {
+      showUpdateBanner(info);
+      showUpdateDialog(info);
+    }
   } catch {
     // silent by contract
   }
+}
+
+/** Shown once per detected version (v0.9.4); "install" runs startInstallUpdate via wireDialogs. */
+let updateDialogShownFor = "";
+function showUpdateDialog(info: UpdateInfo): void {
+  if (updateDialogShownFor === info.latest || updateInstalling) return;
+  updateDialogShownFor = info.latest;
+  const dlg = $("update-dialog") as HTMLDialogElement;
+  $("update-dialog-text").textContent = t("update.available", info.latest);
+  const notes = $("update-dialog-notes");
+  notes.textContent = info.notes; // untrusted → textContent only (SPEC)
+  notes.hidden = info.notes.trim() === "";
+  dlg.returnValue = "";
+  dlg.showModal();
 }
 
 // ---------------------------------------------------------------------------
@@ -2061,6 +2156,7 @@ async function init(): Promise<void> {
   wireServerCard();
   wireOnboard();
   wireUpdateSection();
+  wireDialogs();
 
   $("btn-record-test").addEventListener("click", async () => {
     try {
@@ -2071,7 +2167,7 @@ async function init(): Promise<void> {
   });
 
   $("btn-quit").addEventListener("click", async () => {
-    if (!window.confirm(t("quit.confirm"))) return;
+    if (!(await confirmDialog(t("quit.confirm"), t("sidebar.quit"), true))) return;
     try {
       await invoke("quit_app");
     } catch (e: unknown) {

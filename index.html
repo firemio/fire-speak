@@ -252,7 +252,7 @@
             <button class="btn btn-sm" id="btn-add-mode" data-i18n="modes.add">＋ モードを追加</button>
           </div>
           <div class="hint" data-i18n="modes.hint">
-            モードごとの整形指示を編集できます。「AI整形を使う」をオフにすると文字起こし結果をそのまま使います。
+            モードごとの整形指示を編集できます。無効にしたモードは灰色になり選べません。「なし」を選ぶと文字起こし結果をそのまま入力します。
           </div>
           <div id="mode-list" class="stack"></div>
         </section>
@@ -411,6 +411,27 @@
       </main>
     </div>
 
+    <!-- in-app modals (v0.9.4): no window.confirm / alert anywhere -->
+    <dialog class="modal" id="confirm-dialog">
+      <form method="dialog" class="modal-body">
+        <p class="modal-message" id="confirm-message"></p>
+        <div class="modal-actions">
+          <button class="btn" value="cancel" data-i18n="common.cancel">キャンセル</button>
+          <button class="btn btn-primary" id="btn-confirm-ok" value="ok">OK</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog class="modal modal-update" id="update-dialog">
+      <form method="dialog" class="modal-body">
+        <div class="modal-title"><span class="modal-icon">🔄</span><span data-i18n="update.modalTitle">アップデートがあります</span></div>
+        <p class="modal-message" id="update-dialog-text"></p>
+        <pre class="modal-notes" id="update-dialog-notes" hidden></pre>
+        <div class="modal-actions">
+          <button class="btn" value="later" data-i18n="update.later">後で</button>
+          <button class="btn btn-primary" value="install" data-i18n="update.install">今すぐアップデート</button>
+        </div>
+      </form>
+    </dialog>
     <div id="toast-host"></div>
   </body>
 </html>
