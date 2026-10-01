@@ -31,6 +31,7 @@ Linux は[Linux でのインストール](#linux-でのインストール)を必
 - **グローバルホットキー**（既定: **右Alt を押している間だけ録音**、離すと確定）でどのアプリ上でも起動。押すたびに開始/停止のトグル動作にも変更可。AltGr 配列のキーボードでは既定が `Ctrl+Alt+Space` になります
 - **文字起こしエンジン切替**
   - ローカル: whisper.cpp（完全無料・オフライン・プライバシー安全。アプリ内からサーバ/モデルをワンクリック導入）
+    - 処理デバイス: NVIDIA GPU (CUDA) / AMD・その他 GPU (Vulkan) / AMD NPU (Ryzen AI) / Intel NPU (OpenVINO、Core Ultra の AI Boost。実機未検証) / CPU
   - クラウド: OpenAI互換 `audio/transcriptions` API（OpenAI / Groq など）
 - **AI整形プロバイダ切替**
   - Anthropic API（Claude Haiku 等）

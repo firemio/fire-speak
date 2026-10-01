@@ -672,3 +672,46 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 - ホームの動作状況カードの先頭に、`last_save_error` が空でないとき ✕ 行 `sys.save` / `sys.saveFailed`(エラー文言入り、「変更」は音声認識画面 = 設定フォルダを開くボタンがある)。フロントは保存失敗のトースト後に `refreshSetupStatus()` を呼んで行を出す。
 - エラートーストの表示時間を 6 秒に延長(通常は 2.6 秒のまま)。
 - ロケール追加(12 言語): `sys.save` `sys.saveFailed`。
+
+# v0.10.0 追加仕様: Intel NPU (OpenVINO) 対応 — 実機未検証
+
+## 背景
+
+- 処理デバイスの一覧に Intel NPU が無かった(Windows x64 は CUDA / Vulkan / AMD NPU / CPU の固定)。Core Ultra の NPU(Intel AI Boost)で動かしたい。
+- whisper.cpp は OpenVINO バックエンド(`WHISPER_OPENVINO=1`)でエンコーダを OpenVINO デバイスで実行できる(公式の対応表記は CPU / Intel GPU、NPU は OpenVINO の Whisper パイプラインでは実績ありだが whisper-server では未確認)。公式リリースに OpenVINO ビルドは無いので**自前で CI ビルド**する。
+- Intel NPU 搭載機が手元に無いため、本仕様は**ビルド・配布・検出・UI・起動引数まで**を実装し、NPU 上での実行は Intel 機が用意でき次第確認する。
+
+## CI (`.github/workflows/whisper-openvino.yml`, 手動起動)
+
+- `server` ジョブ(windows-latest): `ggml-org/whisper.cpp` を入力タグ(既定 `v1.9.4`)で checkout、OpenVINO Runtime の Windows アーカイブ(既定 2026.4.0、`.sha256` で検証)を展開し、`cmake -DWHISPER_OPENVINO=1 -DOpenVINO_DIR=<ov>/runtime/cmake -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF` で `whisper-server` をビルド。`Release/` に `whisper-server.exe` + OpenVINO の全ランタイム DLL(`runtime/bin/intel64/Release/*` = コア + CPU/GPU/NPU/AUTO プラグイン)+ TBB DLL を入れて `whisper-<tag>-windows-openvino-x64.zip` にする。
+- `encoders` ジョブ(ubuntu-latest、モデル行列 tiny/base/small/medium/large-v3-turbo): `models/convert-whisper-to-openvino.py` で IR を生成し、`ov.save_model(compress_to_fp16=True)` で FP16 に圧縮して `ggml-<model>-encoder-openvino.zip`(xml + bin)にする。
+- `release` ジョブ: このリポジトリに **prerelease** `whisper-openvino-<whisper_tag>-ov<ov_version>`(既定 `whisper-openvino-v1.9.4-ov2026.4`)を作成/更新し、全アセットと `SHA256SUMS.txt` を載せる。prerelease なのでアプリのアップデート確認(`releases/latest`)には出ない。
+
+## 検出 (hw.rs)
+
+- `Hardware.intel_npu`: `Win32_PnPEntity` で `Name LIKE '%AI Boost%'`(Intel NPU ドライバのデバイス名 "Intel(R) AI Boost")。既存の PowerShell プローブに追加。
+- `supported_accels`(Windows x64)に `openvino` を追加: `auto / cuda / vulkan / npu / openvino / cpu`。`resolve_accel` は明示選択のみ(auto では選ばない。AMD NPU と同じ)。
+- `build_satisfies`: OpenVINO ビルドは `--ov-e-device` 無しなら通常の CPU ビルドなので、`wanted=cpu` を満たす(CUDA/Vulkan と同様。AMD NPU ビルドは従来どおり流用しない)。
+
+## サーバ (setup.rs)
+
+- `server_backend`: exe の隣に `openvino*.dll` があれば `openvino`(flexmlrt / ggml-cuda / ggml-vulkan より先に判定)。
+- ダウンロード元: `accel=openvino` は `firemio/fire-speak` の release `OPENVINO_RELEASE_TAG` のアセット `OPENVINO_SERVER_ASSET`、SHA-256 を `OPENVINO_SERVER_SHA256` と照合(Lemonade と同じ経路 `install_server_archive`)。
+- 起動: `backend=openvino && accel=openvino` のとき `--ov-e-device NPU` を付け、モデルの隣に `ggml-{name}-encoder-openvino.xml` が無ければ `ERR_NPU_CACHE_MISSING`。ヘルスチェックの上限はこのときだけ **600 秒**(初回は OpenVINO が NPU 用にエンコーダをコンパイルする。whisper.cpp がモデルの隣の `…-encoder-openvino-cache` にキャッシュするので 2 回目以降は速い)。起動シグネチャに `ov=` を含める。
+- エンコーダ: `encoder_cache_path(model, accel)` = AMD `…-encoder-vitisai.rai` / Intel `…-encoder-openvino.xml`。`npu_cache_ready` と `download_npu_cache`(進捗 kind `npu`)は両方を扱う。Intel は `ggml-{model}-encoder-openvino.zip` を `.part` にダウンロード → SHA-256 照合(`openvino_encoder_asset` の表)→ モデルのフォルダに展開 → zip 削除。管理外モデル・表に無いモデルは `ERR_NPU_NO_CACHE`。
+- `sync_server_build` / `quick_setup` の「NPU ならエンコーダも取得」は `needs_encoder_cache(accel)`(npu | openvino)。`recommended_model` は openvino も GPU/NPU 扱い(large-v3-turbo)。
+
+## フロントエンド
+
+- `stt.accelOpenvino`(処理デバイスの選択肢)、`setup.backendOpenvino`(ビルドのバッジ)、`stt.intelNpuFound`(検出行)。`ACCEL_SHORT.openvino = "Intel NPU"`。
+- 「NPU エンコーダ」の行・初回セットアップの手順・動作状況カードの判定は `needsEncoderCache(accel)`。サイズ(実アセット): サーバ 81 MB、エンコーダ zip(FP16) tiny 14 / base 36 / small 155 / medium 541 / large-v3-turbo 1110 MB。
+- `setup.npuCacheHint` を AMD 固有の文言から汎用(0.7〜1.3 GB)に変更(12 言語)。
+
+## 検証済み(2026-10-01、開発機 = NVIDIA/AMD 無し Intel NPU 無し)
+
+- CI が出した `whisper-v1.9.4-windows-openvino-x64.zip`(81 MB、`whisper-server.exe` + openvino.dll + CPU/GPU/NPU/AUTO プラグイン + NPU コンパイラ + TBB)と `ggml-tiny-encoder-openvino.zip` を手で展開し、`whisper-server -m ggml-tiny.bin --ov-e-device CPU` で起動 → ログに `whisper_openvino_init: … device = CPU, cache_dir = …-encoder-openvino-cache` / `OPENVINO = 1`、`/inference` が応答。ビルド・パッケージ・エンコーダ IR・起動引数は正しい。
+
+## 未検証・既知の懸念
+
+- Intel NPU 上での実行そのもの(OpenVINO NPU プラグインが whisper エンコーダ IR をコンパイルできるか、large-v3-turbo のコンパイル時間とメモリ)。動かない場合は `ERR_SERVER_DIED` か 600 秒のタイムアウトになる。その場合の代替は処理デバイスを CPU / Vulkan にすること。
+- Intel NPU ドライバ未導入だと検出行に「Intel NPU あり」が出ず、選んでもサーバが起動しない。

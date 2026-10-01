@@ -103,7 +103,7 @@ pub struct SetupStatus {
     /// An NVIDIA driver is installed (Windows: nvcuda.dll present), so the
     /// CUDA build of whisper-server can run here (v0.8).
     pub gpu_available: bool,
-    /// Build of the installed server: "cuda" | "vulkan" | "npu" | "cpu" | ""
+    /// Build of the installed server: "cuda" | "vulkan" | "npu" | "openvino" | "cpu" | ""
     /// (not installed).
     pub server_backend: String,
     /// Detected accelerators (v0.9).
@@ -181,7 +181,10 @@ pub fn server_backend(server_exe: &Path) -> &'static str {
             .iter()
             .any(|n| n.contains(stem) && (n.ends_with(".dll") || n.contains(".so")))
     };
-    if has("flexmlrt") {
+    if has("openvino") {
+        // our OpenVINO build: openvino.dll + openvino_intel_*_plugin.dll
+        "openvino"
+    } else if has("flexmlrt") {
         "npu"
     } else if has("ggml-cuda") {
         "cuda"
@@ -217,6 +220,53 @@ fn npu_cache_path(model_path: &Path) -> Option<PathBuf> {
     Some(model_path.with_file_name(format!("{stem}-encoder-vitisai.rai")))
 }
 
+/// Intel NPU (v0.10): whisper.cpp's OpenVINO backend looks for the encoder
+/// IR next to the model as `ggml-{name}-encoder-openvino.xml` (+ `.bin`).
+fn openvino_encoder_path(model_path: &Path) -> Option<PathBuf> {
+    let stem = model_path.file_stem()?.to_str()?;
+    Some(model_path.with_file_name(format!("{stem}-encoder-openvino.xml")))
+}
+
+/// The per-model encoder file the wanted NPU build needs, if that build
+/// needs one at all.
+fn encoder_cache_path(model_path: &Path, accel: &str) -> Option<PathBuf> {
+    match accel {
+        "npu" => npu_cache_path(model_path),
+        "openvino" => openvino_encoder_path(model_path),
+        _ => None,
+    }
+}
+
+/// Builds that run the encoder on an NPU and need a per-model encoder file.
+fn needs_encoder_cache(accel: &str) -> bool {
+    matches!(accel, "npu" | "openvino")
+}
+
+/// Our own release carrying the OpenVINO whisper-server and the FP16
+/// encoder IRs (built by `.github/workflows/whisper-openvino.yml`). Pinned to
+/// one tag; digests are verified like the Lemonade assets.
+const OPENVINO_RELEASE_REPO: &str = "firemio/fire-speak";
+const OPENVINO_RELEASE_TAG: &str = "whisper-openvino-v1.9.4-ov2026.4";
+const OPENVINO_SERVER_ASSET: &str = "whisper-v1.9.4-windows-openvino-x64.zip";
+const OPENVINO_SERVER_SHA256: &str = "2d39b4c09b6185b88f40559b5a71bc2d3aec08c8d2366039aefe7b07f782287b";
+
+/// (asset, sha256) of the FP16 OpenVINO encoder IR zip for a managed model.
+fn openvino_encoder_asset(model: &str) -> Option<(String, &'static str)> {
+    let sha = match model {
+        "tiny" => "a13a708dcb51b620cb0c19102a0bdafab4bfa56ce33b0d962103402ac324bdca",
+        "base" => "180a1e5634a64790a2a42dec99aeaa6936c67e5e1cfd10786625fd60e46e8a89",
+        "small" => "3135f4ca9142a06415fe2e3f32231f59c4cdb7225153f71c5e8e00314c8ab892",
+        "medium" => "3a4b058c9f7e5aaf35946f1fb27a026562164ce9bd8efe6719a86f2a8c511746",
+        "large-v3-turbo" => "ef010b4850a96b0ac4e2c9dd86cb38e142cc49b36c1f8178ca8217022fc0b4ae",
+        _ => return None,
+    };
+    Some((format!("ggml-{model}-encoder-openvino.zip"), sha))
+}
+
+fn openvino_release_url(asset: &str) -> String {
+    format!("https://github.com/{OPENVINO_RELEASE_REPO}/releases/download/{OPENVINO_RELEASE_TAG}/{asset}")
+}
+
 /// Managed model name (`large-v3-turbo`) of a resolved model path.
 fn managed_model_name(model_path: &Path) -> Option<String> {
     let stem = model_path.file_stem()?.to_str()?;
@@ -227,22 +277,26 @@ fn managed_model_name(model_path: &Path) -> Option<String> {
         .then(|| name.to_string())
 }
 
-/// NPU mode: whether the compiled encoder for the active model is on disk.
+/// NPU modes (AMD / Intel): whether the encoder for the active model is on
+/// disk. Always true for the other builds.
 fn npu_cache_ready(app: &AppHandle, settings: &Settings) -> bool {
-    if effective_accel(settings) != "npu" {
+    let accel = effective_accel(settings);
+    if !needs_encoder_cache(accel) {
         return true;
     }
     resolve_model_path(app, settings)
-        .and_then(|m| npu_cache_path(&m))
+        .and_then(|m| encoder_cache_path(&m, accel))
         .is_some_and(|p| p.exists())
 }
 
 static NPU_CACHE_DOWNLOADING: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
-/// Download the compiled NPU encoder for the active managed model (about
-/// 700 MB for large-v3-turbo). Progress is reported as kind `npu`. A call
-/// while another is running joins it (returns Ok at once).
+/// Download the NPU encoder for the active managed model: AMD's compiled
+/// `.rai` (about 700 MB for large-v3-turbo) or, for the Intel NPU, our FP16
+/// OpenVINO IR zip (about 1.3 GB for large-v3-turbo, extracted next to the
+/// model). Progress is reported as kind `npu`. A call while another is
+/// running joins it (returns Ok at once).
 pub async fn download_npu_cache(app: AppHandle) -> Result<(), String> {
     use std::sync::atomic::Ordering;
     if NPU_CACHE_DOWNLOADING.swap(true, Ordering::SeqCst) {
@@ -260,15 +314,19 @@ pub async fn download_npu_cache(app: AppHandle) -> Result<(), String> {
 
 async fn download_npu_cache_inner(app: &AppHandle) -> Result<(), String> {
     let settings = app.state::<crate::AppState>().settings.lock().unwrap().clone();
+    let accel = effective_accel(&settings);
     let model_path =
         resolve_model_path(app, &settings).ok_or_else(|| SETUP_REQUIRED_MSG.to_string())?;
-    let dest = npu_cache_path(&model_path).ok_or_else(|| "ERR_NPU_NO_CACHE".to_string())?;
+    let dest =
+        encoder_cache_path(&model_path, accel).ok_or_else(|| "ERR_NPU_NO_CACHE".to_string())?;
     if dest.exists() {
         return Ok(());
     }
-    let (repo, file_name) = managed_model_name(&model_path)
-        .and_then(|m| npu_cache_source(&m))
-        .ok_or_else(|| "ERR_NPU_NO_CACHE".to_string())?;
+    let model = managed_model_name(&model_path).ok_or_else(|| "ERR_NPU_NO_CACHE".to_string())?;
+    if accel == "openvino" {
+        return download_openvino_encoder(app, &model, &model_path, &dest).await;
+    }
+    let (repo, file_name) = npu_cache_source(&model).ok_or_else(|| "ERR_NPU_NO_CACHE".to_string())?;
     let url = format!("https://huggingface.co/{repo}/resolve/main/{file_name}");
     let part = dest.with_extension("rai.part");
     let client = download_client()?;
@@ -277,6 +335,47 @@ async fn download_npu_cache_inner(app: &AppHandle) -> Result<(), String> {
     tokio::fs::rename(&part, &dest)
         .await
         .map_err(|e| format!("ERR_FILE_IO|rename npu cache: {e}"))?;
+    emit_progress(app, "npu", "npu-encoder", downloaded, total.max(downloaded), true, None);
+    Ok(())
+}
+
+/// Intel NPU: fetch `ggml-{model}-encoder-openvino.zip` from our release,
+/// verify its digest and unpack the xml + bin next to the model file.
+async fn download_openvino_encoder(
+    app: &AppHandle,
+    model: &str,
+    model_path: &Path,
+    dest: &Path,
+) -> Result<(), String> {
+    let (asset, sha256) =
+        openvino_encoder_asset(model).ok_or_else(|| "ERR_NPU_NO_CACHE".to_string())?;
+    let url = openvino_release_url(&asset);
+    let dir = model_path
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "ERR_NPU_NO_CACHE".to_string())?;
+    let part = dir.join(format!("{asset}.part"));
+    let client = download_client()?;
+    let (downloaded, total) =
+        stream_download(app, &client, &url, &part, "npu", "npu-encoder").await?;
+    let part2 = part.clone();
+    let actual = tokio::task::spawn_blocking(move || sha256_file(&part2))
+        .await
+        .map_err(|e| format!("ERR_INTERNAL|hash: {e}"))??;
+    if actual != sha256 {
+        let _ = tokio::fs::remove_file(&part).await;
+        return Err(format!("ERR_DOWNLOAD_FAILED|checksum mismatch for {asset}"));
+    }
+    let (part3, dir3) = (part.clone(), dir.clone());
+    let extracted = tokio::task::spawn_blocking(move || extract_server_archive(&part3, &dir3))
+        .await
+        .map_err(|e| format!("ERR_INTERNAL|extract: {e}"))
+        .and_then(|r| r);
+    let _ = tokio::fs::remove_file(&part).await;
+    extracted?;
+    if !dest.exists() {
+        return Err("ERR_NPU_NO_CACHE".to_string());
+    }
     emit_progress(app, "npu", "npu-encoder", downloaded, total.max(downloaded), true, None);
     Ok(())
 }
@@ -450,19 +549,27 @@ fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, S
         // The NPU build cannot run the encoder without AMD's compiled cache.
         return Err("ERR_NPU_CACHE_MISSING".to_string());
     }
+    // Intel NPU: the OpenVINO build takes `--ov-e-device NPU` and needs the
+    // encoder IR next to the model. Any other accelerator runs that build as
+    // a plain CPU server (no flag).
+    let ov_device = (backend == "openvino" && accel == "openvino").then_some("NPU");
+    if ov_device.is_some() && !openvino_encoder_path(&model_path).is_some_and(|p| p.exists()) {
+        return Err("ERR_NPU_CACHE_MISSING".to_string());
+    }
     // CPU wanted but a GPU build installed: run it with --no-gpu. Only those
     // builds get the flag, so a user-supplied older binary keeps working.
     let no_gpu = accel == "cpu" && matches!(backend, "cuda" | "vulkan");
     // The build is part of the signature so a server started from the old
     // build right before a download swap is restarted on the next call.
     let signature = format!(
-        "{}|{}|{}|{}|backend={}|no_gpu={}",
+        "{}|{}|{}|{}|backend={}|no_gpu={}|ov={}",
         server_path.display(),
         model_path.display(),
         port,
         threads,
         backend,
-        no_gpu
+        no_gpu,
+        ov_device.unwrap_or("")
     );
 
     let state = app.state::<crate::AppState>();
@@ -509,7 +616,8 @@ fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, S
     }
 
     // We own `server_starting`: spawn + health-check with no lock held.
-    let result = spawn_and_health_check(&server_path, &model_path, port, threads, no_gpu, signature);
+    let result =
+        spawn_and_health_check(&server_path, &model_path, port, threads, no_gpu, ov_device, signature);
     let mut guard = state.server.lock().unwrap();
     state.server_starting.store(false, Ordering::SeqCst);
     match result {
@@ -530,6 +638,7 @@ fn spawn_and_health_check(
     port: u16,
     threads: u32,
     no_gpu: bool,
+    ov_device: Option<&str>,
     signature: String,
 ) -> Result<ManagedServer, String> {
     // Refuse to spawn onto a port something already listens on (e.g. an
@@ -554,6 +663,9 @@ fn spawn_and_health_check(
         .arg(threads.to_string());
     if no_gpu {
         cmd.arg("--no-gpu");
+    }
+    if let Some(device) = ov_device {
+        cmd.arg("--ov-e-device").arg(device);
     }
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -621,8 +733,11 @@ fn spawn_and_health_check(
     };
 
     // health check: retry TCP connect for up to 60 seconds (v0.9: the NPU build
-    // loads a ~700 MB compiled encoder first; a dead child still fails fast)
-    let deadline = Instant::now() + Duration::from_secs(60);
+    // loads a ~700 MB compiled encoder first; a dead child still fails fast).
+    // OpenVINO compiles the encoder for the NPU on the first start (minutes
+    // for large-v3-turbo; cached next to the model afterwards): 10 minutes.
+    let health_secs = if ov_device.is_some() { 600 } else { 60 };
+    let deadline = Instant::now() + Duration::from_secs(health_secs);
     loop {
         if let Ok(Some(status)) = child.try_wait() {
             eprintln!("whisper-server exited immediately (exit: {status})");
@@ -996,7 +1111,7 @@ pub fn sync_server_build(app: &AppHandle) {
                 }
             }
         }
-        if wanted == "npu" && !npu_cache_ready(&app, &settings) {
+        if needs_encoder_cache(wanted) && !npu_cache_ready(&app, &settings) {
             if let Err(e) = download_npu_cache(app.clone()).await {
                 eprintln!("NPU encoder download failed: {e}");
                 return;
@@ -1055,7 +1170,7 @@ pub async fn quick_setup(app: AppHandle) -> Result<(), String> {
     }
 
     let settings = current(&app);
-    if effective_accel(&settings) == "npu" && !npu_cache_ready(&app, &settings) {
+    if needs_encoder_cache(effective_accel(&settings)) && !npu_cache_ready(&app, &settings) {
         download_npu_cache(app.clone()).await?;
         while NPU_CACHE_DOWNLOADING.load(Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -1134,17 +1249,25 @@ async fn download_whisper_server_inner(app: &AppHandle) -> Result<(), String> {
         let settings = app.state::<crate::AppState>().settings.lock().unwrap().clone();
         effective_accel(&settings)
     };
-    let (name, url, sha256) = match lemonade_asset(accel) {
-        Some((asset, digest)) => (
-            asset.to_string(),
-            format!(
-                "https://github.com/{LEMONADE_WHISPER_REPO}/releases/download/{LEMONADE_WHISPER_TAG}/{asset}"
+    let (name, url, sha256) = if accel == "openvino" {
+        (
+            OPENVINO_SERVER_ASSET.to_string(),
+            openvino_release_url(OPENVINO_SERVER_ASSET),
+            Some(OPENVINO_SERVER_SHA256),
+        )
+    } else {
+        match lemonade_asset(accel) {
+            Some((asset, digest)) => (
+                asset.to_string(),
+                format!(
+                    "https://github.com/{LEMONADE_WHISPER_REPO}/releases/download/{LEMONADE_WHISPER_TAG}/{asset}"
+                ),
+                Some(digest),
             ),
-            Some(digest),
-        ),
-        None => {
-            let (name, url) = pick_ggml_release(&client, accel == "cuda").await?;
-            (name, url, None)
+            None => {
+                let (name, url) = pick_ggml_release(&client, accel == "cuda").await?;
+                (name, url, None)
+            }
         }
     };
     install_server_archive(app, &client, &name, &url, sha256).await

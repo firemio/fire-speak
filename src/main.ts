@@ -364,9 +364,16 @@ function renderHomeRecent(): void {
 // ---------------------------------------------------------------------------
 
 /** Approximate download size of each server build (MB), for the setup total. */
-const SERVER_BUILD_MB: Record<string, number> = { cuda: 643, vulkan: 20, npu: 3, cpu: 8 };
+const SERVER_BUILD_MB: Record<string, number> = { cuda: 643, vulkan: 20, npu: 3, openvino: 81, cpu: 8 };
 /** AMD's compiled NPU encoder; only large-v3-turbo's size is known here. */
 const NPU_ENCODER_MB: Record<string, number> = { "large-v3-turbo": 708 };
+/** FP16 OpenVINO encoder IR zips for the Intel NPU (v0.10, release asset sizes). */
+const OV_ENCODER_MB: Record<string, number> = { tiny: 14, base: 36, small: 155, medium: 541, "large-v3-turbo": 1110 };
+
+/** Builds that run the encoder on an NPU and need a per-model encoder download. */
+function needsEncoderCache(accel: string): boolean {
+  return accel === "npu" || accel === "openvino";
+}
 
 let quickSetupRunning = false;
 
@@ -397,11 +404,11 @@ function onboardSteps(s: SetupStatus): OnboardStep[] | null {
       done: s.model_installed,
     },
   ];
-  if (accel === "npu") {
+  if (needsEncoderCache(accel)) {
     steps.push({
       key: downloadKey("npu", "npu-encoder"),
       label: t("onboard.stepNpu"),
-      sizeMb: NPU_ENCODER_MB[model] ?? 0,
+      sizeMb: (accel === "openvino" ? OV_ENCODER_MB : NPU_ENCODER_MB)[model] ?? 0,
       done: s.npu_cache_ready,
     });
   }
@@ -555,7 +562,7 @@ function renderHomeStatus(): void {
         "stt",
       ),
     );
-    if (s.effective_accel === "npu") {
+    if (needsEncoderCache(s.effective_accel)) {
       card.appendChild(
         statusRow(
           s.npu_cache_ready ? "ok" : "missing",
@@ -1567,22 +1574,27 @@ const ACCEL_LABEL_KEYS: Record<string, string> = {
   cuda: "stt.accelCuda",
   vulkan: "stt.accelVulkan",
   npu: "stt.accelNpu",
+  openvino: "stt.accelOpenvino",
   cpu: "stt.accelCpu",
 };
 
 /** Short, untranslated build names for buttons and the resolved-device line. */
-const ACCEL_SHORT: Record<string, string> = { cuda: "CUDA", vulkan: "Vulkan", npu: "NPU", cpu: "CPU" };
+const ACCEL_SHORT: Record<string, string> = { cuda: "CUDA", vulkan: "Vulkan", npu: "NPU", openvino: "Intel NPU", cpu: "CPU" };
 
 const BACKEND_BADGE_KEYS: Record<string, string> = {
   cuda: "setup.backendCuda",
   vulkan: "setup.backendVulkan",
   npu: "setup.backendNpu",
+  openvino: "setup.backendOpenvino",
   cpu: "setup.backendCpu",
 };
 
-/** Mirror of `hw::build_satisfies`: CPU runs on the CUDA/Vulkan builds too. */
+/** Mirror of `hw::build_satisfies`: CPU runs on the CUDA/Vulkan/OpenVINO builds too. */
 function buildSatisfies(installed: string, wanted: string): boolean {
-  return installed === wanted || (wanted === "cpu" && (installed === "cuda" || installed === "vulkan"));
+  return (
+    installed === wanted ||
+    (wanted === "cpu" && (installed === "cuda" || installed === "vulkan" || installed === "openvino"))
+  );
 }
 
 /** Accelerator selector + detected-hardware line inside the server card (v0.9). */
@@ -1602,6 +1614,7 @@ function renderAccel(s: SetupStatus): void {
 
   const found: string[] = s.hw.gpus.length ? [...s.hw.gpus] : [t("stt.noGpu")];
   if (s.hw.npu) found.push(t("stt.npuFound"));
+  if (s.hw.intel_npu) found.push(t("stt.intelNpuFound"));
   const resolved = ACCEL_SHORT[s.effective_accel] ?? "CPU";
   $("accel-hint").textContent = `${t("stt.accelDetected", found.join(" / "))} → ${resolved}`;
 }
@@ -1651,7 +1664,7 @@ function renderServerCard(): void {
   installBtn.className = `btn btn-sm${offerBuild || !s.server_installed ? " btn-primary" : ""}`;
   installBtn.disabled = activeDownloads.has(downloadKey("server", "whisper-server"));
 
-  npuRow.hidden = !(wanted === "npu" && s.model_installed && !s.npu_cache_ready);
+  npuRow.hidden = !(needsEncoderCache(wanted) && s.model_installed && !s.npu_cache_ready);
   ($("btn-install-npu") as HTMLButtonElement).disabled = activeDownloads.has(
     downloadKey("npu", "npu-encoder"),
   );

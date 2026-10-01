@@ -126,6 +126,7 @@ export interface Hardware {
   amd_gpu: boolean;
   vulkan: boolean;
   npu: boolean;
+  intel_npu: boolean; // Intel AI Boost (v0.10)
   gpus: string[];
 }
 

@@ -20,6 +20,9 @@ pub struct Hardware {
     pub vulkan: bool,
     /// An AMD XDNA NPU with its driver ("NPU Compute Accelerator Device").
     pub npu: bool,
+    /// An Intel NPU with its driver ("Intel(R) AI Boost", Core Ultra) — the
+    /// OpenVINO build can run the encoder on it (v0.10, untested on hardware).
+    pub intel_npu: bool,
     /// Display names of the GPUs, for the settings screen.
     pub gpus: Vec<String>,
 }
@@ -49,7 +52,8 @@ fn probe() -> Hardware {
     let script = "$ErrorActionPreference='SilentlyContinue';\
         $g=@(Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name });\
         $n=@(Get-CimInstance Win32_PnPEntity -Filter \"Name LIKE '%NPU Compute Accelerator%'\").Count;\
-        ConvertTo-Json -Compress @{gpus=$g;npu=$n}";
+        $i=@(Get-CimInstance Win32_PnPEntity -Filter \"Name LIKE '%AI Boost%'\").Count;\
+        ConvertTo-Json -Compress @{gpus=$g;npu=$n;intel_npu=$i}";
     if let Some(stdout) = run_with_timeout(
         std::process::Command::new("powershell.exe")
             .args(["-NoProfile", "-NonInteractive", "-Command", script])
@@ -65,6 +69,7 @@ fn probe() -> Hardware {
                 _ => Vec::new(),
             };
             hw.npu = v["npu"].as_u64().unwrap_or(0) > 0;
+            hw.intel_npu = v["intel_npu"].as_u64().unwrap_or(0) > 0;
         }
     }
     hw.amd_gpu = hw.gpus.iter().any(|n| is_amd_gpu_name(n));
@@ -135,7 +140,7 @@ fn is_amd_gpu_name(name: &str) -> bool {
 pub fn supported_accels() -> &'static [&'static str] {
     #[cfg(all(windows, target_arch = "x86_64"))]
     {
-        &["auto", "cuda", "vulkan", "npu", "cpu"]
+        &["auto", "cuda", "vulkan", "npu", "openvino", "cpu"]
     }
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
@@ -151,7 +156,7 @@ pub fn supported_accels() -> &'static [&'static str] {
 }
 
 /// Resolve the configured accelerator to a concrete build:
-/// "cuda" | "vulkan" | "npu" | "cpu".
+/// "cuda" | "vulkan" | "npu" | "openvino" | "cpu".
 ///
 /// "auto": CPU when the legacy `gpu` switch is off; otherwise CUDA on an
 /// NVIDIA driver, Vulkan on an AMD Radeon with the Vulkan loader, else CPU.
@@ -160,12 +165,16 @@ pub fn supported_accels() -> &'static [&'static str] {
 pub fn resolve_accel(configured: &str, gpu_switch: bool, hw: &Hardware) -> &'static str {
     let supported = supported_accels();
     match configured {
-        "cuda" | "vulkan" | "npu" | "cpu" if supported.contains(&configured) => match configured {
-            "cuda" => "cuda",
-            "vulkan" => "vulkan",
-            "npu" => "npu",
-            _ => "cpu",
-        },
+        "cuda" | "vulkan" | "npu" | "openvino" | "cpu" if supported.contains(&configured) => {
+            match configured {
+                "cuda" => "cuda",
+                "vulkan" => "vulkan",
+                "npu" => "npu",
+                // Intel NPU via OpenVINO: explicit choice only, like the AMD NPU
+                "openvino" => "openvino",
+                _ => "cpu",
+            }
+        }
         _ => {
             if !gpu_switch {
                 "cpu"
@@ -181,10 +190,12 @@ pub fn resolve_accel(configured: &str, gpu_switch: bool, hw: &Hardware) -> &'sta
 }
 
 /// Whether an installed server build can serve the wanted accelerator.
-/// CPU is served by the CUDA and Vulkan builds too (with `--no-gpu`), so
-/// switching to CPU never forces a download; the NPU build is not reused.
+/// CPU is served by the CUDA and Vulkan builds too (with `--no-gpu`) and by
+/// the OpenVINO build (a CPU ggml build when `--ov-e-device` is not passed),
+/// so switching to CPU never forces a download; the AMD NPU build is not
+/// reused.
 pub fn build_satisfies(installed: &str, wanted: &str) -> bool {
-    installed == wanted || (wanted == "cpu" && matches!(installed, "cuda" | "vulkan"))
+    installed == wanted || (wanted == "cpu" && matches!(installed, "cuda" | "vulkan" | "openvino"))
 }
 
 #[cfg(test)]
@@ -192,7 +203,7 @@ mod tests {
     use super::*;
 
     fn hw(nvidia: bool, amd_gpu: bool, vulkan: bool, npu: bool) -> Hardware {
-        Hardware { nvidia, amd_gpu, vulkan, npu, gpus: Vec::new() }
+        Hardware { nvidia, amd_gpu, vulkan, npu, intel_npu: false, gpus: Vec::new() }
     }
 
     #[test]
@@ -211,6 +222,9 @@ mod tests {
         assert!(build_satisfies("vulkan", "cpu"));
         assert!(build_satisfies("cuda", "cpu"));
         assert!(!build_satisfies("npu", "cpu"));
+        assert!(build_satisfies("openvino", "cpu"));
+        assert!(!build_satisfies("openvino", "npu"));
+        assert!(!build_satisfies("cpu", "openvino"));
         assert!(!build_satisfies("cpu", "vulkan"));
         assert!(!build_satisfies("vulkan", "npu"));
     }
@@ -225,6 +239,9 @@ mod tests {
         assert_eq!(resolve_accel("auto", false, &hw(true, true, true, true)), "cpu");
         assert_eq!(resolve_accel("auto", true, &hw(false, false, true, false)), "cpu");
         assert_eq!(resolve_accel("npu", true, &hw(false, true, true, true)), "npu");
+        // Intel NPU is never picked by auto either
+        assert_eq!(resolve_accel("openvino", true, &hw(false, false, false, false)), "openvino");
+        assert_eq!(resolve_accel("auto", true, &hw(false, false, false, false)), "cpu");
         assert_eq!(resolve_accel("bogus", true, &hw(false, true, true, false)), "vulkan");
     }
 }
