@@ -178,6 +178,19 @@ async function syncLang(uiLang: string): Promise<void> {
   }
 }
 
+/**
+ * Tell the backend a frame was painted after the HUD was shown. rAF does not
+ * run while WebView2 is not rendering, so a missing ack makes the backend's
+ * paint watchdog recreate this window.
+ */
+function ackPaint(): void {
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      invoke("overlay_painted").catch(() => {});
+    }),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // init
 // ---------------------------------------------------------------------------
@@ -196,6 +209,7 @@ async function init(): Promise<void> {
 
   await listen<StatusChangedPayload>("status-changed", (event) => {
     applyStatus(event.payload);
+    if (event.payload.status === "recording") ackPaint();
   });
 
   await listen<LevelPayload>("level", (event) => {
@@ -226,6 +240,17 @@ async function init(): Promise<void> {
     // non-fatal: chip stays hidden, language stays at default
   }
   applyDom();
+
+  // A recreated HUD (paint watchdog) loads mid-recording: sync the status.
+  try {
+    const status = await invoke<AppStatus>("get_status");
+    if (status !== "idle") {
+      applyStatus({ status });
+      if (status === "recording") ackPaint();
+    }
+  } catch {
+    // stays idle until the next status-changed
+  }
 }
 
 window.addEventListener("DOMContentLoaded", () => {

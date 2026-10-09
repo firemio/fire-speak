@@ -360,6 +360,13 @@ fn get_status(state: State<'_, AppState>) -> Result<String, String> {
     Ok(state.status.lock().unwrap().as_str().to_string())
 }
 
+/// Overlay HUD: a frame was painted after `status-changed{recording}`
+/// (feeds the paint watchdog in `pipeline::show_overlay`).
+#[tauri::command]
+fn overlay_painted() {
+    pipeline::overlay_painted();
+}
+
 #[tauri::command]
 fn get_startup_error(state: State<'_, AppState>) -> Result<Option<String>, String> {
     Ok(state.startup_error.lock().unwrap().take())
@@ -651,6 +658,7 @@ pub fn run() {
             cancel_recording,
             set_hotkey_suspended,
             get_status,
+            overlay_painted,
             get_startup_error,
             get_ui_lang,
             set_active_mode,

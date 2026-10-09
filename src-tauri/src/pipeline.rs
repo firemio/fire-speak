@@ -1,6 +1,6 @@
 use crate::settings::Mode;
 use crate::AppState;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
@@ -268,9 +268,45 @@ fn is_canceled(app: &AppHandle, gen: u64) -> bool {
 // Overlay helpers
 // ---------------------------------------------------------------------------
 
+/// Incremented on every show_overlay; the paint watchdog for show N passes
+/// only if the HUD acknowledged a paint (`overlay_painted`) after it.
+static OVERLAY_SHOW_SEQ: AtomicU64 = AtomicU64::new(0);
+/// OVERLAY_SHOW_SEQ value current when the HUD last acknowledged a paint.
+static OVERLAY_ACK_SEQ: AtomicU64 = AtomicU64::new(0);
+/// How long the HUD has to acknowledge a paint after being shown.
+const OVERLAY_PAINT_TIMEOUT_MS: u64 = 1500;
+
 /// Position the overlay at the bottom-center of the primary monitor's work
 /// area and show it without stealing focus (the window is focus:false).
+///
+/// A paint watchdog follows every show: after a long run the HUD window was
+/// observed to become visible while its WebView2 painted nothing (only a
+/// restart fixed it). If the HUD does not acknowledge a paint in time, the
+/// overlay window is recreated.
 pub fn show_overlay(app: &AppHandle) {
+    let seq = OVERLAY_SHOW_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
+    show_overlay_window(app);
+    let app2 = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(OVERLAY_PAINT_TIMEOUT_MS)).await;
+        if OVERLAY_SHOW_SEQ.load(Ordering::SeqCst) != seq
+            || OVERLAY_ACK_SEQ.load(Ordering::SeqCst) >= seq
+        {
+            return; // superseded by a newer show, or painted fine
+        }
+        let visible = app2
+            .get_webview_window("overlay")
+            .and_then(|w| w.is_visible().ok())
+            .unwrap_or(false);
+        if !visible {
+            return; // already hidden again (short tap / cancel)
+        }
+        crate::settings::log_line(&app2, "overlay: no paint ack after show; recreating HUD window");
+        recreate_overlay(&app2);
+    });
+}
+
+fn show_overlay_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("overlay") {
         if let Ok(Some(monitor)) = window.primary_monitor() {
             let scale = monitor.scale_factor();
@@ -285,14 +321,77 @@ pub fn show_overlay(app: &AppHandle) {
             let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
         }
         let _ = window.show();
+        set_webview_visible(&window, true);
         // never call set_focus on the overlay
     }
 }
 
 pub fn hide_overlay(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("overlay") {
+        set_webview_visible(&window, false);
         let _ = window.hide();
     }
+}
+
+/// `window.show()/hide()` only toggles the native window; WebView2 is never
+/// told. Mirror the state onto the controller (what wry's own set_visible
+/// does) so the renderer resumes painting on show.
+#[cfg(windows)]
+fn set_webview_visible(window: &tauri::WebviewWindow, visible: bool) {
+    let _ = window.with_webview(move |webview| unsafe {
+        let controller = webview.controller();
+        let _ = controller.SetIsVisible(visible);
+        if visible {
+            // the window was moved while hidden
+            let _ = controller.NotifyParentWindowPositionChanged();
+        }
+    });
+}
+
+#[cfg(not(windows))]
+fn set_webview_visible(_window: &tauri::WebviewWindow, _visible: bool) {}
+
+/// HUD -> backend: a frame was painted after `status-changed{recording}`.
+pub fn overlay_painted() {
+    OVERLAY_ACK_SEQ.store(OVERLAY_SHOW_SEQ.load(Ordering::SeqCst), Ordering::SeqCst);
+}
+
+/// Destroy the overlay window and build a fresh one from its tauri.conf
+/// entry, then show it again if a recording / processing is still running.
+/// The new page syncs its state via `get_status` on load.
+fn recreate_overlay(app: &AppHandle) {
+    let Some(config) = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == "overlay")
+        .cloned()
+    else {
+        return;
+    };
+    if let Some(old) = app.get_webview_window("overlay") {
+        let _ = old.destroy();
+    }
+    // destroy is processed on the event loop; build once the label is free
+    let app2 = app.clone();
+    tauri::async_runtime::spawn(async move {
+        for _ in 0..20 {
+            if app2.get_webview_window("overlay").is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        if let Err(e) = tauri::WebviewWindowBuilder::from_config(&app2, &config).and_then(|b| b.build()) {
+            crate::settings::log_line(&app2, &format!("overlay: recreate failed: {e}"));
+            return;
+        }
+        let busy = *app2.state::<AppState>().status.lock().unwrap() != Status::Idle;
+        if busy {
+            // no further watchdog here: one recreate per show is enough
+            show_overlay_window(&app2);
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------

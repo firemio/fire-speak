@@ -751,3 +751,17 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 
 - `is_hallucination` に `is_repetition`: 正規化後 6 文字以上で、同じ断片の 3 回以上の繰り返しだけで構成される(「ありがとうございました×3」「はいはいはいはいはい」)なら幻聴。「ははは」「はいはい、わかりました」は対象外。
 - テスト追加(stt::tests、pipeline::gate_tests)。
+
+# v0.10.3 追加仕様: 録音 HUD が描画されない不具合の対策
+
+## 背景
+
+- 2026-10-10: 約 31 時間常駐した v0.10.2 で、右Alt を押すと録音・文字起こし・貼り付けは動くが HUD が見えない状態になった。overlay ウィンドウは `IsWindowVisible=true` になり位置も画面内だったが、画面キャプチャでは中身が何も描画されていなかった(透明のまま)。WebView2 のプロセスは生存。スリープ復帰・GPU リセットのイベントは無し。アプリ再起動で直る。
+- Tauri の `window.show()/hide()` はネイティブウィンドウの ShowWindow だけで、WebView2 の `ICoreWebView2Controller::SetIsVisible` は起動時から true のまま一度も切り替わらない。
+
+## 対策 (pipeline.rs / overlay.ts)
+
+1. `show_overlay` / `hide_overlay` は Windows で `with_webview` 経由でコントローラの `SetIsVisible(true/false)` も呼ぶ(wry の `set_visible` と同じ)。表示時は `NotifyParentWindowPositionChanged` も呼ぶ。
+2. **描画ウォッチドッグ**: overlay は `status-changed{recording}` 受信後、`requestAnimationFrame` を 2 回待ってからコマンド `overlay_painted`(引数なし、戻り値なし)を invoke する。WebView2 が描画していないと rAF は走らない。`show_overlay` は表示ごとに連番を振り、**1.5 秒**以内にその表示以降の ack が無く、overlay がまだ表示中なら `fire-speak.log` に `overlay: no paint ack after show; recreating HUD window` を記録し、overlay ウィンドウを destroy して tauri.conf の定義から作り直す。作り直し後、status が idle 以外なら再表示する(作り直しは表示 1 回につき 1 回まで)。
+3. overlay は起動時に `get_status` を読み、idle 以外ならその状態を表示する(作り直された HUD が録音途中から始まるため)。
+- 検証(2026-10-10、debug ビルド + WebView2 リモートデバッグ): 通常の録音で `visibilityState=visible`・rAF 約 60fps・ack 到着(作り直し無し)。HUD の `requestAnimationFrame` を無効化して録音 → 1.5 秒後にログ記録・新しい overlay ウィンドウで `recording` 表示・キャンセルで非表示。作り直し後の録音は正常。
