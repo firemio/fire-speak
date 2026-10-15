@@ -47,17 +47,8 @@ impl Context {
             return String::new();
         }
         let mut s = String::from(
-            "\n\n# 参考文脈\n以下はユーザーが直前に扱っていたテキストです(古い順)。口述テキストの語の選択(同音異義語・固有名詞・専門用語・表記ゆれ)を判断する手がかりにだけ使ってください。文脈と話題が合う語を優先し、関係が無ければ無視してください。参考文脈の内容を出力に含めたり、口述内容を補ったりしないでください。",
+            "\n\n# 参考文脈\n以下はユーザーが直前に扱っていたテキストです(古い順)。口述テキストの語の選択(同音異義語・固有名詞・専門用語・表記ゆれ)を判断する手がかりにだけ使ってください。\n- <clipboard_history> はユーザーが実際にコピーした正確なテキストです。口述テキスト中の語と読み・音が同じか近い語がここにあれば、その表記を最優先で採用してください。\n- <recent_dictations> は過去の音声入力の結果で誤認識を含み得るため、話題の把握の補助としてだけ使ってください。\n関係が無ければ無視してください。参考文脈の内容を出力に含めたり、口述内容を補ったりしないでください。",
         );
-        if !self.recent.is_empty() {
-            s.push_str("\n\n<recent_dictations>");
-            for r in &self.recent {
-                s.push_str("\n<item>");
-                s.push_str(r);
-                s.push_str("</item>");
-            }
-            s.push_str("\n</recent_dictations>");
-        }
         if !self.clipboard.is_empty() {
             s.push_str("\n\n<clipboard_history>");
             for c in &self.clipboard {
@@ -66,6 +57,15 @@ impl Context {
                 s.push_str("</item>");
             }
             s.push_str("\n</clipboard_history>");
+        }
+        if !self.recent.is_empty() {
+            s.push_str("\n\n<recent_dictations>");
+            for r in &self.recent {
+                s.push_str("\n<item>");
+                s.push_str(r);
+                s.push_str("</item>");
+            }
+            s.push_str("\n</recent_dictations>");
         }
         s
     }
