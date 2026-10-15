@@ -30,8 +30,15 @@ pub fn is_configured(provider: &LlmProvider) -> bool {
 }
 
 /// Polish `raw` text with the given provider according to the mode instruction.
-pub async fn polish(provider: &LlmProvider, instruction: &str, raw: &str) -> Result<String, String> {
-    let system = format!("{SYSTEM_PREFIX}{instruction}");
+/// `context` hints (clipboard / recent dictations) go into the system prompt so
+/// the user message stays the bare transcript.
+pub async fn polish(
+    provider: &LlmProvider,
+    instruction: &str,
+    raw: &str,
+    context: &crate::context::Context,
+) -> Result<String, String> {
+    let system = format!("{SYSTEM_PREFIX}{instruction}{}", context.prompt_section());
     chat(provider, Some(&system), raw).await
 }
 

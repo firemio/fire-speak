@@ -1297,6 +1297,7 @@ function renderGeneralSection(): void {
   input("in-restore-clipboard").checked = settings.restore_clipboard;
   input("in-autostart").checked = settings.autostart;
   input("in-live-caption").checked = settings.live_caption;
+  input("in-llm-context").checked = settings.llm_context;
 }
 
 /**
@@ -1552,6 +1553,11 @@ function wireGeneralSection(): void {
   input("in-live-caption").addEventListener("change", () => {
     if (!settings) return;
     settings.live_caption = input("in-live-caption").checked;
+    scheduleSave();
+  });
+  input("in-llm-context").addEventListener("change", () => {
+    if (!settings) return;
+    settings.llm_context = input("in-llm-context").checked;
     scheduleSave();
   });
   input("in-autostart").addEventListener("change", () => {

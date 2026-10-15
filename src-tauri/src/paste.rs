@@ -9,6 +9,12 @@ pub fn copy_only(text: &str) -> Result<(), String> {
         .map_err(|e| format!("ERR_CLIPBOARD|{e}"))
 }
 
+/// Current clipboard text; `None` for images/files/empty or on any error.
+pub fn read_text() -> Option<String> {
+    pin_clipboard_owner();
+    arboard::Clipboard::new().ok()?.get_text().ok()
+}
+
 /// Paste `text` into the active application.
 /// paste_mode == "paste": save old clipboard (text or image) -> set new ->
 /// wait for physical modifiers to be released -> Ctrl+V -> optionally restore.

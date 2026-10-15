@@ -722,7 +722,21 @@ async fn run_pipeline(
                     *status = Status::Polishing;
                 }
                 emit_status(&app, "polishing", None);
-                match crate::llm::polish(&p, &mode.instruction, &raw_text).await {
+                let context = if settings.llm_context {
+                    // Read before step 4 overwrites the clipboard with our output.
+                    let clipboard = tokio::task::spawn_blocking(crate::paste::read_text)
+                        .await
+                        .ok()
+                        .flatten();
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0);
+                    crate::context::build(&crate::history::load(&app), now_ms, clipboard)
+                } else {
+                    crate::context::Context::default()
+                };
+                match crate::llm::polish(&p, &mode.instruction, &raw_text, &context).await {
                     Ok(t) if !t.trim().is_empty() => final_text = t.trim().to_string(),
                     Ok(_) => {
                         warning = Some("WARN_LLM_FALLBACK".to_string());

@@ -161,6 +161,8 @@
   "general.autostartDesc": "登入時在背景啟動 fire-speak",
   "general.liveCaption": "即時字幕",
   "general.liveCaptionDesc": "錄音時在彈出視窗顯示辨識中的文字（雲端辨識會增加請求次數）",
+  "general.llmContext": "依上下文選詞",
+  "general.llmContextDesc": "AI 潤飾時參考剪貼簿與最近的語音輸入，選擇正確的同音詞與專有名詞（剪貼簿內容也會傳送給 AI）",
   "hotkey.press": "請按下按鍵…",
   "hotkey.invalid": "無法使用此按鍵",
   "hotkey.needModifier": "請搭配修飾鍵（Ctrl/Alt/Shift）使用",

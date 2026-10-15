@@ -29,6 +29,10 @@ pub struct Settings {
     /// Show partial transcription in the HUD while recording (v0.5).
     #[serde(default = "default_true")]
     pub live_caption: bool,
+    /// Give the LLM the clipboard and recent dictations as hints for word
+    /// choice (homophones, proper nouns) (v0.11).
+    #[serde(default = "default_true")]
+    pub llm_context: bool,
     #[serde(default = "default_history_limit")]
     pub history_limit: usize,
     #[serde(default)]
@@ -66,6 +70,7 @@ impl Default for Settings {
             restore_clipboard: true,
             autostart: true,
             live_caption: true,
+            llm_context: true,
             history_limit: default_history_limit(),
             stt: SttSettings::default(),
             llm: LlmSettings::default(),

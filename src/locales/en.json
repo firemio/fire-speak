@@ -161,6 +161,8 @@
   "general.autostartDesc": "Launches fire-speak in the background at sign-in",
   "general.liveCaption": "Live captions",
   "general.liveCaptionDesc": "Shows the partial transcription in the popup while recording (cloud STT sends extra requests)",
+  "general.llmContext": "Use context for word choice",
+  "general.llmContextDesc": "When polishing with AI, uses the clipboard and recent dictations to pick the right homophones and proper nouns (clipboard text is sent to the AI)",
   "hotkey.press": "Press keys…",
   "hotkey.invalid": "This key cannot be used",
   "hotkey.needModifier": "Combine with a modifier key (Ctrl/Alt/Shift)",

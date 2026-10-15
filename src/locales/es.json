@@ -161,6 +161,8 @@
   "general.autostartDesc": "Inicia fire-speak en segundo plano al iniciar sesión",
   "general.liveCaption": "Subtítulos en tiempo real",
   "general.liveCaptionDesc": "Muestra la transcripción parcial en la ventana emergente durante la grabación (el reconocimiento en la nube envía más solicitudes)",
+  "general.llmContext": "Elegir palabras por contexto",
+  "general.llmContextDesc": "Al pulir con IA, usa el portapapeles y los dictados recientes para elegir homófonos y nombres propios correctos (el texto del portapapeles se envía a la IA)",
   "hotkey.press": "Presiona las teclas…",
   "hotkey.invalid": "Esta tecla no se puede usar",
   "hotkey.needModifier": "Combínala con una tecla modificadora (Ctrl/Alt/Shift)",

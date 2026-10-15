@@ -72,6 +72,8 @@ export interface Settings {
   autostart: boolean;
   /** Show partial transcription in the HUD while recording (v0.5). */
   live_caption: boolean;
+  /** Clipboard + recent dictations as word-choice hints for the LLM (v0.11). */
+  llm_context: boolean;
   history_limit: number;
   stt: SttSettings;
   llm: LlmSettings;

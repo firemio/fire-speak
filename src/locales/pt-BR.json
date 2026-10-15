@@ -161,6 +161,8 @@
   "general.autostartDesc": "Inicia o fire-speak em segundo plano ao fazer login",
   "general.liveCaption": "Legendas em tempo real",
   "general.liveCaptionDesc": "Mostra a transcrição parcial na janela durante a gravação (o reconhecimento na nuvem envia mais requisições)",
+  "general.llmContext": "Escolher palavras pelo contexto",
+  "general.llmContextDesc": "Ao refinar com IA, usa a área de transferência e os ditados recentes para escolher homófonos e nomes próprios corretos (o texto da área de transferência é enviado à IA)",
   "hotkey.press": "Pressione as teclas…",
   "hotkey.invalid": "Esta tecla não pode ser usada",
   "hotkey.needModifier": "Combine com uma tecla modificadora (Ctrl/Alt/Shift)",

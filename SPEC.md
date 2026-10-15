@@ -765,3 +765,12 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 2. **描画ウォッチドッグ**: overlay は `status-changed{recording}` 受信後、`requestAnimationFrame` を 2 回待ってからコマンド `overlay_painted`(引数なし、戻り値なし)を invoke する。WebView2 が描画していないと rAF は走らない。`show_overlay` は表示ごとに連番を振り、**1.5 秒**以内にその表示以降の ack が無く、overlay がまだ表示中なら `fire-speak.log` に `overlay: no paint ack after show; recreating HUD window` を記録し、overlay ウィンドウを destroy して tauri.conf の定義から作り直す。作り直し後、status が idle 以外なら再表示する(作り直しは表示 1 回につき 1 回まで)。
 3. overlay は起動時に `get_status` を読み、idle 以外ならその状態を表示する(作り直された HUD が録音途中から始まるため)。
 - 検証(2026-10-10、debug ビルド + WebView2 リモートデバッグ): 通常の録音で `visibilityState=visible`・rAF 約 60fps・ack 到着(作り直し無し)。HUD の `requestAnimationFrame` を無効化して録音 → 1.5 秒後にログ記録・新しい overlay ウィンドウで `recording` 表示・キャンセルで非表示。作り直し後の録音は正常。
+
+# v0.11.0 追加仕様: 文脈による語の選択 (context.rs)
+
+- 設定 `llm_context: bool`(既定 true、一般 → 貼り付けカードのスイッチ「文脈で語を選ぶ」)。true なら LLM モード(整形ほか全 LLM モード)の整形時に参考文脈をシステムプロンプト末尾へ付ける。ユーザーメッセージは従来どおり文字起こしのみ。
+- 参考文脈:
+  - **直近の音声入力**: 履歴の新しい順に 30 分以内・最大 3 件の `final_text`(各末尾 600 字)、古い順に並べる。
+  - **クリップボード**: 貼り付け(ステップ 4)前に読むテキスト(末尾 1500 字)。画像・空は無し。直前の履歴の `final_text` と同一(=前回の自分の出力)なら除外。空白を含まない 12 字以上の ASCII で英字と非英字が混在するもの(パスワード・API キー形)は送らない(`://` を含む URL は除く)。
+- 指示: 参考文脈は同音異義語・固有名詞・専門用語・表記ゆれの判断材料にのみ使い、出力に含めない・内容を補わない・無関係なら無視。
+- テスト: context::tests。

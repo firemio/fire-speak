@@ -161,6 +161,8 @@
   "general.autostartDesc": "Startet fire-speak bei der Anmeldung im Hintergrund",
   "general.liveCaption": "Live-Untertitel",
   "general.liveCaptionDesc": "Zeigt die vorläufige Transkription während der Aufnahme im Popup an (Cloud-Erkennung sendet zusätzliche Anfragen)",
+  "general.llmContext": "Wortwahl nach Kontext",
+  "general.llmContextDesc": "Nutzt beim KI-Überarbeiten die Zwischenablage und die letzten Diktate, um Homophone und Eigennamen richtig zu wählen (der Text der Zwischenablage wird an die KI gesendet)",
   "hotkey.press": "Tasten drücken…",
   "hotkey.invalid": "Diese Taste kann nicht verwendet werden",
   "hotkey.needModifier": "Mit einer Zusatztaste kombinieren (Ctrl/Alt/Shift)",
