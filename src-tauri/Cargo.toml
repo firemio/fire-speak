@@ -42,11 +42,12 @@ hex = "0.4.3"
 
 # --- Windows-only -----------------------------------------------------------
 # win32job: kill-on-close Job Object for the managed whisper-server.
-# windows-sys: WH_KEYBOARD_LL hook, GetAsyncKeyState, VkKeyScanExW.
+# windows-sys: WH_KEYBOARD_LL hook, GetAsyncKeyState, VkKeyScanExW,
+#   GetClipboardSequenceNumber (clipboard-history watcher).
 # zip: the whisper.cpp Windows release asset is a .zip (Linux ships .tar.gz).
 [target.'cfg(windows)'.dependencies]
 win32job = "2.0.3"
-windows-sys = { version = "0.61.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
+windows-sys = { version = "0.61.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_System_DataExchange"] }
 zip = "8.6.0"
 
 # --- Linux-only -------------------------------------------------------------

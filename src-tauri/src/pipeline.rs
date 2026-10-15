@@ -724,15 +724,16 @@ async fn run_pipeline(
                 emit_status(&app, "polishing", None);
                 let context = if settings.llm_context {
                     // Read before step 4 overwrites the clipboard with our output.
-                    let clipboard = tokio::task::spawn_blocking(crate::paste::read_text)
+                    let current = tokio::task::spawn_blocking(crate::paste::read_text)
                         .await
                         .ok()
                         .flatten();
+                    let clipboard = crate::context::clipboard_snapshot(current);
                     let now_ms = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_millis() as u64)
                         .unwrap_or(0);
-                    crate::context::build(&crate::history::load(&app), now_ms, clipboard)
+                    crate::context::build(&crate::history::load(&app), now_ms, &clipboard)
                 } else {
                     crate::context::Context::default()
                 };

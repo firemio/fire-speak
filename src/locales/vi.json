@@ -162,7 +162,7 @@
   "general.liveCaption": "Phụ đề thời gian thực",
   "general.liveCaptionDesc": "Hiển thị văn bản đang nhận dạng trong cửa sổ nổi khi ghi âm (nhận dạng đám mây gửi thêm yêu cầu)",
   "general.llmContext": "Chọn từ theo ngữ cảnh",
-  "general.llmContextDesc": "Khi AI chỉnh sửa, dùng bộ nhớ tạm và các lần đọc gần đây để chọn đúng từ đồng âm và danh từ riêng (nội dung bộ nhớ tạm cũng được gửi đến AI)",
+  "general.llmContextDesc": "Khi AI chỉnh sửa, dùng lịch sử bộ nhớ tạm (5 lần sao chép gần nhất) và các lần đọc gần đây để chọn đúng từ đồng âm và danh từ riêng (chỉ lưu trong bộ nhớ; nội dung được gửi đến AI)",
   "hotkey.press": "Hãy nhấn phím…",
   "hotkey.invalid": "Không thể dùng phím này",
   "hotkey.needModifier": "Hãy kết hợp với phím bổ trợ (Ctrl/Alt/Shift)",

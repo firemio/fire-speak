@@ -5,8 +5,11 @@ pub fn copy_only(text: &str) -> Result<(), String> {
     pin_clipboard_owner();
     let mut cb =
         arboard::Clipboard::new().map_err(|e| format!("ERR_CLIPBOARD|open: {e}"))?;
-    cb.set_text(text.to_string())
-        .map_err(|e| format!("ERR_CLIPBOARD|{e}"))
+    let r = cb
+        .set_text(text.to_string())
+        .map_err(|e| format!("ERR_CLIPBOARD|{e}"));
+    crate::context::mark_own_write();
+    r
 }
 
 /// Current clipboard text; `None` for images/files/empty or on any error.
@@ -68,6 +71,7 @@ pub fn paste_text(text: &str, paste_mode: &str, restore_clipboard: bool) -> Resu
             }
         }
     }
+    crate::context::mark_own_write();
     Ok(())
 }
 

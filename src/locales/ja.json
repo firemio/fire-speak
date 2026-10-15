@@ -162,7 +162,7 @@
   "general.liveCaption": "リアルタイム字幕",
   "general.liveCaptionDesc": "録音中に認識途中のテキストをポップアップに表示します（クラウド認識ではリクエスト数が増えます）",
   "general.llmContext": "文脈で語を選ぶ",
-  "general.llmContextDesc": "AI整形時、クリップボードと直近の音声入力を参考に同音異義語・固有名詞を選びます（クリップボードの内容も AI に送信されます）",
+  "general.llmContextDesc": "AI整形時、クリップボード履歴（直近5件）と直近の音声入力を参考に同音異義語・固有名詞を選びます（履歴はメモリ内のみ保持。内容は AI に送信されます）",
   "hotkey.press": "キーを押してください…",
   "hotkey.invalid": "このキーは使用できません",
   "hotkey.needModifier": "修飾キー(Ctrl/Alt/Shift)と組み合わせてください",

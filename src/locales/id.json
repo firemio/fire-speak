@@ -162,7 +162,7 @@
   "general.liveCaption": "Teks langsung",
   "general.liveCaptionDesc": "Menampilkan transkripsi sementara di popup saat merekam (pengenalan cloud mengirim lebih banyak permintaan)",
   "general.llmContext": "Pilih kata sesuai konteks",
-  "general.llmContextDesc": "Saat merapikan dengan AI, memakai papan klip dan dikte terbaru untuk memilih homofon dan nama diri yang tepat (teks papan klip ikut dikirim ke AI)",
+  "general.llmContextDesc": "Saat merapikan dengan AI, memakai riwayat papan klip (5 salinan terakhir) dan dikte terbaru untuk memilih homofon dan nama diri yang tepat (hanya disimpan di memori; teks dikirim ke AI)",
   "hotkey.press": "Tekan tombol…",
   "hotkey.invalid": "Tombol ini tidak dapat digunakan",
   "hotkey.needModifier": "Kombinasikan dengan tombol pengubah (Ctrl/Alt/Shift)",

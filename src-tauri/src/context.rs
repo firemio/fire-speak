@@ -1,26 +1,44 @@
-//! Context hints for LLM polishing (v0.11): the user's clipboard and the
-//! last few dictations. The model uses them only to choose between
+//! Context hints for LLM polishing (v0.11): the user's clipboard history and
+//! the last few dictations. The model uses them only to choose between
 //! candidate words — homophones (例: 機会/機械, 公演/講演), proper nouns,
 //! spelling conventions — never as content to output.
+//!
+//! Clipboard history (v0.11.1): a watcher thread records each new clipboard
+//! text while the app runs. It lives in memory only (never written to disk)
+//! and is cleared when `llm_context` is turned off. Our own paste / restore
+//! is not recorded (`mark_own_write`).
 
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
+use tauri::Manager;
 
 /// Recent dictations older than this are about something else.
 const RECENT_WINDOW: Duration = Duration::from_secs(30 * 60);
 const RECENT_MAX: usize = 3;
 const RECENT_MAX_CHARS: usize = 600;
-const CLIPBOARD_MAX_CHARS: usize = 1500;
+
+const CLIP_WINDOW: Duration = Duration::from_secs(60 * 60);
+const CLIP_MAX: usize = 5;
+const CLIP_ITEM_MAX_CHARS: usize = 800;
+/// Total budget across clipboard items (newest kept first).
+const CLIP_TOTAL_CHARS: usize = 3000;
+/// Entries kept in memory (more than CLIP_MAX so filtering still leaves enough).
+const CLIP_KEEP: usize = 10;
+const POLL: Duration = Duration::from_millis(1000);
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Context {
-    pub clipboard: Option<String>,
+    /// Oldest first.
+    pub clipboard: Vec<String>,
     /// Oldest first.
     pub recent: Vec<String>,
 }
 
 impl Context {
     pub fn is_empty(&self) -> bool {
-        self.clipboard.is_none() && self.recent.is_empty()
+        self.clipboard.is_empty() && self.recent.is_empty()
     }
 
     /// System-prompt section, or "" when there is nothing to add.
@@ -29,31 +47,129 @@ impl Context {
             return String::new();
         }
         let mut s = String::from(
-            "\n\n# 参考文脈\n以下はユーザーが直前に扱っていたテキストです。口述テキストの語の選択(同音異義語・固有名詞・専門用語・表記ゆれ)を判断する手がかりにだけ使ってください。文脈と話題が合う語を優先し、関係が無ければ無視してください。参考文脈の内容を出力に含めたり、口述内容を補ったりしないでください。",
+            "\n\n# 参考文脈\n以下はユーザーが直前に扱っていたテキストです(古い順)。口述テキストの語の選択(同音異義語・固有名詞・専門用語・表記ゆれ)を判断する手がかりにだけ使ってください。文脈と話題が合う語を優先し、関係が無ければ無視してください。参考文脈の内容を出力に含めたり、口述内容を補ったりしないでください。",
         );
         if !self.recent.is_empty() {
             s.push_str("\n\n<recent_dictations>");
             for r in &self.recent {
-                s.push_str("\n- ");
+                s.push_str("\n<item>");
                 s.push_str(r);
+                s.push_str("</item>");
             }
             s.push_str("\n</recent_dictations>");
         }
-        if let Some(c) = &self.clipboard {
-            s.push_str("\n\n<clipboard>\n");
-            s.push_str(c);
-            s.push_str("\n</clipboard>");
+        if !self.clipboard.is_empty() {
+            s.push_str("\n\n<clipboard_history>");
+            for c in &self.clipboard {
+                s.push_str("\n<item>");
+                s.push_str(c);
+                s.push_str("</item>");
+            }
+            s.push_str("\n</clipboard_history>");
         }
         s
     }
 }
 
-/// Gather context. `clipboard` is the raw clipboard text (read by the caller
-/// before our own paste overwrites it).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClipEntry {
+    /// unix ms of when the text was first seen
+    pub timestamp: u64,
+    pub text: String,
+}
+
+/// Newest first.
+static CLIP_HISTORY: Mutex<VecDeque<ClipEntry>> = Mutex::new(VecDeque::new());
+static OWN_WRITE: AtomicBool = AtomicBool::new(false);
+
+/// Called after we set / restore the clipboard ourselves: the watcher adopts
+/// the current content as "seen" without recording it.
+pub fn mark_own_write() {
+    OWN_WRITE.store(true, Ordering::SeqCst);
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Insert `text` as the newest entry (an existing identical entry moves up).
+fn record(list: &mut VecDeque<ClipEntry>, text: &str, now: u64) {
+    let text = text.trim();
+    if text.is_empty() || looks_secret(text) {
+        return;
+    }
+    list.retain(|e| e.text != text);
+    list.push_front(ClipEntry { timestamp: now, text: text.to_string() });
+    list.truncate(CLIP_KEEP);
+}
+
+/// Start the clipboard watcher (once, at startup).
+pub fn start_watcher(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let mut last: Option<String> = None;
+        #[cfg(windows)]
+        let mut last_seq: u32 = 0;
+        loop {
+            std::thread::sleep(POLL);
+            let enabled = app
+                .state::<crate::AppState>()
+                .settings
+                .lock()
+                .map(|s| s.llm_context)
+                .unwrap_or(false);
+            if !enabled {
+                if let Ok(mut h) = CLIP_HISTORY.lock() {
+                    h.clear();
+                }
+                last = None;
+                continue;
+            }
+            // Cheap change check: skip opening the clipboard when nothing changed.
+            #[cfg(windows)]
+            {
+                let seq = unsafe {
+                    windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber()
+                };
+                if seq == last_seq && !OWN_WRITE.load(Ordering::SeqCst) {
+                    continue;
+                }
+                last_seq = seq;
+            }
+            let current = crate::paste::read_text();
+            if OWN_WRITE.swap(false, Ordering::SeqCst) {
+                last = current;
+                continue;
+            }
+            if current.is_some() && current != last {
+                if let (Some(t), Ok(mut h)) = (current.as_deref(), CLIP_HISTORY.lock()) {
+                    record(&mut h, t, now_ms());
+                }
+            }
+            last = current;
+        }
+    });
+}
+
+/// Snapshot of the clipboard history, newest first, with `current` (read just
+/// now, before our paste) merged in so a copy made <1 s ago is not missed.
+pub fn clipboard_snapshot(current: Option<String>) -> Vec<ClipEntry> {
+    let mut list = CLIP_HISTORY.lock().map(|h| h.clone()).unwrap_or_default();
+    if let Some(c) = current {
+        if !list.iter().any(|e| e.text == c.trim()) {
+            record(&mut list, &c, now_ms());
+        }
+    }
+    list.into()
+}
+
+/// Build the context. `clipboard` is newest first (see `clipboard_snapshot`).
 pub fn build(
     history: &[crate::history::HistoryEntry],
     now_ms: u64,
-    clipboard: Option<String>,
+    clipboard: &[ClipEntry],
 ) -> Context {
     let window_ms = RECENT_WINDOW.as_millis() as u64;
     let mut recent: Vec<String> = history
@@ -66,14 +182,28 @@ pub fn build(
         .collect();
     recent.reverse();
 
-    let clipboard = clipboard
-        .map(|c| c.trim().to_string())
-        .filter(|c| !c.is_empty() && !looks_secret(c))
-        // With restore off, the clipboard still holds our last output.
-        .filter(|c| !history.first().is_some_and(|h| h.final_text.trim() == c))
-        .map(|c| tail(&c, CLIPBOARD_MAX_CHARS));
+    // Our own outputs can still land in the clipboard (copy-only mode,
+    // restore off); they are already in `recent` or stale.
+    let own: Vec<&str> = history.iter().take(20).map(|h| h.final_text.trim()).collect();
+    let clip_window_ms = CLIP_WINDOW.as_millis() as u64;
+    let mut budget = CLIP_TOTAL_CHARS;
+    let mut clip: Vec<String> = Vec::new();
+    for e in clipboard
+        .iter()
+        .filter(|e| now_ms.saturating_sub(e.timestamp) <= clip_window_ms)
+        .filter(|e| !e.text.trim().is_empty() && !looks_secret(e.text.trim()))
+        .filter(|e| !own.contains(&e.text.trim()))
+    {
+        if clip.len() >= CLIP_MAX || budget == 0 {
+            break;
+        }
+        let t = tail(e.text.trim(), CLIP_ITEM_MAX_CHARS.min(budget));
+        budget -= t.chars().count();
+        clip.push(t);
+    }
+    clip.reverse();
 
-    Context { clipboard, recent }
+    Context { clipboard: clip, recent }
 }
 
 /// A single whitespace-free ASCII run mixing letters and digits/symbols is
@@ -112,6 +242,10 @@ mod tests {
         }
     }
 
+    fn clip(ts: u64, text: &str) -> ClipEntry {
+        ClipEntry { timestamp: ts, text: text.into() }
+    }
+
     #[test]
     fn recent_window_and_order() {
         let now = 100 * 60 * 1000;
@@ -121,34 +255,58 @@ mod tests {
             entry(now - 3_000, "a"),
             entry(now - 4_000, "too many"),
         ];
-        assert_eq!(build(&h, now, None).recent, vec!["a", "b", "c"]);
+        assert_eq!(build(&h, now, &[]).recent, vec!["a", "b", "c"]);
         let old = vec![entry(now - 31 * 60 * 1000, "stale")];
-        assert!(build(&old, now, None).recent.is_empty());
+        assert!(build(&old, now, &[]).recent.is_empty());
     }
 
     #[test]
-    fn clipboard_filters() {
-        let now = 1_000_000;
+    fn clipboard_history_filters_and_order() {
+        let now = 200 * 60 * 1000;
         let h = vec![entry(now, "前回の出力")];
-        assert_eq!(build(&h, now, Some("前回の出力".into())).clipboard, None);
-        assert_eq!(build(&[], now, Some("sk-ant-api03-AbCd1234xyz".into())).clipboard, None);
-        assert_eq!(build(&[], now, Some("   ".into())).clipboard, None);
+        let c = vec![
+            clip(now - 1_000, "前回の出力"),
+            clip(now - 2_000, "講演会の資料"),
+            clip(now - 3_000, "sk-ant-api03-AbCd1234xyz"),
+            clip(now - 4_000, "https://example.com/path"),
+            clip(now - 61 * 60 * 1000, "古すぎる"),
+        ];
         assert_eq!(
-            build(&[], now, Some("https://example.com/path".into())).clipboard.as_deref(),
-            Some("https://example.com/path")
+            build(&h, now, &c).clipboard,
+            vec!["https://example.com/path", "講演会の資料"]
         );
-        assert_eq!(
-            build(&[], now, Some("講演会の資料".into())).clipboard.as_deref(),
-            Some("講演会の資料")
-        );
+    }
+
+    #[test]
+    fn clipboard_limits() {
+        let now = 200 * 60 * 1000;
+        let c: Vec<ClipEntry> = (0..8).map(|i| clip(now - i, &format!("item{i} あ"))).collect();
+        let got = build(&[], now, &c).clipboard;
+        assert_eq!(got.len(), CLIP_MAX);
+        assert_eq!(got.last().map(String::as_str), Some("item0 あ"));
+        let big: Vec<ClipEntry> = (0..5).map(|i| clip(now - i, &"字".repeat(1000))).collect();
+        let total: usize = build(&[], now, &big).clipboard.iter().map(|s| s.chars().count()).sum();
+        assert_eq!(total, CLIP_TOTAL_CHARS);
+    }
+
+    #[test]
+    fn record_dedupes_and_skips_secrets() {
+        let mut l = VecDeque::new();
+        record(&mut l, "a b", 1);
+        record(&mut l, "c d", 2);
+        record(&mut l, "a b", 3);
+        record(&mut l, "hunter2hunter2", 4);
+        record(&mut l, "  ", 5);
+        let texts: Vec<&str> = l.iter().map(|e| e.text.as_str()).collect();
+        assert_eq!(texts, vec!["a b", "c d"]);
     }
 
     #[test]
     fn prompt_section() {
         assert_eq!(Context::default().prompt_section(), "");
-        let c = Context { clipboard: Some("X".into()), recent: vec!["Y".into()] };
+        let c = Context { clipboard: vec!["X".into(), "Z".into()], recent: vec!["Y".into()] };
         let s = c.prompt_section();
-        assert!(s.contains("<clipboard>\nX\n</clipboard>"));
-        assert!(s.contains("- Y"));
+        assert!(s.contains("<clipboard_history>\n<item>X</item>\n<item>Z</item>\n</clipboard_history>"));
+        assert!(s.contains("<item>Y</item>"));
     }
 }

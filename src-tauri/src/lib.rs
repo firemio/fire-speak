@@ -633,6 +633,7 @@ pub fn run() {
             if let Err(e) = apply_autostart(&handle, loaded.autostart) {
                 eprintln!("autostart sync failed: {e}");
             }
+            context::start_watcher(handle.clone());
             build_tray(&handle, &loaded)?;
             setup::on_startup(&handle);
 

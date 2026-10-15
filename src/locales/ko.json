@@ -162,7 +162,7 @@
   "general.liveCaption": "실시간 자막",
   "general.liveCaptionDesc": "녹음 중 인식 중인 텍스트를 팝업에 표시합니다 (클라우드 인식 시 요청 수가 늘어납니다)",
   "general.llmContext": "문맥으로 단어 선택",
-  "general.llmContextDesc": "AI 다듬기 시 클립보드와 최근 음성 입력을 참고해 동음이의어와 고유명사를 고릅니다 (클립보드 내용도 AI로 전송됩니다)",
+  "general.llmContextDesc": "AI 다듬기 시 클립보드 기록(최근 5개)과 최근 음성 입력을 참고해 동음이의어와 고유명사를 고릅니다 (기록은 메모리에만 보관되며 내용은 AI로 전송됩니다)",
   "hotkey.press": "키를 누르세요…",
   "hotkey.invalid": "이 키는 사용할 수 없습니다",
   "hotkey.needModifier": "보조 키(Ctrl/Alt/Shift)와 함께 사용하세요",
