@@ -1172,7 +1172,7 @@ pub fn prewarm(app: &AppHandle) {
         let settings = app.state::<crate::AppState>().settings.lock().unwrap().clone();
         if effective_accel(&settings) != "cpu" {
             if let Ok(wav) = crate::audio::wav_bytes(&[0i16; 16000]) {
-                let _ = crate::stt::transcribe_local(&app, &settings, wav).await;
+                let _ = crate::stt::transcribe_local(&app, &settings, wav, None).await;
             }
         }
     });

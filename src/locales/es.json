@@ -162,7 +162,7 @@
   "general.liveCaption": "Subtítulos en tiempo real",
   "general.liveCaptionDesc": "Muestra la transcripción parcial en la ventana emergente durante la grabación (el reconocimiento en la nube envía más solicitudes)",
   "general.llmContext": "Elegir palabras por contexto",
-  "general.llmContextDesc": "Al pulir con IA, usa el historial del portapapeles (últimas 5 copias) y los dictados recientes para elegir homófonos y nombres propios correctos (solo se guarda en memoria; el texto se envía a la IA)",
+  "general.llmContextDesc": "El reconocimiento de voz y el pulido con IA usan el historial del portapapeles (últimas 5 copias) y los dictados recientes para elegir homófonos y nombres propios correctos (solo en memoria; los términos van al reconocedor y el texto a la IA)",
   "hotkey.press": "Presiona las teclas…",
   "hotkey.invalid": "Esta tecla no se puede usar",
   "hotkey.needModifier": "Combínala con una tecla modificadora (Ctrl/Alt/Shift)",

@@ -551,7 +551,8 @@ fn spawn_live_captions(app: AppHandle, gen: u64) {
                     continue;
                 }
             };
-            let text = match crate::stt::transcribe(&app, &settings, wav).await {
+            // No prompt here: short caption windows are where whisper recites it.
+            let text = match crate::stt::transcribe(&app, &settings, wav, None).await {
                 Ok(t) => {
                     failures = 0;
                     if t.no_speech {
@@ -672,10 +673,39 @@ async fn run_pipeline(
     }
     let wav = crate::audio::wav_bytes(&samples)?;
 
-    // 2. STT
-    let transcript = crate::stt::transcribe(&app, &settings, wav).await?;
+    // Context (v0.11): clipboard history, read before step 4 overwrites the
+    // clipboard with our output. Feeds both the STT prompt and the LLM.
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let clipboard = if settings.llm_context {
+        let current = tokio::task::spawn_blocking(crate::paste::read_text)
+            .await
+            .ok()
+            .flatten();
+        crate::context::clipboard_snapshot(current)
+    } else {
+        Vec::new()
+    };
+    let stt_hint = crate::context::stt_hint(&clipboard, now_ms, &settings.language);
+
+    // 2. STT (with the clipboard vocabulary as whisper's prompt)
+    let prompt = stt_hint.as_ref().map(|h| h.prompt.as_str());
+    let mut transcript = crate::stt::transcribe(&app, &settings, wav.clone(), prompt).await?;
     if is_canceled(&app, gen) {
         return Ok(());
+    }
+    if let Some(h) = &stt_hint {
+        if crate::context::is_prompt_echo(&transcript.text, h) {
+            // Whisper recited the prompt instead of transcribing: once more
+            // without it, and let the usual checks judge that result.
+            eprintln!("stt: prompt echo detected; retrying without prompt");
+            transcript = crate::stt::transcribe(&app, &settings, wav, None).await?;
+            if is_canceled(&app, gen) {
+                return Ok(());
+            }
+        }
     }
     let raw_text = transcript.text.trim().to_string();
     if raw_text.is_empty() || transcript.no_speech || is_hallucination(&raw_text) {
@@ -723,16 +753,6 @@ async fn run_pipeline(
                 }
                 emit_status(&app, "polishing", None);
                 let context = if settings.llm_context {
-                    // Read before step 4 overwrites the clipboard with our output.
-                    let current = tokio::task::spawn_blocking(crate::paste::read_text)
-                        .await
-                        .ok()
-                        .flatten();
-                    let clipboard = crate::context::clipboard_snapshot(current);
-                    let now_ms = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis() as u64)
-                        .unwrap_or(0);
                     crate::context::build(&crate::history::load(&app), now_ms, &clipboard)
                 } else {
                     crate::context::Context::default()

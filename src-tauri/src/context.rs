@@ -206,6 +206,149 @@ pub fn build(
     Context { clipboard: clip, recent }
 }
 
+/// Whisper keeps only the last ~224 tokens of a prompt, and a kanji can cost
+/// 2-3 tokens; stay well inside that.
+const STT_PROMPT_MAX_CHARS: usize = 100;
+const STT_PROMPT_MAX_TERMS: usize = 30;
+/// A transcript made of at least this many prompt terms and nothing else is
+/// whisper reciting its prompt, not the user.
+const ECHO_MIN_TERMS: usize = 3;
+
+/// Vocabulary hint for the STT `prompt` (v0.11): terms from the clipboard.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SttHint {
+    pub prompt: String,
+    pub terms: Vec<String>,
+}
+
+const ASCII_STOPWORDS: &[&str] = &[
+    "the", "and", "for", "with", "this", "that", "from", "are", "was", "you", "your", "not",
+    "but", "have", "has", "will", "can", "all", "its", "our", "out", "into", "then", "than",
+];
+
+fn is_term_cjk(c: char) -> bool {
+    matches!(c as u32,
+        0x30A1..=0x30FA | 0x30FC   // katakana + ー (・ U+30FB separates)
+        | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF
+        | 0x3005)                  // 々
+}
+
+fn is_term_ascii(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+' | '#')
+}
+
+/// Proper-noun-ish terms of one text, in order: kanji/katakana runs of 2+
+/// chars and ASCII words of 2+ chars with a letter (`Next.js`, `fire-speak`).
+/// Hiragana is particles/okurigana, so it only separates. URLs, mail
+/// addresses and secret-shaped tokens are dropped (Japanese text has no
+/// spaces, so this is done per ASCII run, not per whitespace piece).
+fn extract_terms(text: &str) -> Vec<String> {
+    fn flush_cjk(cur: &mut String, out: &mut Vec<String>) {
+        if cur.chars().count() >= 2 {
+            out.push(cur.clone());
+        }
+        cur.clear();
+    }
+    fn flush_ascii(cur: &mut String, out: &mut Vec<String>) {
+        if !(cur.contains("://") || cur.contains('@') || looks_secret(cur)) {
+            for w in cur.split(|c: char| !is_term_ascii(c)) {
+                let w = w.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '#' && c != '+');
+                if w.len() >= 2
+                    && w.chars().any(|c| c.is_ascii_alphabetic())
+                    && !ASCII_STOPWORDS.contains(&w.to_ascii_lowercase().as_str())
+                    && !looks_secret(w)
+                {
+                    out.push(w.to_string());
+                }
+            }
+        }
+        cur.clear();
+    }
+    let mut out = Vec::new();
+    let (mut cjk, mut ascii) = (String::new(), String::new());
+    for c in text.chars() {
+        if is_term_cjk(c) {
+            flush_ascii(&mut ascii, &mut out);
+            cjk.push(c);
+        } else if c.is_ascii_graphic() {
+            flush_cjk(&mut cjk, &mut out);
+            ascii.push(c);
+        } else {
+            flush_cjk(&mut cjk, &mut out);
+            flush_ascii(&mut ascii, &mut out);
+        }
+    }
+    flush_cjk(&mut cjk, &mut out);
+    flush_ascii(&mut ascii, &mut out);
+    out
+}
+
+/// Build the STT prompt from the clipboard history (newest first). Newest
+/// terms go LAST: whisper truncates a long prompt from the front.
+pub fn stt_hint(clipboard: &[ClipEntry], now_ms: u64, language: &str) -> Option<SttHint> {
+    let window_ms = CLIP_WINDOW.as_millis() as u64;
+    // One block per clipboard entry, newest entry first.
+    let mut blocks: Vec<Vec<String>> = Vec::new();
+    let (mut count, mut chars) = (0, 0);
+    'outer: for e in clipboard
+        .iter()
+        .filter(|e| now_ms.saturating_sub(e.timestamp) <= window_ms)
+    {
+        let mut block = Vec::new();
+        for t in extract_terms(&e.text) {
+            if block.contains(&t) || blocks.iter().flatten().any(|x| x == &t) {
+                continue;
+            }
+            let n = t.chars().count() + 1;
+            if chars + n > STT_PROMPT_MAX_CHARS || count >= STT_PROMPT_MAX_TERMS {
+                blocks.push(block);
+                break 'outer;
+            }
+            chars += n;
+            count += 1;
+            block.push(t);
+        }
+        blocks.push(block);
+    }
+    let terms: Vec<String> = blocks.into_iter().rev().flatten().collect();
+    if terms.is_empty() {
+        return None;
+    }
+    // The prompt's punctuation style leaks into the transcript.
+    let cjk = matches!(language, "ja" | "zh");
+    let prompt = if cjk { format!("{}。", terms.join("、")) } else { format!("{}.", terms.join(", ")) };
+    Some(SttHint { prompt, terms })
+}
+
+fn norm(s: &str) -> String {
+    s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+}
+
+/// Whisper reciting the prompt instead of transcribing: the transcript is the
+/// whole prompt, or nothing but `ECHO_MIN_TERMS`+ prompt terms. A dictation of
+/// one or two of the terms ("講演会") stays valid.
+pub fn is_prompt_echo(text: &str, hint: &SttHint) -> bool {
+    let mut rest = norm(text);
+    if rest.is_empty() {
+        return false;
+    }
+    if rest == norm(&hint.prompt) {
+        return true;
+    }
+    let mut terms: Vec<String> = hint.terms.iter().map(|t| norm(t)).filter(|t| !t.is_empty()).collect();
+    // Longest first so "東京タワー" is removed before "東京".
+    terms.sort_by_key(|t| std::cmp::Reverse(t.chars().count()));
+    let mut hits = 0;
+    for t in &terms {
+        let n = rest.matches(t.as_str()).count();
+        if n > 0 {
+            hits += n;
+            rest = rest.replace(t.as_str(), "");
+        }
+    }
+    rest.is_empty() && hits >= ECHO_MIN_TERMS
+}
+
 /// A single whitespace-free ASCII run mixing letters and digits/symbols is
 /// most likely a password, API key or token: never forward it to an LLM.
 fn looks_secret(s: &str) -> bool {
@@ -299,6 +442,46 @@ mod tests {
         record(&mut l, "  ", 5);
         let texts: Vec<&str> = l.iter().map(|e| e.text.as_str()).collect();
         assert_eq!(texts, vec!["a b", "c d"]);
+    }
+
+    #[test]
+    fn terms_extraction() {
+        assert_eq!(
+            extract_terms("講演会の資料をfire-speakとNext.jsで作る。https://x.com/a me@x.jp"),
+            vec!["講演会", "資料", "fire-speak", "Next.js"]
+        );
+        assert_eq!(extract_terms("東京タワー・スカイツリー"), vec!["東京タワー", "スカイツリー"]);
+        assert_eq!(extract_terms("the API and C# 2024 sk-ant-api03-AbCd1234xyz"), vec!["API", "C#"]);
+    }
+
+    #[test]
+    fn stt_hint_order_and_limits() {
+        let now = 200 * 60 * 1000;
+        let c = vec![clip(now - 1_000, "新しい用語 Tauri"), clip(now - 2_000, "古い単語 Whisper Tauri")];
+        let h = stt_hint(&c, now, "ja").unwrap();
+        // older entry first, newest entry last (whisper keeps the tail), deduped
+        assert_eq!(h.terms, vec!["単語", "Whisper", "用語", "Tauri"]);
+        assert_eq!(h.prompt, "単語、Whisper、用語、Tauri。");
+        assert!(stt_hint(&[clip(now - 61 * 60 * 1000, "古すぎる用語")], now, "ja").is_none());
+        let many: Vec<ClipEntry> = (0..50).map(|i| clip(now - i, &format!("用語{i}番目 word{i}"))).collect();
+        let h = stt_hint(&many, now, "en").unwrap();
+        assert!(h.terms.iter().map(|t| t.chars().count() + 1).sum::<usize>() <= STT_PROMPT_MAX_CHARS);
+        assert!(h.prompt.contains(", "));
+        // the newest entry's terms survive the cap
+        assert!(h.prompt.ends_with("word0."));
+    }
+
+    #[test]
+    fn prompt_echo() {
+        let hint = SttHint {
+            prompt: "講演会、Tauri、Whisper、東京タワー。".into(),
+            terms: vec!["講演会".into(), "Tauri".into(), "Whisper".into(), "東京タワー".into()],
+        };
+        assert!(is_prompt_echo("講演会、Tauri、Whisper、東京タワー。", &hint));
+        assert!(is_prompt_echo("Tauri Whisper 講演会", &hint));
+        assert!(!is_prompt_echo("講演会", &hint));
+        assert!(!is_prompt_echo("Tauri と Whisper", &hint));
+        assert!(!is_prompt_echo("明日の講演会でTauriとWhisperを紹介します", &hint));
     }
 
     #[test]

@@ -162,7 +162,7 @@
   "general.liveCaption": "Live-Untertitel",
   "general.liveCaptionDesc": "Zeigt die vorläufige Transkription während der Aufnahme im Popup an (Cloud-Erkennung sendet zusätzliche Anfragen)",
   "general.llmContext": "Wortwahl nach Kontext",
-  "general.llmContextDesc": "Nutzt beim KI-Überarbeiten den Verlauf der Zwischenablage (letzte 5 Kopien) und die letzten Diktate, um Homophone und Eigennamen richtig zu wählen (nur im Arbeitsspeicher; der Text wird an die KI gesendet)",
+  "general.llmContextDesc": "Spracherkennung und KI-Überarbeitung nutzen den Verlauf der Zwischenablage (letzte 5 Kopien) und die letzten Diktate, um Homophone und Eigennamen richtig zu wählen (nur im Arbeitsspeicher; Begriffe gehen an die Erkennung, Text an die KI)",
   "hotkey.press": "Tasten drücken…",
   "hotkey.invalid": "Diese Taste kann nicht verwendet werden",
   "hotkey.needModifier": "Mit einer Zusatztaste kombinieren (Ctrl/Alt/Shift)",

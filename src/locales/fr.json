@@ -162,7 +162,7 @@
   "general.liveCaption": "Sous-titres en direct",
   "general.liveCaptionDesc": "Affiche la transcription partielle dans la fenêtre pendant l'enregistrement (la reconnaissance cloud envoie des requêtes supplémentaires)",
   "general.llmContext": "Choisir les mots selon le contexte",
-  "general.llmContextDesc": "Lors de la mise en forme par IA, utilise l'historique du presse-papiers (5 dernières copies) et les dictées récentes pour choisir les bons homophones et noms propres (conservé en mémoire uniquement ; le texte est envoyé à l'IA)",
+  "general.llmContextDesc": "La reconnaissance vocale et la mise en forme par IA utilisent l'historique du presse-papiers (5 dernières copies) et les dictées récentes pour choisir les bons homophones et noms propres (en mémoire uniquement ; les termes vont au moteur de reconnaissance, le texte à l'IA)",
   "hotkey.press": "Appuyez sur les touches…",
   "hotkey.invalid": "Cette touche ne peut pas être utilisée",
   "hotkey.needModifier": "Combinez avec une touche modificatrice (Ctrl/Alt/Shift)",

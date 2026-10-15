@@ -39,14 +39,18 @@ fn client() -> Result<reqwest::Client, String> {
 }
 
 /// Transcribe a 16kHz mono WAV according to the configured engine.
+/// `prompt` is whisper's initial prompt: a vocabulary hint that biases the
+/// spelling of names and terms (v0.11). Both whisper-server `/inference` and
+/// OpenAI-compatible `/audio/transcriptions` take it as the `prompt` field.
 pub async fn transcribe(
     app: &AppHandle,
     settings: &Settings,
     wav: Vec<u8>,
+    prompt: Option<&str>,
 ) -> Result<Transcript, String> {
     match settings.stt.engine.as_str() {
-        "cloud" => transcribe_cloud(settings, wav).await,
-        _ => transcribe_local(app, settings, wav).await,
+        "cloud" => transcribe_cloud(settings, wav, prompt).await,
+        _ => transcribe_local(app, settings, wav, prompt).await,
     }
 }
 
@@ -54,6 +58,7 @@ pub async fn transcribe_local(
     app: &AppHandle,
     settings: &Settings,
     wav: Vec<u8>,
+    prompt: Option<&str>,
 ) -> Result<Transcript, String> {
     let port = crate::setup::ensure_server(app.clone()).await?;
 
@@ -71,6 +76,9 @@ pub async fn transcribe_local(
         .text("temperature", "0.0");
     if settings.language != "auto" && !settings.language.trim().is_empty() {
         form = form.text("language", settings.language.clone());
+    }
+    if let Some(p) = prompt.filter(|p| !p.trim().is_empty()) {
+        form = form.text("prompt", p.to_string());
     }
 
     let resp = client()?
@@ -94,7 +102,11 @@ pub async fn transcribe_local(
     Ok(parse_transcript(&v))
 }
 
-pub async fn transcribe_cloud(settings: &Settings, wav: Vec<u8>) -> Result<Transcript, String> {
+pub async fn transcribe_cloud(
+    settings: &Settings,
+    wav: Vec<u8>,
+    prompt: Option<&str>,
+) -> Result<Transcript, String> {
     let cloud = &settings.stt.cloud;
     if cloud.api_key.trim().is_empty() {
         return Err("ERR_STT_NO_KEY".to_string());
@@ -116,6 +128,9 @@ pub async fn transcribe_cloud(settings: &Settings, wav: Vec<u8>) -> Result<Trans
         .text("model", cloud.model.clone());
     if settings.language != "auto" && !settings.language.trim().is_empty() {
         form = form.text("language", settings.language.clone());
+    }
+    if let Some(p) = prompt.filter(|p| !p.trim().is_empty()) {
+        form = form.text("prompt", p.to_string());
     }
 
     let resp = client()?

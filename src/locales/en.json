@@ -162,7 +162,7 @@
   "general.liveCaption": "Live captions",
   "general.liveCaptionDesc": "Shows the partial transcription in the popup while recording (cloud STT sends extra requests)",
   "general.llmContext": "Use context for word choice",
-  "general.llmContextDesc": "When polishing with AI, uses your clipboard history (last 5 copies) and recent dictations to pick the right homophones and proper nouns (kept in memory only; the text is sent to the AI)",
+  "general.llmContextDesc": "Speech recognition and AI polishing use your clipboard history (last 5 copies) and recent dictations to pick the right homophones and proper nouns (kept in memory only; terms go to the recognizer, text to the AI)",
   "hotkey.press": "Press keys…",
   "hotkey.invalid": "This key cannot be used",
   "hotkey.needModifier": "Combine with a modifier key (Ctrl/Alt/Shift)",

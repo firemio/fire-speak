@@ -162,7 +162,7 @@
   "general.liveCaption": "实时字幕",
   "general.liveCaptionDesc": "录音时在弹窗中显示识别中的文字（云端识别会增加请求次数）",
   "general.llmContext": "根据上下文选词",
-  "general.llmContextDesc": "AI 润色时参考剪贴板历史（最近 5 条）和最近的语音输入，选择正确的同音词和专有名词（历史仅保存在内存中，内容会发送给 AI）",
+  "general.llmContextDesc": "语音识别和 AI 润色时参考剪贴板历史（最近 5 条）和最近的语音输入，选择正确的同音词和专有名词（历史仅保存在内存中；术语发送给识别引擎，内容发送给 AI）",
   "hotkey.press": "请按下按键…",
   "hotkey.invalid": "此按键不可用",
   "hotkey.needModifier": "请与修饰键（Ctrl/Alt/Shift）组合使用",
