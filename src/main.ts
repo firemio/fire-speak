@@ -386,6 +386,23 @@ interface OnboardStep {
 
 /** Steps of the one-click setup for the current machine, or null if the local engine is not in use. */
 function onboardSteps(s: SetupStatus): OnboardStep[] | null {
+  if (settings?.stt.engine === "qwen") {
+    const id = settings.stt.qwen.model;
+    return [
+      {
+        key: downloadKey("qwen-server", "llama-server"),
+        label: t("onboard.stepServer", "llama.cpp"),
+        sizeMb: LLAMA_SERVER_MB,
+        done: s.qwen.server_installed,
+      },
+      {
+        key: downloadKey("qwen-model", id),
+        label: t("onboard.stepModel", qwenModelLabel(id)),
+        sizeMb: s.qwen.models.find((m) => m.id === id)?.size_mb ?? 0,
+        done: s.qwen.model_installed,
+      },
+    ];
+  }
   if (!settings || settings.stt.engine !== "local") return null;
   const accel = s.effective_accel;
   const customServer = settings.stt.local.server_path.trim() !== "";
@@ -572,6 +589,19 @@ function renderHomeStatus(): void {
         ),
       );
     }
+  } else if (settings.stt.engine === "qwen") {
+    const q = s.qwen;
+    const device = q.effective_accel === "gpu" ? "GPU (Vulkan)" : "CPU";
+    card.appendChild(
+      q.server_installed
+        ? statusRow("ok", t("sys.engine"), `llama.cpp · ${device} · ${t(q.server_running ? "sys.running" : "sys.idle")}`, "stt")
+        : statusRow("missing", t("sys.engine"), t("sys.notInstalled"), "stt"),
+    );
+    card.appendChild(
+      q.model_installed
+        ? statusRow("ok", t("sys.model"), qwenModelLabel(settings.stt.qwen.model), "stt")
+        : statusRow("missing", t("sys.model"), t("sys.notInstalled"), "stt"),
+    );
   } else {
     const cloud = settings.stt.cloud;
     let host = cloud.base_url;
@@ -620,7 +650,13 @@ function renderSttSection(): void {
     btn.classList.toggle("is-active", btn.dataset.engine === engine);
   }
   $("stt-local-panel").hidden = engine !== "local";
+  $("stt-qwen-panel").hidden = engine !== "qwen";
   $("stt-cloud-panel").hidden = engine !== "cloud";
+
+  input("in-qwen-port").value = String(settings.stt.qwen.server_port);
+  input("in-qwen-threads").value = String(settings.stt.qwen.threads);
+  ($("in-qwen-accel") as HTMLSelectElement).value = settings.stt.qwen.accel || "auto";
+  renderQwenPanel();
 
   input("in-local-port").value = String(settings.stt.local.server_port);
   input("in-local-threads").value = String(settings.stt.local.threads);
@@ -632,6 +668,142 @@ function renderSttSection(): void {
   input("in-cloud-model").value = settings.stt.cloud.model;
 
   renderSttModelList();
+}
+
+// ---------------------------------------------------------------------------
+// stt section: local Qwen3-ASR (llama-server) panel (v0.12)
+// ---------------------------------------------------------------------------
+
+/** Download size of the pinned llama.cpp Vulkan build (`qwen::LLAMA_TAG`). */
+const LLAMA_SERVER_MB = 30;
+
+function qwenModelLabel(id: string): string {
+  return `Qwen3-ASR ${id.toUpperCase()}`;
+}
+
+function renderQwenPanel(): void {
+  if (!settings) return;
+  const q = setupStatus?.qwen;
+  const badge = $("qwen-server-badge");
+  const installBtn = $("btn-qwen-install-server") as HTMLButtonElement;
+  badge.textContent = !q ? t("setup.checking") : q.server_installed ? t("common.installed") : t("common.notInstalled");
+  badge.className = `badge${q?.server_installed ? " ok" : ""}`;
+  $("qwen-server-path").textContent = q?.server_path || "—";
+  installBtn.textContent = q?.server_installed ? t("setup.reinstall") : t("setup.install");
+  installBtn.className = `btn btn-sm${q?.server_installed ? "" : " btn-primary"}`;
+  installBtn.disabled = !q || activeDownloads.has(downloadKey("qwen-server", "llama-server"));
+  if (setupStatus) {
+    const s = setupStatus;
+    const found = s.hw.gpus.length ? s.hw.gpus.join(" / ") : t("stt.noGpu");
+    const resolved = s.qwen.effective_accel === "gpu" ? "GPU (Vulkan)" : "CPU";
+    $("qwen-accel-hint").textContent = `${t("stt.accelDetected", found)} → ${resolved}`;
+  }
+
+  const host = $("qwen-model-list");
+  host.textContent = "";
+  if (!q) {
+    host.appendChild(el("div", "hint", t("stt.loadingModels")));
+    return;
+  }
+  for (const m of q.models) {
+    const key = downloadKey("qwen-model", m.id);
+    const wrap = el("div", "model-row-wrap");
+    const row = el("div", "model-row");
+    const opt = el("div", "model-option");
+    if (settings.stt.qwen.model === m.id) opt.classList.add("is-selected");
+    if (!m.installed) opt.classList.add("is-disabled");
+    opt.appendChild(el("span", "radio"));
+    opt.appendChild(el("span", "model-option-name", qwenModelLabel(m.id)));
+    opt.appendChild(
+      el("span", "model-option-meta", t(m.installed ? "stt.modelInstalledMeta" : "stt.modelNotInstalledMeta", m.size_mb)),
+    );
+    if (m.installed) {
+      opt.addEventListener("click", () => {
+        if (!settings) return;
+        settings.stt.qwen.model = m.id;
+        renderQwenPanel();
+        persistSettings()
+          .then(() => refreshSetupStatus())
+          .catch((e: unknown) => toast(errText(e), true));
+      });
+    }
+    row.appendChild(opt);
+    // verified model files are kept and skipped, so there is no re-download
+    if (!m.installed) {
+      const btn = el("button", "btn btn-sm btn-primary", t("setup.download")) as HTMLButtonElement;
+      btn.type = "button";
+      btn.disabled = activeDownloads.has(key);
+      btn.addEventListener("click", () => void startQwenModelDownload(m.id));
+      row.appendChild(btn);
+    }
+    wrap.appendChild(row);
+    wrap.appendChild(buildProgressEl(key));
+    host.appendChild(wrap);
+  }
+}
+
+async function startQwenServerDownload(): Promise<void> {
+  const key = downloadKey("qwen-server", "llama-server");
+  activeDownloads.set(key, { kind: "qwen-server", name: "llama-server", downloaded: 0, total: 0, done: false });
+  const wrap = $("qwen-server-progress");
+  wrap.dataset.downloadKey = key;
+  wrap.hidden = false;
+  wrap.classList.add("indeterminate");
+  ($("btn-qwen-install-server") as HTMLButtonElement).disabled = true;
+  try {
+    await invoke("qwen_download_server");
+  } catch (e: unknown) {
+    // If the key is gone, a download-progress error event already toasted it.
+    const stillPending = activeDownloads.has(key);
+    activeDownloads.delete(key);
+    wrap.hidden = true;
+    ($("btn-qwen-install-server") as HTMLButtonElement).disabled = false;
+    if (stillPending) toast(t("setup.serverInstallFailed", errText(e)), true);
+  }
+}
+
+async function startQwenModelDownload(id: string): Promise<void> {
+  const key = downloadKey("qwen-model", id);
+  activeDownloads.set(key, { kind: "qwen-model", name: id, downloaded: 0, total: 0, done: false });
+  renderQwenPanel();
+  try {
+    await invoke("qwen_download_model", { model: id });
+  } catch (e: unknown) {
+    const stillPending = activeDownloads.has(key);
+    activeDownloads.delete(key);
+    renderQwenPanel();
+    if (stillPending) toast(t("setup.modelDownloadFailed", qwenModelLabel(id), errText(e)), true);
+  }
+}
+
+function wireQwenPanel(): void {
+  $("btn-qwen-install-server").addEventListener("click", () => void startQwenServerDownload());
+  $("in-qwen-accel").addEventListener("change", async () => {
+    if (!settings) return;
+    settings.stt.qwen.accel = ($("in-qwen-accel") as HTMLSelectElement).value;
+    try {
+      await persistSettings();
+    } catch (e: unknown) {
+      toast(errText(e), true);
+    }
+    await refreshSetupStatus();
+  });
+  input("in-qwen-port").addEventListener("input", () => {
+    if (!settings) return;
+    const v = parseInt(input("in-qwen-port").value, 10);
+    if (Number.isFinite(v) && v > 0 && v < 65536) {
+      settings.stt.qwen.server_port = v;
+      scheduleSave();
+    }
+  });
+  input("in-qwen-threads").addEventListener("input", () => {
+    if (!settings) return;
+    const v = parseInt(input("in-qwen-threads").value, 10);
+    if (Number.isFinite(v) && v > 0) {
+      settings.stt.qwen.threads = v;
+      scheduleSave();
+    }
+  });
 }
 
 /** Build the managed model path from setup_status.models_dir. */
@@ -779,6 +951,7 @@ function wireSttSection(): void {
   const STT_PRESETS: Record<string, { base_url: string; model: string }> = {
     openai: { base_url: "https://api.openai.com/v1", model: "whisper-1" },
     groq: { base_url: "https://api.groq.com/openai/v1", model: "whisper-large-v3-turbo" },
+    "openrouter-qwen": { base_url: "https://openrouter.ai/api/v1", model: "qwen/qwen3-asr-0.6b" },
   };
   document.querySelectorAll<HTMLButtonElement>("[data-stt-preset]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
@@ -1773,7 +1946,13 @@ async function startModelDownload(name: string): Promise<void> {
 }
 
 function onDownloadProgress(p: DownloadProgressPayload): void {
-  const key = downloadKey(p.kind, p.kind === "server" ? "whisper-server" : p.name);
+  // server events carry the asset file name; their key is fixed
+  const name = p.kind === "server" ? "whisper-server" : p.kind === "qwen-server" ? "llama-server" : p.name;
+  const key = downloadKey(p.kind, name);
+  if (p.kind === "qwen-server" || p.kind === "qwen-model") {
+    onQwenDownloadProgress(p, key);
+    return;
+  }
   if (p.done) {
     activeDownloads.delete(key);
     if (p.error) {
@@ -1824,6 +2003,37 @@ function onDownloadProgress(p: DownloadProgressPayload): void {
   }
 }
 
+function onQwenDownloadProgress(p: DownloadProgressPayload, key: string): void {
+  const isServer = p.kind === "qwen-server";
+  if (p.done) {
+    activeDownloads.delete(key);
+    if (p.error) {
+      toast(
+        isServer
+          ? t("setup.serverInstallFailed", tMsg(p.error))
+          : t("setup.modelDownloadFailed", qwenModelLabel(p.name), tMsg(p.error)),
+        true,
+      );
+    } else {
+      toast(isServer ? t("setup.qwenServerInstalled") : t("setup.modelDownloaded", qwenModelLabel(p.name)));
+    }
+    if (isServer) $("qwen-server-progress").hidden = true;
+    void refreshSetupStatus();
+    return;
+  }
+  activeDownloads.set(key, p);
+  const onboardBar = document.querySelector<HTMLElement>(`#onboard-steps .progress[data-download-key="${key}"]`);
+  if (onboardBar) applyProgress(onboardBar, p);
+  if (isServer) {
+    applyProgress($("qwen-server-progress"), p);
+    ($("btn-qwen-install-server") as HTMLButtonElement).disabled = true;
+  } else {
+    const wrap = document.querySelector<HTMLElement>(`#qwen-model-list .progress[data-download-key="${key}"]`);
+    if (wrap) applyProgress(wrap, p);
+    else renderQwenPanel();
+  }
+}
+
 async function refreshSetupStatus(): Promise<void> {
   try {
     setupStatus = await invoke<SetupStatus>("setup_status");
@@ -1832,6 +2042,7 @@ async function refreshSetupStatus(): Promise<void> {
   }
   renderServerCard();
   renderSttModelList();
+  renderQwenPanel();
   renderOnboard();
   renderHomeStatus();
 }
@@ -2179,6 +2390,7 @@ async function init(): Promise<void> {
   wireHistorySection();
   wireGeneralSection();
   wireServerCard();
+  wireQwenPanel();
   wireOnboard();
   wireUpdateSection();
   wireDialogs();

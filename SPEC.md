@@ -780,3 +780,29 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
   - **最終認識のみ**。リアルタイム字幕・プリウォーム・接続テストには付けない(短い窓ほど復唱しやすい)。
   - **復唱検出**: 結果がプロンプト全体と一致、または 3 語以上のプロンプト用語だけで構成される(英数字以外を除去・小文字化して比較)なら、プロンプト無しで **1 回だけ** 再認識し、その結果を通常の幻聴判定に回す。1〜2 語だけの発話(「講演会」)は有効。
 - テスト: context::tests。
+
+# v0.12.0 追加仕様: Qwen3-ASR (ローカル llama-server / クラウド OpenRouter)
+
+## エンジン "qwen" (qwen.rs)
+
+- `stt.engine` に `"qwen"` を追加(ローカル Qwen3-ASR)。設定 `stt.qwen { model: "0.6b"|"1.7b"(既定 0.6b), server_port: 8179, threads(既定は whisper と同じ), accel: "auto"|"gpu"|"cpu" }`。
+- 実行: llama.cpp の `llama-server` に ggml-org の GGUF 変換(`ggml-org/Qwen3-ASR-{0.6B,1.7B}-GGUF` の Q8_0、モデル + mmproj)を読ませる。`POST /v1/chat/completions` に `{"messages":[system?, {"role":"user","content":[{"type":"input_audio","input_audio":{"data":<WAV base64>,"format":"wav"}}]}, assistant?], "temperature":0, "max_tokens":4096}`。
+  - 出力は `language Japanese<asr_text>本文`。`<asr_text>` より後を本文とし、言語タグ `None` は `no_speech`(`qwen::parse_asr_output`。クラウド応答にも同じ処理をかける)。
+  - 認識言語が固定(≠auto)なら assistant ターンに `language {英語名}<asr_text>` を prefill して言語を固定する。
+  - 語彙ヒント(v0.11 のクリップボード用語)は **system メッセージ**として渡す(Qwen3-ASR の文脈入力)。
+- 配布物はピン留め+SHA-256 検証:
+  - llama.cpp `b11684` の Vulkan ビルド(Windows `llama-b11684-bin-win-vulkan-x64.zip` 約 30MB、Linux `llama-b11684-bin-ubuntu-vulkan-x64.tar.gz`)。CPU バックエンドも同梱(ggml は実行時ロード)なので GPU/CPU 両用。置き場所は `{app_data}/llama/`(`bin/` は whisper 用で `*server*.exe` を再帰検索するため、`ggml-rpc-server.exe` を含む llama.cpp は別フォルダ)。`llama.new/` に展開・検証してから入れ替え。
+  - モデルは Hugging Face のコミット固定 URL から `{app_data}/models/` へ(mmproj → モデルの順、各 `.part` → 検証 → rename)。0.6B = 972MB、1.7B = 2404MB。
+- 起動: `llama-server -m <model> --mmproj <mmproj> --host 127.0.0.1 --port <port> -t <threads> -c 8192 -np 2 --no-webui`、CPU のとき `-dev none`。ヘルスは `GET /health` が 200(読み込み中は 503 なので TCP 接続では判定しない)、上限 120 秒。Job Object / PDEATHSIG は whisper と共通(`setup::spawn_bound`)。シグネチャ(exe・モデル・ポート・スレッド・accel)が変われば再起動。
+- `auto` は NVIDIA または AMD Radeon(`hw::Hardware`)があれば GPU、それ以外(iGPU のみ・GPU なし)は CPU。
+- エンジン切替時: qwen 以外になれば llama-server を、local 以外になれば whisper-server を停止。アプリ終了経路はすべて両方停止(`kill_engines`)。起動時・設定変更時は `qwen::prewarm`(起動 + 1 秒の無音を認識して Vulkan のシェーダコンパイル約 7 秒を先に済ませる)。
+- 未インストールで認識要求 → `ERR_SETUP_REQUIRED`。ホームのワンクリックセットアップは engine=qwen なら llama-server → 選択モデルの順に入れる(`quick_setup` が分岐)。
+- コマンド: `qwen_download_server`、`qwen_download_model { model }`。進捗イベントは `download-progress` の kind `qwen-server` / `qwen-model`(name はモデル id。mmproj とモデルでバーが 2 回進む)。`SetupStatus.qwen: { server_installed, server_path, model_installed, models[{id, installed, size_mb}], server_running, effective_accel }`。
+- UI: エンジン選択に「ローカル (Qwen3-ASR)」。パネルは llama-server カード(状態・パス・インストール・処理デバイス 自動/GPU (Vulkan)/CPU)、モデル選択(0.6B / 1.7B)、詳細設定(ポート・スレッド)。ホームの状態カードはエンジン(llama.cpp · デバイス · 稼働状態)とモデル。
+- 実測(2026-10-16、RTX 4070 Ti SUPER、0.6B Q8_0、TTS 音声): Vulkan で 6〜8 秒の発話 0.1〜0.35 秒(初回のみ約 7 秒)、CPU 4 スレッド(`-dev none`)で 0.3〜0.6 秒。76 秒の連続発話も欠落なし(プロンプト約 13 トークン/秒)。system に「fire-speak」を入れると「ファイアスピーク」→「fire-speak」。無音は「language Portuguese…」等を幻聴するので、既存の発話量ゲート(`MIN_SPEECH_SECS`)と言語 prefill が前提。
+
+## クラウド: OpenRouter プリセット (stt.rs)
+
+- クラウド STT のプリセットに `OpenRouter (Qwen3-ASR)` = `https://openrouter.ai/api/v1` / `qwen/qwen3-asr-0.6b`(OpenRouter の `/audio/transcriptions` は OpenAI 形式の multipart `file` を受ける。提供元 DeepInfra、約 $0.0002/分)。
+- `prompt` と `response_format=verbose_json` を受け付けない OpenAI 互換エンドポイントのため、**HTTP 400 なら 1 回だけ** `file` / `model` / `language` のみで再送する。
+- 未検証: OpenRouter 実機での応答(API キーが無く未確認)。

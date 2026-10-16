@@ -50,6 +50,7 @@ pub async fn transcribe(
 ) -> Result<Transcript, String> {
     match settings.stt.engine.as_str() {
         "cloud" => transcribe_cloud(settings, wav, prompt).await,
+        "qwen" => crate::qwen::transcribe(app, settings, wav, prompt).await,
         _ => transcribe_local(app, settings, wav, prompt).await,
     }
 }
@@ -116,32 +117,19 @@ pub async fn transcribe_cloud(
         cloud.base_url.trim_end_matches('/')
     );
 
-    let file_part = reqwest::multipart::Part::bytes(wav)
-        .file_name("audio.wav")
-        .mime_str("audio/wav")
-        .map_err(|e| format!("ERR_INTERNAL|multipart: {e}"))?;
-    let mut form = reqwest::multipart::Form::new()
-        .part("file", file_part)
-        // OpenAI and Groq return segments with no_speech_prob for this
-        // format; an endpoint that sends only `text` still parses fine.
-        .text("response_format", "verbose_json")
-        .text("model", cloud.model.clone());
-    if settings.language != "auto" && !settings.language.trim().is_empty() {
-        form = form.text("language", settings.language.clone());
+    // OpenAI and Groq take `prompt` and answer `verbose_json` with segments
+    // (no_speech_prob). Other OpenAI-style endpoints (OpenRouter's Qwen3-ASR
+    // providers) may reject either with a 400: retry once with only
+    // file/model/language (v0.12).
+    let mut resp = send_cloud(settings, &url, wav.clone(), prompt, true).await?;
+    if resp.0.as_u16() == 400 {
+        eprintln!(
+            "cloud STT rejected the full request (HTTP 400): {}; retrying without prompt/verbose_json",
+            truncate(&resp.1, 200)
+        );
+        resp = send_cloud(settings, &url, wav, None, false).await?;
     }
-    if let Some(p) = prompt.filter(|p| !p.trim().is_empty()) {
-        form = form.text("prompt", p.to_string());
-    }
-
-    let resp = client()?
-        .post(&url)
-        .bearer_auth(cloud.api_key.trim())
-        .multipart(form)
-        .send()
-        .await
-        .map_err(|e| format!("ERR_STT_NETWORK|{e}"))?;
-    let status = resp.status();
-    let text = resp.text().await.unwrap_or_default();
+    let (status, text) = resp;
     if !status.is_success() {
         eprintln!(
             "cloud STT failed (HTTP {}): {}",
@@ -152,7 +140,47 @@ pub async fn transcribe_cloud(
     }
     let v: serde_json::Value = serde_json::from_str(&text)
         .map_err(|e| format!("ERR_STT_NETWORK|invalid response: {e}"))?;
-    Ok(parse_transcript(&v))
+    let mut t = parse_transcript(&v);
+    // a Qwen3-ASR deployment may pass its raw `language X<asr_text>` tag through
+    let (lang, text) = crate::qwen::parse_asr_output(&t.text);
+    t.no_speech |= lang.as_deref() == Some("None");
+    t.text = text;
+    Ok(t)
+}
+
+async fn send_cloud(
+    settings: &Settings,
+    url: &str,
+    wav: Vec<u8>,
+    prompt: Option<&str>,
+    full: bool,
+) -> Result<(reqwest::StatusCode, String), String> {
+    let cloud = &settings.stt.cloud;
+    let file_part = reqwest::multipart::Part::bytes(wav)
+        .file_name("audio.wav")
+        .mime_str("audio/wav")
+        .map_err(|e| format!("ERR_INTERNAL|multipart: {e}"))?;
+    let mut form = reqwest::multipart::Form::new()
+        .part("file", file_part)
+        .text("model", cloud.model.clone());
+    if full {
+        form = form.text("response_format", "verbose_json");
+    }
+    if settings.language != "auto" && !settings.language.trim().is_empty() {
+        form = form.text("language", settings.language.clone());
+    }
+    if let Some(p) = prompt.filter(|p| !p.trim().is_empty()) {
+        form = form.text("prompt", p.to_string());
+    }
+    let resp = client()?
+        .post(url)
+        .bearer_auth(cloud.api_key.trim())
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("ERR_STT_NETWORK|{e}"))?;
+    let status = resp.status();
+    Ok((status, resp.text().await.unwrap_or_default()))
 }
 
 fn truncate(s: &str, max: usize) -> String {

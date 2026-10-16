@@ -6,6 +6,7 @@ mod hook;
 mod llm;
 mod locale;
 mod paste;
+mod qwen;
 mod pipeline;
 mod settings;
 mod setup;
@@ -54,6 +55,12 @@ impl AppState {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Stop every local STT server (whisper-server, llama-server) before exit.
+fn kill_engines(app: &AppHandle) {
+    setup::kill_server(app);
+    qwen::kill(app);
+}
 
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -190,7 +197,7 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
     match id {
         "open-settings" => show_main_window(app),
         "quit" => {
-            setup::kill_server(app);
+            kill_engines(app);
             app.exit(0);
         }
         other => {
@@ -268,15 +275,19 @@ fn apply_settings(app: &AppHandle, new_settings: Settings) -> Result<(), String>
         apply_autostart(app, new_settings.autostart)?;
     }
     if old_settings.stt != new_settings.stt {
-        if new_settings.stt.engine == "local" {
+        // free the RAM/VRAM held by a local engine that is no longer in use
+        if new_settings.stt.engine != "local" {
+            setup::kill_server(app);
+        }
+        if new_settings.stt.engine != "qwen" {
+            qwen::kill(app);
+        }
+        if new_settings.stt.engine != "cloud" {
             // ensure_server compares the launch signature, so this restarts
             // the server only when a launch-relevant field changed (v0.8.1)
             // downloads a different server build / NPU encoder if the new
             // settings need one, then prewarms (v0.9)
             setup::sync_server_build(app);
-        } else {
-            // cloud engine: free the RAM/VRAM held by the local model
-            setup::kill_server(app);
         }
     }
     rebuild_tray_menu(app, &new_settings);
@@ -411,6 +422,9 @@ async fn test_stt(app: AppHandle) -> Result<String, String> {
         let wav = audio::wav_bytes(&vec![0i16; 8000])?;
         let _ = stt::transcribe_cloud(&settings, wav, None).await?;
         Ok("OK_STT".to_string())
+    } else if settings.stt.engine == "qwen" {
+        qwen::ensure_server(app.clone()).await?;
+        Ok("OK_STT".to_string())
     } else {
         setup::ensure_server(app.clone()).await?;
         Ok("OK_STT".to_string())
@@ -458,6 +472,16 @@ async fn download_model(app: AppHandle, model: String) -> Result<(), String> {
     // NPU mode: also fetches the new model's compiled encoder; then prewarms
     setup::sync_server_build(&app);
     Ok(())
+}
+
+#[tauri::command]
+async fn qwen_download_server(app: AppHandle) -> Result<(), String> {
+    qwen::download_server(app).await
+}
+
+#[tauri::command]
+async fn qwen_download_model(app: AppHandle, model: String) -> Result<(), String> {
+    qwen::download_model(app, model).await
 }
 
 #[tauri::command]
@@ -525,7 +549,7 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
         .map_err(|e| err(e.to_string()))?
         // The plugin leaves via std::process::exit on Windows, which skips
         // RunEvent::Exit — stop the managed whisper-server here instead.
-        .on_before_exit(move || setup::kill_server(&app_exit))
+        .on_before_exit(move || kill_engines(&app_exit))
         .build()
         .map_err(|e| err(e.to_string()))?;
     let update = updater
@@ -560,7 +584,7 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
         .map_err(|e| err(e.to_string()))?;
 
     // Linux: the new package is in place; relaunch into it.
-    setup::kill_server(&app);
+    kill_engines(&app);
     app.restart();
 }
 
@@ -576,7 +600,7 @@ async fn open_url(app: AppHandle, url: String) -> Result<(), String> {
 
 #[tauri::command]
 fn quit_app(app: AppHandle) -> Result<(), String> {
-    setup::kill_server(&app);
+    kill_engines(&app);
     app.exit(0);
     Ok(())
 }
@@ -674,6 +698,8 @@ pub fn run() {
             download_model,
             download_npu_cache,
             quick_setup,
+            qwen_download_server,
+            qwen_download_model,
             open_config_dir,
             quit_app,
             check_update,
@@ -684,7 +710,7 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
-                setup::kill_server(app);
+                kill_engines(app);
             }
         });
 }

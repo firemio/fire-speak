@@ -1,6 +1,6 @@
 // Shared types mirroring SPEC.md (backend contract). Field names must match exactly.
 
-export type SttEngine = "local" | "cloud";
+export type SttEngine = "local" | "cloud" | "qwen";
 export type PasteMode = "paste" | "clipboard";
 export type ProviderKind = "anthropic" | "openai";
 /** v0.3: "hold" = record while the hotkey is held (default), "toggle" = press to start/stop. */
@@ -24,10 +24,19 @@ export interface CloudSttSettings {
   model: string;
 }
 
+/** Local Qwen3-ASR through llama-server (v0.12). */
+export interface QwenSttSettings {
+  model: string; // "0.6b" | "1.7b"
+  server_port: number;
+  threads: number;
+  accel: string; // "auto" | "gpu" | "cpu"
+}
+
 export interface SttSettings {
   engine: SttEngine;
   local: LocalSttSettings;
   cloud: CloudSttSettings;
+  qwen: QwenSttSettings;
 }
 
 export interface LlmProvider {
@@ -121,6 +130,18 @@ export interface SetupStatus {
   /** The managed whisper-server is running (model loaded) (v0.9.2). */
   server_running: boolean;
   last_save_error: string; // "" = last save succeeded (v0.9.5)
+  qwen: QwenStatus;
+}
+
+export interface QwenStatus {
+  server_installed: boolean;
+  server_path: string;
+  /** The model chosen in `stt.qwen.model` is on disk. */
+  model_installed: boolean;
+  models: { id: string; installed: boolean; size_mb: number }[];
+  server_running: boolean;
+  /** "gpu" | "cpu" */
+  effective_accel: string;
 }
 
 export interface Hardware {
@@ -176,7 +197,7 @@ export interface UpdateProgressPayload {
 }
 
 export interface DownloadProgressPayload {
-  kind: "server" | "model" | "npu";
+  kind: "server" | "model" | "npu" | "qwen-server" | "qwen-model";
   name: string;
   downloaded: number;
   total: number;

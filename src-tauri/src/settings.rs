@@ -108,6 +108,9 @@ pub struct SttSettings {
     pub local: LocalSttSettings,
     #[serde(default)]
     pub cloud: CloudSttSettings,
+    /// Local Qwen3-ASR through llama-server (v0.12, engine "qwen").
+    #[serde(default)]
+    pub qwen: QwenSttSettings,
 }
 
 impl Default for SttSettings {
@@ -116,8 +119,42 @@ impl Default for SttSettings {
             engine: default_stt_engine(),
             local: LocalSttSettings::default(),
             cloud: CloudSttSettings::default(),
+            qwen: QwenSttSettings::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QwenSttSettings {
+    /// "0.6b" | "1.7b" (see `qwen::MODELS`).
+    #[serde(default = "default_qwen_model")]
+    pub model: String,
+    #[serde(default = "default_qwen_port")]
+    pub server_port: u16,
+    #[serde(default = "default_threads")]
+    pub threads: u32,
+    /// "auto" (GPU when an NVIDIA / AMD Radeon GPU is present) | "gpu" | "cpu".
+    #[serde(default = "default_accel")]
+    pub accel: String,
+}
+
+impl Default for QwenSttSettings {
+    fn default() -> Self {
+        Self {
+            model: default_qwen_model(),
+            server_port: default_qwen_port(),
+            threads: default_threads(),
+            accel: default_accel(),
+        }
+    }
+}
+
+fn default_qwen_model() -> String {
+    "0.6b".to_string()
+}
+
+fn default_qwen_port() -> u16 {
+    8179
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -125,6 +125,7 @@
           <h2 class="section-heading" data-i18n="stt.engineHeading">音声認識エンジン</h2>
           <div class="segmented" id="stt-engine-seg">
             <button data-engine="local" data-i18n="stt.engineLocal">ローカル (whisper.cpp)</button>
+            <button data-engine="qwen" data-i18n="stt.engineQwen">ローカル (Qwen3-ASR)</button>
             <button data-engine="cloud" data-i18n="stt.engineCloud">クラウド (OpenAI互換)</button>
           </div>
 
@@ -188,12 +189,60 @@
             </details>
           </div>
 
+          <div id="stt-qwen-panel" hidden>
+            <div class="card setup-card">
+              <div class="setup-row">
+                <div class="setup-info">
+                  <div class="setup-name">llama-server (llama.cpp) <span class="badge" id="qwen-server-badge">未インストール</span></div>
+                  <div class="setup-path mono" id="qwen-server-path">—</div>
+                </div>
+                <button class="btn btn-primary btn-sm" id="btn-qwen-install-server">インストール</button>
+              </div>
+              <div class="accel-row">
+                <label class="field">
+                  <span class="field-label" data-i18n="stt.accel">処理デバイス</span>
+                  <select id="in-qwen-accel">
+                    <option value="auto" data-i18n="stt.accelAuto">自動（おすすめ）</option>
+                    <option value="gpu" data-i18n="stt.qwenAccelGpu">GPU (Vulkan)</option>
+                    <option value="cpu" data-i18n="stt.accelCpu">CPU</option>
+                  </select>
+                </label>
+                <div class="hint" id="qwen-accel-hint"></div>
+              </div>
+              <div class="progress" id="qwen-server-progress" hidden>
+                <div class="progress-bar"></div>
+                <span class="progress-text"></span>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-title" data-i18n="stt.modelSelect">モデル選択</div>
+              <div class="hint" data-i18n="stt.qwenModelHint">Qwen3-ASR のモデルを選びます。0.6B は軽く CPU でも実用的、1.7B はより高精度です</div>
+              <div class="model-select-list" id="qwen-model-list"></div>
+            </div>
+
+            <details class="card details-card">
+              <summary data-i18n="common.advanced">詳細設定</summary>
+              <div class="form-grid">
+                <label class="field">
+                  <span class="field-label" data-i18n="stt.serverPort">サーバポート</span>
+                  <input type="number" id="in-qwen-port" min="1" max="65535" />
+                </label>
+                <label class="field">
+                  <span class="field-label" data-i18n="stt.threads">スレッド数</span>
+                  <input type="number" id="in-qwen-threads" min="1" max="64" />
+                </label>
+              </div>
+            </details>
+          </div>
+
           <div id="stt-cloud-panel" hidden>
             <div class="card">
               <div class="preset-row">
                 <span class="field-label" data-i18n="stt.preset">プリセット</span>
                 <button class="btn btn-sm" data-stt-preset="openai">OpenAI</button>
                 <button class="btn btn-sm" data-stt-preset="groq">Groq</button>
+                <button class="btn btn-sm" data-stt-preset="openrouter-qwen">OpenRouter (Qwen3-ASR)</button>
                 <span class="hint" data-i18n="stt.presetHint">Groq は whisper-large-v3-turbo を高速・低価格で提供します</span>
               </div>
               <div class="form-grid">

@@ -76,7 +76,7 @@ fn spawn_child(mut cmd: Command) -> std::io::Result<Child> {
 /// below), so the whole group is signalled first — whisper-server's worker
 /// processes, if it ever spawns any, die with it. On Windows this is exactly
 /// the previous `kill()` + `wait()` pair; the Job Object handles descendants.
-fn terminate(child: &mut Child) {
+pub(crate) fn terminate(child: &mut Child) {
     #[cfg(target_os = "linux")]
     {
         let pid = child.id() as i32;
@@ -122,6 +122,8 @@ pub struct SetupStatus {
     /// Error of the most recent failed settings save, "" when the last save
     /// succeeded (v0.9.5). The home card shows it as a ✕ row.
     pub last_save_error: String,
+    /// Local Qwen3-ASR engine (v0.12).
+    pub qwen: crate::qwen::QwenStatus,
 }
 
 /// Whether the managed whisper-server process is alive.
@@ -454,7 +456,7 @@ pub struct ModelInfo {
     pub size_mb: u64,
 }
 
-fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
         .map_err(|e| format!("ERR_FILE_IO|app data dir: {e}"))
@@ -574,6 +576,7 @@ pub fn get_setup_status(app: &AppHandle, settings: &Settings) -> Result<SetupSta
         recommended_model: recommended_model(effective_accel(settings)).to_string(),
         server_running: server_running(app),
         last_save_error: crate::settings::last_save_error().unwrap_or_default(),
+        qwen: crate::qwen::status(app, settings),
         model_installed: model.is_some(),
         model_path: model
             .map(|p| p.to_string_lossy().to_string())
@@ -777,10 +780,46 @@ fn spawn_and_health_check(
             .arg("--vad-speech-pad-ms")
             .arg(VAD_SPEECH_PAD_MS);
     }
+    let mut managed = spawn_bound(cmd, server_path, signature)?;
+    let child = &mut managed.child;
+
+    // health check: retry TCP connect for up to 60 seconds (v0.9: the NPU build
+    // loads a ~700 MB compiled encoder first; a dead child still fails fast).
+    // OpenVINO compiles the encoder for the NPU on the first start (minutes
+    // for large-v3-turbo; cached next to the model afterwards): 10 minutes.
+    let health_secs = if ov_device.is_some() { 600 } else { 60 };
+    let deadline = Instant::now() + Duration::from_secs(health_secs);
+    loop {
+        if let Ok(Some(status)) = child.try_wait() {
+            eprintln!("whisper-server exited immediately (exit: {status})");
+            return Err("ERR_SERVER_DIED".to_string());
+        }
+        if tcp_ok(port, Duration::from_millis(400)) {
+            break;
+        }
+        if Instant::now() >= deadline {
+            terminate(child);
+            return Err("ERR_SERVER_START|health check timeout (60s)".to_string());
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+
+    Ok(managed)
+}
+
+/// Spawn a local inference server (whisper-server, llama-server) bound to
+/// this process: no console window or inherited stdio, working directory =
+/// the exe's folder, and killed together with the app even on a crash (Job
+/// Object on Windows, `PR_SET_PDEATHSIG` on Linux).
+pub(crate) fn spawn_bound(
+    mut cmd: Command,
+    exe: &Path,
+    signature: String,
+) -> Result<ManagedServer, String> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    if let Some(parent) = server_path.parent() {
+    if let Some(parent) = exe.parent() {
         cmd.current_dir(parent);
         // The whisper.cpp Linux release ships libggml/libwhisper next to the
         // binary; make sure they are found even without an RPATH.
@@ -842,27 +881,6 @@ fn spawn_and_health_check(
         }
     };
 
-    // health check: retry TCP connect for up to 60 seconds (v0.9: the NPU build
-    // loads a ~700 MB compiled encoder first; a dead child still fails fast).
-    // OpenVINO compiles the encoder for the NPU on the first start (minutes
-    // for large-v3-turbo; cached next to the model afterwards): 10 minutes.
-    let health_secs = if ov_device.is_some() { 600 } else { 60 };
-    let deadline = Instant::now() + Duration::from_secs(health_secs);
-    loop {
-        if let Ok(Some(status)) = child.try_wait() {
-            eprintln!("whisper-server exited immediately (exit: {status})");
-            return Err("ERR_SERVER_DIED".to_string());
-        }
-        if tcp_ok(port, Duration::from_millis(400)) {
-            break;
-        }
-        if Instant::now() >= deadline {
-            terminate(&mut child);
-            return Err("ERR_SERVER_START|health check timeout (60s)".to_string());
-        }
-        std::thread::sleep(Duration::from_millis(500));
-    }
-
     Ok(ManagedServer {
         child,
         signature,
@@ -883,7 +901,7 @@ fn assign_kill_on_close_job(child: &Child) -> Result<win32job::Job, String> {
     Ok(job)
 }
 
-fn tcp_ok(port: u16, timeout: Duration) -> bool {
+pub(crate) fn tcp_ok(port: u16, timeout: Duration) -> bool {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     std::net::TcpStream::connect_timeout(&addr, timeout).is_ok()
 }
@@ -909,7 +927,7 @@ pub fn kill_server(app: &AppHandle) {
 // Downloads
 // ---------------------------------------------------------------------------
 
-fn emit_progress(
+pub(crate) fn emit_progress(
     app: &AppHandle,
     kind: &str,
     name: &str,
@@ -931,14 +949,14 @@ fn emit_progress(
     let _ = app.emit("download-progress", payload);
 }
 
-fn download_client() -> Result<reqwest::Client, String> {
+pub(crate) fn download_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .user_agent("fire-speak")
         .build()
         .map_err(|e| format!("ERR_INTERNAL|http client: {e}"))
 }
 
-async fn stream_download(
+pub(crate) async fn stream_download(
     app: &AppHandle,
     client: &reqwest::Client,
     url: &str,
@@ -1087,7 +1105,7 @@ fn pick_server_asset<'a>(
 
 /// Extract the downloaded server archive into `dest`
 /// (.zip on Windows, .tar.gz on Linux).
-fn extract_server_archive(archive: &Path, dest: &Path) -> Result<(), String> {
+pub(crate) fn extract_server_archive(archive: &Path, dest: &Path) -> Result<(), String> {
     #[cfg(windows)]
     {
         extract_zip(archive, dest)
@@ -1135,7 +1153,7 @@ static SERVER_SWAPPING: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 /// Clears a flag on drop, so an early return or panic cannot leave it set.
-struct FlagReset(&'static std::sync::atomic::AtomicBool);
+pub(crate) struct FlagReset(pub(crate) &'static std::sync::atomic::AtomicBool);
 
 impl Drop for FlagReset {
     fn drop(&mut self) {
@@ -1192,6 +1210,11 @@ pub fn sync_server_build(app: &AppHandle) {
         // The first hardware probe takes about a second (WMI).
         let _ = tokio::task::spawn_blocking(crate::hw::get).await;
         let settings = app.state::<crate::AppState>().settings.lock().unwrap().clone();
+        if settings.stt.engine == "qwen" {
+            // restarts the server when a launch-relevant setting changed
+            crate::qwen::prewarm(&app);
+            return;
+        }
         if settings.stt.engine != "local" {
             return;
         }
@@ -1247,6 +1270,9 @@ pub async fn quick_setup(app: AppHandle) -> Result<(), String> {
     }
     let _reset = FlagReset(&QUICK_SETUP);
     let _ = tokio::task::spawn_blocking(crate::hw::get).await;
+    if app.state::<crate::AppState>().settings.lock().unwrap().stt.engine == "qwen" {
+        return crate::qwen::quick_setup(app.clone()).await;
+    }
     let current = |app: &AppHandle| app.state::<crate::AppState>().settings.lock().unwrap().clone();
     let settings = current(&app);
     let accel = effective_accel(&settings);
@@ -1339,7 +1365,7 @@ fn lemonade_asset(accel: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
-fn sha256_file(path: &Path) -> Result<String, String> {
+pub(crate) fn sha256_file(path: &Path) -> Result<String, String> {
     use sha2::{Digest, Sha256};
     let mut file = std::fs::File::open(path).map_err(|e| format!("ERR_FILE_IO|open: {e}"))?;
     let mut hasher = Sha256::new();
@@ -1548,7 +1574,7 @@ async fn install_server_archive(
 }
 
 #[cfg(windows)]
-fn extract_zip(zip_path: &Path, dest: &Path) -> Result<(), String> {
+pub(crate) fn extract_zip(zip_path: &Path, dest: &Path) -> Result<(), String> {
     let file =
         std::fs::File::open(zip_path).map_err(|e| format!("ERR_ZIP|open: {e}"))?;
     let mut archive =
@@ -1582,7 +1608,7 @@ fn safe_relative_path(path: &Path) -> Result<PathBuf, String> {
 /// relative symlinks are extracted; anything else (device nodes, hard links,
 /// FIFOs) is skipped.
 #[cfg(target_os = "linux")]
-fn extract_tar_gz(archive_path: &Path, dest: &Path) -> Result<(), String> {
+pub(crate) fn extract_tar_gz(archive_path: &Path, dest: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
 
     let file =
