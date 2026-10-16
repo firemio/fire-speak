@@ -224,6 +224,7 @@
   "overlay.polishing": "Mise en forme IA…",
   "overlay.done": "✓ Collé",
   "overlay.doneWith": "✓ Collé — {0}",
+  "overlay.updateAvailable": "⬆ v{0} est disponible — mettez à jour depuis le menu de la zone de notification",
   "overlay.error": "Une erreur est survenue",
   "overlay.idle": "En attente",
   "overlay.cancel": "Annuler",

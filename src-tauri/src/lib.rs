@@ -142,6 +142,19 @@ fn build_tray_menu(app: &AppHandle, settings: &Settings) -> tauri::Result<Menu<W
     let lang = locale::resolve_ui_lang_setting(&settings.ui_lang);
     let (open_settings_label, quit_label, none_label) = locale::tray_labels(&lang);
     let mut builder = MenuBuilder::new(app);
+    // An available update goes on top, where it cannot be missed (v0.12.1).
+    if let Some(info) = update::available() {
+        let (label, _, _) = locale::update_labels(&lang);
+        builder = builder
+            .item(&MenuItem::with_id(
+                app,
+                "update",
+                label.replace("{0}", &info.latest),
+                true,
+                None::<&str>,
+            )?)
+            .separator();
+    }
     // Built-in "none" first; a missing or disabled active mode counts as none.
     let active_is_none = !settings
         .modes
@@ -193,9 +206,30 @@ fn rebuild_tray_menu(app: &AppHandle, settings: &Settings) {
     }
 }
 
+/// Rebuild the tray menu and tooltip from the current settings and update
+/// state (called when a check finds a new version).
+pub(crate) fn refresh_tray(app: &AppHandle) {
+    let settings = app.state::<AppState>().settings.lock().unwrap().clone();
+    rebuild_tray_menu(app, &settings);
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let tip = match update::available() {
+            Some(info) => format!("fire-speak — v{} available", info.latest),
+            None => "fire-speak".to_string(),
+        };
+        let _ = tray.set_tooltip(Some(tip));
+    }
+}
+
 fn handle_menu_event(app: &AppHandle, id: &str) {
     match id {
         "open-settings" => show_main_window(app),
+        "update" => {
+            // the settings window opens its update dialog on this event
+            show_main_window(app);
+            if let Some(info) = update::available() {
+                let _ = app.emit("update-open-dialog", info);
+            }
+        }
         "quit" => {
             kill_engines(app);
             app.exit(0);
@@ -507,13 +541,13 @@ fn open_config_dir(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 async fn check_update(app: AppHandle) -> Result<update::UpdateInfo, String> {
-    let (owner, repo) = {
-        let state = app.state::<AppState>();
-        let guard = state.settings.lock().unwrap();
-        (guard.update.owner.clone(), guard.update.repo.clone())
-    };
-    let current = app.package_info().version.to_string();
-    update::check(&owner, &repo, &current).await
+    update::check_now(&app).await
+}
+
+/// Newest release a check already found, if newer than this app (v0.12.1).
+#[tauri::command]
+fn get_available_update() -> Option<update::UpdateInfo> {
+    update::available()
 }
 
 /// Download, verify (minisign, pubkey in tauri.conf.json) and install the
@@ -616,6 +650,7 @@ pub fn run() {
             show_main_window(app);
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -660,6 +695,7 @@ pub fn run() {
             context::start_watcher(handle.clone());
             build_tray(&handle, &loaded)?;
             setup::on_startup(&handle);
+            update::start_background_checks(handle.clone());
 
             // Launched by autostart with --hidden: start minimized to tray.
             if std::env::args().any(|a| a == "--hidden") {
@@ -703,6 +739,7 @@ pub fn run() {
             open_config_dir,
             quit_app,
             check_update,
+            get_available_update,
             install_update,
             open_url
         ])

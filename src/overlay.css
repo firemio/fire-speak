@@ -335,3 +335,9 @@ body {
   }
 }
 
+
+/* available update after a dictation (v0.12.1) */
+.caption.is-update {
+  color: var(--gold, #ffd27a);
+  font-weight: 700;
+}

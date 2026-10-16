@@ -806,3 +806,14 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 - クラウド STT のプリセットに `OpenRouter (Qwen3-ASR)` = `https://openrouter.ai/api/v1` / `qwen/qwen3-asr-0.6b`(OpenRouter の `/audio/transcriptions` は OpenAI 形式の multipart `file` を受ける。提供元 DeepInfra、約 $0.0002/分)。
 - `prompt` と `response_format=verbose_json` を受け付けない OpenAI 互換エンドポイントのため、**HTTP 400 なら 1 回だけ** `file` / `model` / `language` のみで再送する。
 - 未検証: OpenRouter 実機での応答(API キーが無く未確認)。
+
+# v0.12.1 追加仕様: アップデートの通知を目立たせる
+
+- 背景: 更新確認は起動時 1 回だけで、通知はメインウィンドウ内(バナー/ダイアログ)のみだった。fire-speak は Windows 起動時に `--hidden` で常駐し何日も動くため、常駐中に出たリリースも、ウィンドウを開かない限り見逃していた。
+- バックエンドの定期確認(`update::start_background_checks`): `update.auto_check` が true の間、起動 20 秒後と以後 **6 時間ごと**に確認。設定画面の「更新を確認」も同じ `update::check_now` を通る。新しい版が見つかったら `update::AVAILABLE` に保持し、次をすべて行う:
+  1. **デスクトップ通知**(tauri-plugin-notification、版ごとに 1 回): タイトル「fire-speak v{版} が出ました」、本文「トレイアイコンのメニューか設定画面からアップデートできます」(12 言語、`locale::update_labels`)。
+  2. **トレイ**: メニュー先頭に「⬆ v{版} にアップデート」(押すとメインウィンドウを開き、イベント `update-open-dialog` で更新ダイアログを表示)+区切り線。ツールチップ「fire-speak — v{版} available」。
+  3. イベント `update-available`(UpdateInfo)。設定ウィンドウはバナー・ダイアログ(版ごとに 1 回)に加え、サイドバー「アップデート」に点滅バッジ `v{版}`(閉じられない)。HUD は保持する。
+- **HUD**: 新しい版がある間、音声入力の完了(done)時に字幕欄へ金色で「⬆ v{版} が出ています — トレイのメニューからアップデート」(`overlay.updateAvailable`、12 言語)。このとき done の表示時間を 1.2 秒 → 3.5 秒に延ばす。
+- コマンド `get_available_update` → `UpdateInfo | null`(後から開いたウィンドウ・HUD が既知の結果を読む)。
+- 検証(2026-10-16): version 0.11.0 に偽装した debug ビルドを `--hidden` 起動 → 20 秒後に GitHub を確認し、Windows の通知 DB に「fire-speak v0.12.0 が出ました」のトーストが届いた(未パッケージの debug ビルドなので送信元は PowerShell 名義。インストール版はアプリ名義の想定、未確認)。トレイメニュー・HUD・バッジは画面で未確認。

@@ -2182,6 +2182,19 @@ function showUpdateBanner(info: UpdateInfo): void {
   bannerInfo = info;
   $("update-banner-text").textContent = t("update.available", info.latest);
   $("update-banner").hidden = false;
+  // the sidebar badge stays until the app is updated (the banner can be closed)
+  const badge = $("nav-update-badge");
+  badge.textContent = `v${info.latest}`;
+  badge.hidden = false;
+}
+
+/** A newer release found by the backend (startup, every 6 h, or the check button) (v0.12.1). */
+function onUpdateAvailable(info: UpdateInfo): void {
+  if (!info.update_available) return;
+  updateInfo = info;
+  renderUpdateResult();
+  showUpdateBanner(info);
+  showUpdateDialog(info);
 }
 
 function wireUpdateSection(): void {
@@ -2377,6 +2390,16 @@ async function setupListeners(): Promise<void> {
     void refreshSetupStatus();
   });
 
+  await listen<UpdateInfo>("update-available", (event) => {
+    onUpdateAvailable(event.payload);
+  });
+
+  // tray menu "Update to vX": open the dialog even if it was shown before
+  await listen<UpdateInfo>("update-open-dialog", (event) => {
+    updateDialogShownFor = "";
+    onUpdateAvailable(event.payload);
+  });
+
   await listen<DownloadProgressPayload>("download-progress", (event) => {
     onDownloadProgress(event.payload);
   });
@@ -2460,6 +2483,14 @@ async function init(): Promise<void> {
   void refreshHistory();
   void refreshSetupStatus();
 
+  // the backend may already know of a release (the window opens later than
+  // its first check when started hidden)
+  try {
+    const known = await invoke<UpdateInfo | null>("get_available_update");
+    if (known) onUpdateAvailable(known);
+  } catch {
+    // non-fatal
+  }
   if (settings?.update.auto_check) {
     void autoCheckUpdate();
   }

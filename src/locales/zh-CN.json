@@ -224,6 +224,7 @@
   "overlay.polishing": "AI 润色中…",
   "overlay.done": "✓ 已粘贴",
   "overlay.doneWith": "✓ 已粘贴 — {0}",
+  "overlay.updateAvailable": "⬆ v{0} 已发布 — 从托盘菜单更新",
   "overlay.error": "发生错误",
   "overlay.idle": "空闲",
   "overlay.cancel": "取消",

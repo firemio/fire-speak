@@ -224,6 +224,7 @@
   "overlay.polishing": "Memformat dengan AI…",
   "overlay.done": "✓ Ditempel",
   "overlay.doneWith": "✓ Ditempel — {0}",
+  "overlay.updateAvailable": "⬆ v{0} tersedia — perbarui dari menu baki",
   "overlay.error": "Terjadi kesalahan",
   "overlay.idle": "Siaga",
   "overlay.cancel": "Batal",

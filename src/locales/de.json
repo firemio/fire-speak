@@ -224,6 +224,7 @@
   "overlay.polishing": "KI-Formatierung…",
   "overlay.done": "✓ Eingefügt",
   "overlay.doneWith": "✓ Eingefügt — {0}",
+  "overlay.updateAvailable": "⬆ v{0} ist verfügbar — über das Tray-Menü aktualisieren",
   "overlay.error": "Ein Fehler ist aufgetreten",
   "overlay.idle": "Bereit",
   "overlay.cancel": "Abbrechen",

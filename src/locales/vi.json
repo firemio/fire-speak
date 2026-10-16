@@ -224,6 +224,7 @@
   "overlay.polishing": "AI đang chỉnh sửa…",
   "overlay.done": "✓ Đã dán",
   "overlay.doneWith": "✓ Đã dán — {0}",
+  "overlay.updateAvailable": "⬆ Đã có v{0} — cập nhật từ menu khay",
   "overlay.error": "Đã xảy ra lỗi",
   "overlay.idle": "Chờ",
   "overlay.cancel": "Hủy",

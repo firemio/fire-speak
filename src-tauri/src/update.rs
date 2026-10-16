@@ -117,6 +117,106 @@ pub async fn check(owner: &str, repo: &str, current: &str) -> Result<UpdateInfo,
     })
 }
 
+/// How often a running app re-checks (v0.12.1). fire-speak starts with
+/// Windows and stays in the tray for days, so a check at startup alone missed
+/// every release published while it ran.
+const RECHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+/// Let startup (hotkey, tray, local engine) settle before the first check.
+const FIRST_CHECK_DELAY: Duration = Duration::from_secs(20);
+
+/// Newest release found by any check (background or the settings button),
+/// when it is newer than the running app.
+static AVAILABLE: std::sync::Mutex<Option<UpdateInfo>> = std::sync::Mutex::new(None);
+/// Version the desktop notification was last shown for (once per version).
+static NOTIFIED: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+pub fn available() -> Option<UpdateInfo> {
+    AVAILABLE.lock().ok().and_then(|g| g.clone())
+}
+
+/// Check now with the saved owner/repo and tell every surface about a newer
+/// version (see `record`).
+pub async fn check_now(app: &tauri::AppHandle) -> Result<UpdateInfo, String> {
+    use tauri::Manager;
+    let (owner, repo) = {
+        let state = app.state::<crate::AppState>();
+        let guard = state.settings.lock().unwrap();
+        (guard.update.owner.clone(), guard.update.repo.clone())
+    };
+    let current = app.package_info().version.to_string();
+    let info = check(&owner, &repo, &current).await?;
+    record(app, &info);
+    Ok(info)
+}
+
+/// Remember the result; on a newer version: the `update-available` event
+/// (settings window banner/dialog/nav badge, HUD), the tray (menu item +
+/// tooltip) and, once per version, a desktop notification.
+fn record(app: &tauri::AppHandle, info: &UpdateInfo) {
+    use tauri::Emitter;
+    if !info.update_available {
+        *AVAILABLE.lock().unwrap() = None;
+        return;
+    }
+    let changed = {
+        let mut guard = AVAILABLE.lock().unwrap();
+        let changed = guard.as_ref().map(|i| i.latest.as_str()) != Some(info.latest.as_str());
+        *guard = Some(info.clone());
+        changed
+    };
+    let _ = app.emit("update-available", info);
+    if changed {
+        crate::refresh_tray(app);
+    }
+    let first_notice = {
+        let mut notified = NOTIFIED.lock().unwrap();
+        let first = *notified != info.latest;
+        *notified = info.latest.clone();
+        first
+    };
+    if first_notice {
+        notify(app, &info.latest);
+    }
+}
+
+fn notify(app: &tauri::AppHandle, latest: &str) {
+    use tauri::Manager;
+    use tauri_plugin_notification::NotificationExt;
+    let lang = {
+        let state = app.state::<crate::AppState>();
+        let ui_lang = state.settings.lock().unwrap().ui_lang.clone();
+        crate::locale::resolve_ui_lang_setting(&ui_lang)
+    };
+    let (_, title, body) = crate::locale::update_labels(&lang);
+    if let Err(e) = app
+        .notification()
+        .builder()
+        .title(title.replace("{0}", latest))
+        .body(body)
+        .show()
+    {
+        eprintln!("update notification failed: {e}");
+    }
+}
+
+/// Background checks while `update.auto_check` is on: shortly after startup,
+/// then every 6 hours. Failures are silent (the next round retries).
+pub fn start_background_checks(app: tauri::AppHandle) {
+    use tauri::Manager;
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(FIRST_CHECK_DELAY).await;
+        loop {
+            let enabled = app.state::<crate::AppState>().settings.lock().unwrap().update.auto_check;
+            if enabled {
+                if let Err(e) = check_now(&app).await {
+                    eprintln!("background update check failed: {e}");
+                }
+            }
+            tokio::time::sleep(RECHECK_INTERVAL).await;
+        }
+    });
+}
+
 /// Parse "X.Y.Z" into numeric components; non-digit suffixes in a component
 /// are ignored ("1.2.3-beta" -> [1, 2, 3]). Unparsable components become 0.
 fn parse_ver(s: &str) -> Vec<u64> {

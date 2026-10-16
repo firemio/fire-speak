@@ -126,6 +126,25 @@ pub fn tray_labels(lang: &str) -> (&'static str, &'static str, &'static str) {
     }
 }
 
+/// (tray menu item, notification title, notification body) for an available
+/// update (v0.12.1). `{0}` is the new version.
+pub fn update_labels(lang: &str) -> (&'static str, &'static str, &'static str) {
+    match lang {
+        "ja" => ("⬆ v{0} にアップデート", "fire-speak v{0} が出ました", "トレイアイコンのメニューか設定画面からアップデートできます"),
+        "zh-CN" => ("⬆ 更新到 v{0}", "fire-speak v{0} 已发布", "可从托盘图标菜单或设置窗口更新"),
+        "zh-TW" => ("⬆ 更新至 v{0}", "fire-speak v{0} 已發布", "可從系統匣圖示選單或設定視窗更新"),
+        "ko" => ("⬆ v{0}(으)로 업데이트", "fire-speak v{0} 출시", "트레이 아이콘 메뉴나 설정 창에서 업데이트할 수 있습니다"),
+        "es" => ("⬆ Actualizar a v{0}", "fire-speak v{0} disponible", "Actualiza desde el menú del icono de la bandeja o la ventana de configuración"),
+        "fr" => ("⬆ Mettre à jour vers v{0}", "fire-speak v{0} est disponible", "Mettez à jour depuis le menu de l’icône de la zone de notification ou la fenêtre des paramètres"),
+        "de" => ("⬆ Auf v{0} aktualisieren", "fire-speak v{0} ist verfügbar", "Aktualisieren Sie über das Tray-Menü oder das Einstellungsfenster"),
+        "pt-BR" => ("⬆ Atualizar para v{0}", "fire-speak v{0} disponível", "Atualize pelo menu do ícone da bandeja ou pela janela de configurações"),
+        "ru" => ("⬆ Обновить до v{0}", "Вышел fire-speak v{0}", "Обновите через меню значка в трее или окно настроек"),
+        "vi" => ("⬆ Cập nhật lên v{0}", "Đã có fire-speak v{0}", "Cập nhật từ menu biểu tượng khay hoặc cửa sổ cài đặt"),
+        "id" => ("⬆ Perbarui ke v{0}", "fire-speak v{0} tersedia", "Perbarui dari menu ikon baki atau jendela pengaturan"),
+        _ => ("⬆ Update to v{0}", "fire-speak v{0} is available", "Update from the tray icon menu or the settings window"),
+    }
+}
+
 /// Build the 6 default modes (polish, to_en, to_ja, terminal, business,
 /// ninja) with name and instruction in `lang`. `raw` is no longer created:
 /// the built-in "none" entry covers it (v0.9.4). Used only at first run; the

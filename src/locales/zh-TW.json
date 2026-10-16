@@ -224,6 +224,7 @@
   "overlay.polishing": "AI 潤飾中…",
   "overlay.done": "✓ 已貼上",
   "overlay.doneWith": "✓ 已貼上 — {0}",
+  "overlay.updateAvailable": "⬆ v{0} 已發布 — 從系統匣選單更新",
   "overlay.error": "發生錯誤",
   "overlay.idle": "待命中",
   "overlay.cancel": "取消",

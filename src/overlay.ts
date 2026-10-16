@@ -9,6 +9,7 @@ import type {
   LevelPayload,
   Settings,
   StatusChangedPayload,
+  UpdateInfo,
 } from "./types";
 
 const BAR_COUNT = 14;
@@ -131,6 +132,9 @@ function setCaption(text: string): void {
   caption.scrollTop = caption.scrollHeight;
 }
 
+/** Newer release the backend found, shown after each dictation (v0.12.1). */
+let updateLatest = "";
+
 function applyStatus(payload: StatusChangedPayload): void {
   lastStatusPayload = payload;
   currentStatus = payload.status;
@@ -139,6 +143,11 @@ function applyStatus(payload: StatusChangedPayload): void {
     resetBars();
     // a new recording starts with an empty caption; idle clears it
     setCaption("");
+  }
+  caption.classList.toggle("is-update", payload.status === "done" && updateLatest !== "");
+  if (payload.status === "done" && updateLatest) {
+    // the HUD is the one surface seen on every dictation: hard to miss
+    setCaption(t("overlay.updateAvailable", updateLatest));
   }
   renderCaption(payload);
   // clear CSS animation heights when leaving processing states
@@ -211,6 +220,15 @@ async function init(): Promise<void> {
     applyStatus(event.payload);
     if (event.payload.status === "recording") ackPaint();
   });
+
+  await listen<UpdateInfo>("update-available", (event) => {
+    if (event.payload.update_available) updateLatest = event.payload.latest;
+  });
+  invoke<UpdateInfo | null>("get_available_update")
+    .then((info) => {
+      if (info) updateLatest = info.latest;
+    })
+    .catch(() => {});
 
   await listen<LevelPayload>("level", (event) => {
     onLevel(event.payload.rms);

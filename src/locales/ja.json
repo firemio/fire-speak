@@ -224,6 +224,7 @@
   "overlay.polishing": "AI整形中…",
   "overlay.done": "✓ 貼り付けました",
   "overlay.doneWith": "✓ 貼り付けました — {0}",
+  "overlay.updateAvailable": "⬆ v{0} が出ています — トレイのメニューからアップデート",
   "overlay.error": "エラーが発生しました",
   "overlay.idle": "待機中",
   "overlay.cancel": "キャンセル",

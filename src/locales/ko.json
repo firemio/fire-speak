@@ -224,6 +224,7 @@
   "overlay.polishing": "AI 다듬는 중…",
   "overlay.done": "✓ 붙여넣었습니다",
   "overlay.doneWith": "✓ 붙여넣었습니다 — {0}",
+  "overlay.updateAvailable": "⬆ v{0} 출시 — 트레이 메뉴에서 업데이트",
   "overlay.error": "오류가 발생했습니다",
   "overlay.idle": "대기 중",
   "overlay.cancel": "취소",

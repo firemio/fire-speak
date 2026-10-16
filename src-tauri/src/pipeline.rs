@@ -814,9 +814,12 @@ async fn run_pipeline(
         *status = Status::Idle;
     }
     emit_status(&app, "done", warning.as_deref());
+    // The HUD shows an available update under the result (v0.12.1): leave
+    // it up long enough to read.
+    let linger_ms = if crate::update::available().is_some() { 3500 } else { 1200 };
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(1200)).await;
+        tokio::time::sleep(Duration::from_millis(linger_ms)).await;
         if !is_canceled(&app2, gen) {
             hide_overlay(&app2);
             emit_status(&app2, "idle", None);

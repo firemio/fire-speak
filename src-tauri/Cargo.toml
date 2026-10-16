@@ -1,6 +1,6 @@
 [package]
 name = "fire-speak"
-version = "0.12.0"
+version = "0.12.1"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -36,6 +36,7 @@ tokio = { version = "1.53.1", features = ["full"] }
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "multipart", "stream", "rustls"] }
 sys-locale = "0.3.2"
 tauri-plugin-updater = "2.11.0"
+tauri-plugin-notification = "2"
 url = "2.5.8"
 sha2 = "0.11.0"
 hex = "0.4.3"

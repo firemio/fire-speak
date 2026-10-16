@@ -224,6 +224,7 @@
   "overlay.polishing": "AI-обработка…",
   "overlay.done": "✓ Вставлено",
   "overlay.doneWith": "✓ Вставлено — {0}",
+  "overlay.updateAvailable": "⬆ Доступна v{0} — обновите через меню в трее",
   "overlay.error": "Произошла ошибка",
   "overlay.idle": "Ожидание",
   "overlay.cancel": "Отмена",

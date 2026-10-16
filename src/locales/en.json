@@ -224,6 +224,7 @@
   "overlay.polishing": "AI formatting…",
   "overlay.done": "✓ Pasted",
   "overlay.doneWith": "✓ Pasted — {0}",
+  "overlay.updateAvailable": "⬆ v{0} is available — update from the tray menu",
   "overlay.error": "An error occurred",
   "overlay.idle": "Idle",
   "overlay.cancel": "Cancel",

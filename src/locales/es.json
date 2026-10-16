@@ -224,6 +224,7 @@
   "overlay.polishing": "Aplicando formato con IA…",
   "overlay.done": "✓ Pegado",
   "overlay.doneWith": "✓ Pegado — {0}",
+  "overlay.updateAvailable": "⬆ v{0} disponible — actualiza desde el menú de la bandeja",
   "overlay.error": "Ocurrió un error",
   "overlay.idle": "En espera",
   "overlay.cancel": "Cancelar",
