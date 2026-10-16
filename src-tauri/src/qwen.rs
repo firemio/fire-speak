@@ -59,6 +59,12 @@ pub const MODELS: &[QwenModel] = &[
 /// llama.cpp build pinned like the Lemonade whisper builds: the Vulkan
 /// archive also carries every CPU backend (ggml loads backends at runtime),
 /// so one download serves GPU (`auto`/`gpu`) and CPU (`-dev none`).
+///
+/// Vulkan only, on every platform (v0.12.2, measured on an RTX 4070 Ti SUPER
+/// with 15 s of Japanese): CUDA 12.4 ran no faster (0.6B 0.17 s vs 0.15 s,
+/// 1.7B 0.29 s vs 0.31 s) for a 630 MB download, and the OpenVINO build
+/// (Intel GPU/NPU) fails on the audio encoder ("failed to process mtmd
+/// chunk"). llama.cpp has no AMD NPU backend.
 const LLAMA_TAG: &str = "b11684";
 
 fn llama_asset() -> Option<(&'static str, &'static str)> {
@@ -69,6 +75,13 @@ fn llama_asset() -> Option<(&'static str, &'static str)> {
             "aaf1be43e50527d09b59d4a9eb048252b44dd267eec42bac882fe6086d771c8a",
         ))
     }
+    #[cfg(all(windows, target_arch = "aarch64"))]
+    {
+        Some((
+            "llama-b11684-bin-win-vulkan-arm64.zip",
+            "4bac3b04f6f84cf0e81e9a994f44fb6ccd118f8c9ad1a77658c11d092634f523",
+        ))
+    }
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
         Some((
@@ -76,9 +89,16 @@ fn llama_asset() -> Option<(&'static str, &'static str)> {
             "7d68d9267d26b58ce3f518d9c7144b51aa5a8ed57cc7da58eeb4722f50f68c80",
         ))
     }
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    {
+        Some((
+            "llama-b11684-bin-ubuntu-vulkan-arm64.tar.gz",
+            "d67f8704a71dbd9a2c5ed82fd08cd04b7ffa6e245becf3385d884fb98fef3165",
+        ))
+    }
     #[cfg(not(any(
-        all(windows, target_arch = "x86_64"),
-        all(target_os = "linux", target_arch = "x86_64")
+        all(windows, any(target_arch = "x86_64", target_arch = "aarch64")),
+        all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64"))
     )))]
     {
         None

@@ -817,3 +817,13 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 - **HUD**: 新しい版がある間、音声入力の完了(done)時に字幕欄へ金色で「⬆ v{版} が出ています — トレイのメニューからアップデート」(`overlay.updateAvailable`、12 言語)。このとき done の表示時間を 1.2 秒 → 3.5 秒に延ばす。
 - コマンド `get_available_update` → `UpdateInfo | null`(後から開いたウィンドウ・HUD が既知の結果を読む)。
 - 検証(2026-10-16): version 0.11.0 に偽装した debug ビルドを `--hidden` 起動 → 20 秒後に GitHub を確認し、Windows の通知 DB に「fire-speak v0.12.0 が出ました」のトーストが届いた(未パッケージの debug ビルドなので送信元は PowerShell 名義。インストール版はアプリ名義の想定、未確認)。トレイメニュー・HUD・バッジは画面で未確認。
+
+# v0.12.2 追加仕様: Qwen3-ASR を ARM 機でも / 処理デバイスの整理
+
+- llama-server の配布物に **Windows arm64**(`llama-b11684-bin-win-vulkan-arm64.zip`)と **Linux arm64**(`llama-b11684-bin-ubuntu-vulkan-arm64.tar.gz`)を追加。どちらも Vulkan 版で CPU バックエンド同梱(`-dev none` で CPU)。それまで x64 以外では `ERR_NO_SERVER_ASSET` だった。
+- 処理デバイスは引き続き 自動 / GPU (Vulkan) / CPU。表示名を「GPU (Vulkan) — NVIDIA / AMD / Intel」に(Vulkan は 3 社の GPU で動く)。
+- 他のビルドを入れない理由(2026-10-17、RTX 4070 Ti SUPER、15 秒の日本語、b11684):
+  - CUDA 12.4: 0.6B 0.17 秒 / 1.7B 0.29 秒で Vulkan(0.15 / 0.31 秒)と同等。本体+cudart で約 630 MB 増えるだけ。
+  - OpenVINO(Intel GPU/NPU): 音声エンコーダで `failed to process mtmd chunk`(ggml-openvino の動的形状チェック失敗)。CPU でも動かない。
+  - AMD NPU: llama.cpp にバックエンドが無い。
+- NPU(AMD `hw.npu` / Intel `hw.intel_npu`)がある PC では、Qwen の処理デバイス欄のヒントに「この PC の NPU は Qwen3-ASR では使えません…「ローカル (whisper.cpp)」を選んでください」(`stt.qwenNoNpu`、12 言語)を足す。

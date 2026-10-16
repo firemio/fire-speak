@@ -696,7 +696,8 @@ function renderQwenPanel(): void {
     const s = setupStatus;
     const found = s.hw.gpus.length ? s.hw.gpus.join(" / ") : t("stt.noGpu");
     const resolved = s.qwen.effective_accel === "gpu" ? "GPU (Vulkan)" : "CPU";
-    $("qwen-accel-hint").textContent = `${t("stt.accelDetected", found)} → ${resolved}`;
+    const npuNote = s.hw.npu || s.hw.intel_npu ? ` ${t("stt.qwenNoNpu")}` : "";
+    $("qwen-accel-hint").textContent = `${t("stt.accelDetected", found)} → ${resolved}${npuNote}`;
   }
 
   const host = $("qwen-model-list");
