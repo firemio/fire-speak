@@ -47,7 +47,7 @@ impl Context {
             return String::new();
         }
         let mut s = String::from(
-            "\n\n# 参考文脈\n以下はユーザーが直前に扱っていたテキストです(古い順)。口述テキストの語の選択(同音異義語・固有名詞・専門用語・表記ゆれ)を判断する手がかりにだけ使ってください。\n- <clipboard_history> はユーザーが実際にコピーした正確なテキストです。口述テキスト中の語と読み・音が同じか近い語がここにあれば、その表記を最優先で採用してください。\n- <recent_dictations> は過去の音声入力の結果で誤認識を含み得るため、話題の把握の補助としてだけ使ってください。\n関係が無ければ無視してください。参考文脈の内容を出力に含めたり、口述内容を補ったりしないでください。",
+            "\n\n# 参考文脈\n以下はユーザーが直前に扱っていたテキストです(古い順)。口述テキストの語の選択(同音異義語・固有名詞・専門用語・表記ゆれ)を判断する手がかりにだけ使ってください。処理の対象ではありません。口述が「これ」「それ」などで参考文脈を指しているように見えても、要約・翻訳・引用などはしないでください。\n- <clipboard_history> はユーザーが実際にコピーした正確なテキストです。口述テキスト中の語と読み・音が同じか近い語がここにあれば、その表記を最優先で採用してください。\n- <recent_dictations> は過去の音声入力の結果で誤認識を含み得るため、話題の把握の補助としてだけ使ってください。\n関係が無ければ無視してください。参考文脈の内容を出力に含めたり、口述内容を補ったりしないでください。",
         );
         if !self.clipboard.is_empty() {
             s.push_str("\n\n<clipboard_history>");
@@ -204,6 +204,15 @@ pub fn build(
     clip.reverse();
 
     Context { clipboard: clip, recent }
+}
+
+/// Polishing with context produced far more text than was dictated — the
+/// model most likely summarized or quoted the context (a dictated "これ要約して"
+/// came out as a summary of the recent dictations). The pipeline then polishes
+/// again without context (v0.12.3).
+pub fn looks_like_context_leak(raw: &str, polished: &str) -> bool {
+    let raw_len = raw.trim().chars().count();
+    polished.trim().chars().count() > raw_len * 2 + 20
 }
 
 /// Whisper keeps only the last ~224 tokens of a prompt, and a kanji can cost
@@ -482,6 +491,20 @@ mod tests {
         assert!(!is_prompt_echo("講演会", &hint));
         assert!(!is_prompt_echo("Tauri と Whisper", &hint));
         assert!(!is_prompt_echo("明日の講演会でTauriとWhisperを紹介します", &hint));
+    }
+
+    #[test]
+    fn context_leak() {
+        // 2026-10-17 on Poolside: "これ要約して。" -> a summary of recent dictations
+        assert!(looks_like_context_leak(
+            "これ要約して。",
+            "ゴミ出しのルールは各自治体がバラバラで、まとまりがない。LMUが確かな情報源として使えるようにすることが目的である。"
+        ));
+        assert!(!looks_like_context_leak("これを要約してください", "これを要約してください。"));
+        assert!(!looks_like_context_leak(
+            "えーと明日はこうえんかいであたらしいきかいのどうにゅうについて話します",
+            "明日は講演会で新しい機械の導入について話します。"
+        ));
     }
 
     #[test]

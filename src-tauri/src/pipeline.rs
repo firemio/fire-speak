@@ -757,7 +757,20 @@ async fn run_pipeline(
                 } else {
                     crate::context::Context::default()
                 };
-                match crate::llm::polish(&p, &mode.instruction, &raw_text, &context).await {
+                let mut result = crate::llm::polish(&p, &mode.instruction, &raw_text, &context).await;
+                if let Ok(t) = &result {
+                    if !context.is_empty() && crate::context::looks_like_context_leak(&raw_text, t) {
+                        crate::settings::log_line(&app, "llm: output much longer than dictation; polishing again without context");
+                        result = crate::llm::polish(
+                            &p,
+                            &mode.instruction,
+                            &raw_text,
+                            &crate::context::Context::default(),
+                        )
+                        .await;
+                    }
+                }
+                match result {
                     Ok(t) if !t.trim().is_empty() => final_text = t.trim().to_string(),
                     Ok(_) => {
                         warning = Some("WARN_LLM_FALLBACK".to_string());
