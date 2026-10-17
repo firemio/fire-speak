@@ -872,6 +872,15 @@ button.engine-row.is-active {
   padding-bottom: 2px;
 }
 
+.engine-head .is-sorted {
+  color: var(--accent, #ff8a2a);
+  font-weight: 700;
+}
+
+.engine-head .is-sorted::before {
+  content: "▲ ";
+}
+
 .engine-radio {
   width: 14px;
   height: 14px;

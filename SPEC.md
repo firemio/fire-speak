@@ -928,3 +928,11 @@ v0.13.0 と同じ 8 文(Windows 音声合成 4 声、200 文字)・同じ正規�
 - おすすめ(`recommendedChoice`): NVIDIA / AMD Radeon があれば whisper.cpp、無ければ認識言語が日本語か自動なら Parakeet、それ以外は Qwen3-ASR 0.6B。その行に「この PC におすすめ」バッジ、表の下に「この PC({GPU 名 / GPU なし})には {名前} がおすすめです。」+ 測定条件。
 - ロケール 12 言語(`stt.sortBy`, `stt.sort*`, `stt.col*`, `stt.seconds`, `stt.recommended`, `stt.fit*`, `stt.recoThisPc`, `stt.engineNote`)。v0.14.1 の `stt.engineMeta` は削除。
 - 確認: 静的モック(Tauri IPC スタブ)で GPU なし / NVIDIA の表示、並び替え、Qwen 0.6B 行の選択でパネルが Qwen に切り替わることを確認。
+
+# v0.14.3 変更: 使い道のない whisper モデルを外す / CPU だけの PC は Parakeet から
+
+- 計測(v0.14 と同じ 8 文、1 文あたり、GPU = RTX 4070 Ti SUPER / CPU = Ryzen 7 9800X3D 8 スレッド): whisper tiny 誤り 24.5%・0.06 / 0.19 秒、base 12.0%・0.08 / 0.39 秒、small 8.5%・0.12 / 1.3 秒。日本語では Parakeet(2.0%・CPU 0.32 秒)が精度・速さとも上回り、medium は large-v3-turbo に劣る。tiny は「東京都千代田区丸の内一丁目」→「東京都知用だくなるのをちい調明に」で実用外。
+- whisper のダウンロード対象は large-v3-turbo のみ(`setup::DOWNLOADABLE`)。tiny / base / small / medium は `MODELS` に残し、インストール済みなら従来どおり一覧に出て選べる・使える(既存環境を壊さない)。`download_model` は対象外を `ERR_INTERNAL` で拒否。`recommended_model` は常に large-v3-turbo。
+- 初回セットアップ(ホームのカード): engine = local・whisper のサーバーもモデルも未導入・モデルパス上書きなし・処理デバイスが CPU のとき、比較表のおすすめ(`recommendedChoice`)に切り替えて案内する(`onboardRedirect`)。日本語/自動 → Parakeet(CrispASR が無い Windows arm64 では Qwen3-ASR 0.6B)、それ以外の言語 → Qwen3-ASR 0.6B。「セットアップを開始」で `stt.engine`(と Qwen のモデル)を保存してから `quick_setup`。おすすめ先がすでに入っている場合は切り替えない。
+- `SetupStatus.crisp.available`: この OS/CPU 向けの CrispASR があるか。
+- 比較表: 並び順に使っている列の見出しを強調(▲ + アクセント色)。

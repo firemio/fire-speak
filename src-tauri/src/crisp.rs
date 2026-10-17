@@ -118,6 +118,8 @@ pub struct CrispModelInfo {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CrispStatus {
+    /// A CrispASR build exists for this platform (none for Windows arm64).
+    pub available: bool,
     pub server_installed: bool,
     pub server_path: String,
     pub models: Vec<CrispModelInfo>,
@@ -195,6 +197,7 @@ fn running() -> bool {
 pub fn status(app: &AppHandle, settings: &Settings) -> CrispStatus {
     let server = server_path(app);
     CrispStatus {
+        available: crisp_asset().is_some(),
         server_installed: server.is_some(),
         server_path: server
             .map(|p| p.to_string_lossy().to_string())

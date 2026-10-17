@@ -164,6 +164,8 @@ export interface QwenStatus {
 }
 
 export interface CrispStatus {
+  /** A CrispASR build exists for this platform (none for Windows arm64). */
+  available: boolean;
   server_installed: boolean;
   server_path: string;
   /** One model per engine; `id` is the engine ("parakeet" | "cohere"). */

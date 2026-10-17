@@ -385,10 +385,33 @@ interface OnboardStep {
   done: boolean;
 }
 
+/**
+ * First run on a PC without an NVIDIA / Radeon GPU (v0.14.3): instead of
+ * whisper on the CPU (5.5 s per sentence), the setup card installs the
+ * engine the comparison chart recommends — Parakeet for Japanese, else
+ * Qwen3-ASR 0.6B — and switches to it. Only while nothing of whisper is
+ * installed and no custom model path is set.
+ */
+function onboardRedirect(s: SetupStatus): EngineChoice | null {
+  if (!settings || settings.stt.engine !== "local") return null;
+  if (s.server_installed || s.model_installed || settings.stt.local.model_path.trim() !== "") return null;
+  if (s.effective_accel !== "cpu") return null;
+  const reco = recommendedChoice();
+  if (!reco || reco.engine === "local") return null;
+  // already fully installed: the user picked whisper on purpose
+  const ready =
+    reco.engine === "qwen"
+      ? s.qwen.server_installed && !!s.qwen.models.find((m) => m.id === reco.qwenModel)?.installed
+      : s.crisp.server_installed && !!s.crisp.models.find((m) => m.id === reco.engine)?.installed;
+  return ready ? null : reco;
+}
+
 /** Steps of the one-click setup for the current machine, or null if the local engine is not in use. */
 function onboardSteps(s: SetupStatus): OnboardStep[] | null {
-  if (settings?.stt.engine === "qwen") {
-    const id = settings.stt.qwen.model;
+  const redirect = onboardRedirect(s);
+  const engine = redirect ? redirect.engine : settings?.stt.engine;
+  if (settings && engine === "qwen") {
+    const id = redirect?.qwenModel ?? settings.stt.qwen.model;
     return [
       {
         key: downloadKey("qwen-server", "llama-server"),
@@ -400,12 +423,12 @@ function onboardSteps(s: SetupStatus): OnboardStep[] | null {
         key: downloadKey("qwen-model", id),
         label: t("onboard.stepModel", qwenModelLabel(id)),
         sizeMb: s.qwen.models.find((m) => m.id === id)?.size_mb ?? 0,
-        done: s.qwen.model_installed,
+        done: !!s.qwen.models.find((m) => m.id === id)?.installed,
       },
     ];
   }
-  if (settings && isCrispEngine(settings.stt.engine)) {
-    const id = settings.stt.engine;
+  if (settings && engine && isCrispEngine(engine)) {
+    const id = engine;
     const m = s.crisp.models.find((x) => x.id === id);
     return [
       {
@@ -494,6 +517,13 @@ async function runQuickSetup(): Promise<void> {
   quickSetupRunning = true;
   renderOnboard();
   try {
+    const redirect = setupStatus ? onboardRedirect(setupStatus) : null;
+    if (redirect && settings) {
+      settings.stt.engine = redirect.engine;
+      if (redirect.qwenModel) settings.stt.qwen.model = redirect.qwenModel;
+      await persistSettings();
+      renderSttSection();
+    }
     await invoke("quick_setup");
     toast(t("onboard.done", settings ? displayHotkey(settings.hotkey) : ""));
   } catch (e: unknown) {
@@ -714,7 +744,9 @@ function recommendedChoice(): EngineChoice | null {
   if (!hw || !settings) return null;
   if (hw.nvidia || hw.amd_gpu) return ENGINE_CHOICES[0];
   const ja = settings.language === "ja" || settings.language === "auto" || settings.language === "";
-  return ENGINE_CHOICES.find((c) => (ja ? c.engine === "parakeet" : c.qwenModel === "0.6b")) ?? null;
+  // no CrispASR build for Windows arm64
+  const parakeet = ja && !!setupStatus?.crisp.available;
+  return ENGINE_CHOICES.find((c) => (parakeet ? c.engine === "parakeet" : c.qwenModel === "0.6b")) ?? null;
 }
 
 function isChoiceActive(c: EngineChoice): boolean {
@@ -737,6 +769,10 @@ function renderEngineCompare(): void {
   if (!settings) return;
   for (const b of document.querySelectorAll<HTMLButtonElement>("#engine-sort-seg button")) {
     b.classList.toggle("is-active", b.dataset.sort === engineSort);
+  }
+  // the column the rows are ordered by
+  for (const h of document.querySelectorAll<HTMLElement>(".engine-head [data-col]")) {
+    h.classList.toggle("is-sorted", h.dataset.col === engineSort);
   }
   const key: Record<EngineSort, (c: EngineChoice) => number> = {
     accuracy: (c) => c.err,

@@ -15,6 +15,12 @@ pub const MODELS: &[(&str, u64)] = &[
     ("large-v3-turbo", 1624),
 ];
 
+/// Models offered for download (v0.14.3). The smaller ones lose to Parakeet
+/// in Japanese on both accuracy and CPU speed (tiny 24.5%, base 12.0%,
+/// small 8.5% character error rate vs 2.0%), and medium to large-v3-turbo;
+/// they stay in `MODELS` so existing installs keep working and are listed.
+const DOWNLOADABLE: &[&str] = &["large-v3-turbo"];
+
 /// Preference order when the user did not pin a model path.
 const MODEL_PREFERENCE: &[&str] = &["large-v3-turbo", "medium", "small", "base", "tiny"];
 
@@ -141,15 +147,11 @@ fn server_running(app: &AppHandle) -> bool {
         .unwrap_or(false)
 }
 
-/// Model for the one-click setup: large-v3-turbo wherever a GPU/NPU runs it
-/// (0.2 s for 11 s of speech on a GPU), `small` on the CPU, where the turbo
-/// model takes about 6 s for the same clip.
-pub fn recommended_model(accel: &str) -> &'static str {
-    if accel == "cpu" {
-        "small"
-    } else {
-        "large-v3-turbo"
-    }
+/// Model for the one-click setup: always large-v3-turbo (v0.14.3). On a
+/// CPU-only PC the settings screen sends the user to Parakeet / Qwen3-ASR
+/// 0.6B instead of a smaller whisper model.
+pub fn recommended_model(_accel: &str) -> &'static str {
+    "large-v3-turbo"
 }
 
 /// Whether the NVIDIA driver (and therefore CUDA) is present on this machine.
@@ -556,6 +558,7 @@ pub fn get_setup_status(app: &AppHandle, settings: &Settings) -> Result<SetupSta
             installed: mdir.join(format!("ggml-{name}.bin")).exists(),
             size_mb: *size_mb,
         })
+        .filter(|m| m.installed || DOWNLOADABLE.contains(&m.name.as_str()))
         .collect();
     let server_backend = server
         .as_deref()
@@ -1708,7 +1711,7 @@ impl Drop for ModelDownloadGuard {
 }
 
 pub async fn download_model(app: AppHandle, model: String) -> Result<(), String> {
-    if !MODELS.iter().any(|(n, _)| *n == model) {
+    if !DOWNLOADABLE.contains(&model.as_str()) {
         return Err(format!("ERR_INTERNAL|unknown model: {model}"));
     }
     {
