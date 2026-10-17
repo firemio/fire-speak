@@ -1842,3 +1842,43 @@ dialog.modal[open] {
   overflow-wrap: anywhere;
   user-select: text;
 }
+
+/* ---------- v0.15 layout: home context line, AI page modes, history tools ---------- */
+.home-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 2px 0;
+}
+
+.home-context .hint {
+  margin: 0;
+}
+
+.llm-modes {
+  margin-top: 28px;
+}
+
+.history-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.history-limit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-limit input {
+  width: 80px;
+}
+
+.stt-lang-card {
+  margin-bottom: 18px;
+}
+
+.add-provider-row {
+  margin-top: 10px;
+}

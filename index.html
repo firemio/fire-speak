@@ -40,26 +40,20 @@
           <button class="nav-item is-active" data-section="home">
             <span class="nav-icon">🏠</span><span data-i18n="nav.home">ホーム</span>
           </button>
-          <button class="nav-item" data-section="general">
-            <span class="nav-icon">⚙️</span><span data-i18n="nav.general">一般</span>
-          </button>
           <button class="nav-item" data-section="stt">
             <span class="nav-icon">🎙️</span><span data-i18n="nav.stt">音声認識</span>
           </button>
           <button class="nav-item" data-section="llm">
             <span class="nav-icon">✨</span><span data-i18n="nav.llm">AI整形</span>
           </button>
-          <button class="nav-item" data-section="modes">
-            <span class="nav-icon">🧩</span><span data-i18n="nav.modes">モード</span>
+          <button class="nav-item" data-section="dictionary">
+            <span class="nav-icon">📖</span><span data-i18n="nav.dictionary">用語辞書</span>
           </button>
           <button class="nav-item" data-section="history">
             <span class="nav-icon">🕘</span><span data-i18n="nav.history">履歴</span>
           </button>
-          <button class="nav-item" data-section="dictionary">
-            <span class="nav-icon">📖</span><span data-i18n="nav.dictionary">用語辞書</span>
-          </button>
-          <button class="nav-item" data-section="update">
-            <span class="nav-icon">🔄</span><span data-i18n="nav.update">アップデート</span>
+          <button class="nav-item" data-section="general">
+            <span class="nav-icon">⚙️</span><span data-i18n="nav.general">設定</span>
             <span class="nav-badge" id="nav-update-badge" hidden></span>
           </button>
         </nav>
@@ -114,6 +108,11 @@
             </button>
           </div>
 
+          <div class="home-context">
+            <span class="hint" id="home-context-text"></span>
+            <button class="btn btn-ghost btn-sm" id="btn-home-context" data-i18n="sys.change">変更</button>
+          </div>
+
           <h2 class="section-heading" id="home-status-heading" data-i18n="sys.heading" hidden>動作状況</h2>
           <div class="card sys-card" id="home-status" hidden></div>
 
@@ -126,6 +125,15 @@
 
         <!-- 音声認識 -->
         <section class="section" id="section-stt">
+          <div class="card stt-lang-card">
+            <div class="form-grid">
+              <label class="field">
+                <span class="field-label" data-i18n="general.language">認識言語</span>
+                <select id="in-language"></select>
+              </label>
+            </div>
+          </div>
+
           <h2 class="section-heading" data-i18n="stt.engineHeading">音声認識エンジン</h2>
           <div class="card engine-compare" id="stt-engine-seg">
             <div class="engine-sort">
@@ -333,50 +341,51 @@
 
           <div class="test-row">
             <button class="btn" id="btn-test-stt" data-i18n="stt.testBtn">🔌 接続テスト</button>
-            <button class="btn btn-ghost" id="btn-open-config" data-i18n="setup.openConfig">📂 設定フォルダを開く</button>
             <span class="test-result" id="stt-test-result"></span>
           </div>
         </section>
 
         <!-- AI整形 -->
         <section class="section" id="section-llm">
-          <div class="section-head-row">
-            <h2 class="section-heading" data-i18n="llm.heading">整形プロバイダ</h2>
-            <button class="btn btn-sm" id="btn-add-provider" data-i18n="llm.add">＋ プロバイダを追加</button>
-          </div>
+          <h2 class="section-heading" data-i18n="llm.heading">整形プロバイダ</h2>
           <div class="hint" data-i18n="llm.hint">
             アクティブに設定したプロバイダが、モードの整形指示の実行に使われます。
           </div>
-          <div class="preset-row">
-            <span class="field-label" data-i18n="llm.preset">プリセット</span>
+          <div id="provider-list" class="stack"></div>
+          <div class="preset-row add-provider-row">
+            <span class="field-label" data-i18n="llm.addLabel">＋ 追加</span>
             <button class="btn btn-sm" data-llm-preset="poolside">Poolside</button>
             <button class="btn btn-sm" data-llm-preset="anthropic">Claude</button>
             <button class="btn btn-sm" data-llm-preset="openai">OpenAI</button>
             <button class="btn btn-sm" data-llm-preset="openrouter">OpenRouter</button>
             <button class="btn btn-sm" data-llm-preset="groq">Groq</button>
             <button class="btn btn-sm" data-llm-preset="ollama">Ollama</button>
-            <span class="hint" data-i18n="llm.presetHint">URL とモデルを埋めたプロバイダを追加します。API キーは各サービスで発行して貼り付けてください</span>
+            <button class="btn btn-sm btn-ghost" id="btn-add-provider" data-i18n="llm.custom">カスタム</button>
           </div>
-          <div id="provider-list" class="stack"></div>
-        </section>
 
-        <!-- モード -->
-        <section class="section" id="section-modes">
-          <div class="section-head-row">
-            <h2 class="section-heading" data-i18n="modes.heading">モード管理</h2>
-            <button class="btn btn-sm" id="btn-add-mode" data-i18n="modes.add">＋ モードを追加</button>
-          </div>
+          <div class="llm-modes">
+          <h2 class="section-heading" data-i18n="modes.heading">モード管理</h2>
           <div class="hint" data-i18n="modes.hint">
             モードごとの整形指示を編集できます。無効にしたモードは灰色になり選べません。「なし」を選ぶと文字起こし結果をそのまま入力します。
           </div>
           <div id="mode-list" class="stack"></div>
+          <div class="preset-row add-provider-row">
+            <button class="btn btn-sm" id="btn-add-mode" data-i18n="modes.add">＋ モードを追加</button>
+          </div>
+        </div>
         </section>
 
         <!-- 履歴 -->
         <section class="section" id="section-history">
           <div class="section-head-row">
             <h2 class="section-heading" data-i18n="nav.history">履歴</h2>
-            <button class="btn btn-danger btn-sm" id="btn-clear-history" data-i18n="history.clear">🗑 全消去</button>
+            <div class="history-tools">
+              <label class="history-limit">
+                <span class="field-label" data-i18n="general.historyLimit">履歴保存件数</span>
+                <input type="number" id="in-history-limit" min="0" max="1000" />
+              </label>
+              <button class="btn btn-danger btn-sm" id="btn-clear-history" data-i18n="history.clear">🗑 全消去</button>
+            </div>
           </div>
           <div id="history-list" class="stack"></div>
         </section>
@@ -401,22 +410,8 @@
           <div id="dict-list" class="stack"></div>
         </section>
 
-        <!-- 一般 -->
+        <!-- 設定 (v0.15: 一般 + アップデート) -->
         <section class="section" id="section-general">
-          <div class="card">
-            <div class="card-title" data-i18n="general.languageHeading">言語</div>
-            <div class="form-grid">
-              <label class="field">
-                <span class="field-label" data-i18n="general.uiLang">表示言語</span>
-                <select id="in-ui-lang"></select>
-              </label>
-              <label class="field">
-                <span class="field-label" data-i18n="general.language">認識言語</span>
-                <select id="in-language"></select>
-              </label>
-            </div>
-          </div>
-
           <div class="card">
             <div class="card-title" data-i18n="general.hotkeyHeading">ホットキー</div>
             <div class="form-grid">
@@ -461,13 +456,12 @@
                 </span>
                 <input type="checkbox" id="in-restore-clipboard" class="switch" />
               </label>
-              <label class="switch-row">
-                <span>
-                  <span class="switch-title" data-i18n="general.liveCaption">リアルタイム字幕</span>
-                  <span class="switch-desc" data-i18n="general.liveCaptionDesc">録音中に認識途中のテキストをポップアップに表示します（クラウド認識ではリクエスト数が増えます）</span>
-                </span>
-                <input type="checkbox" id="in-live-caption" class="switch" />
-              </label>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title" data-i18n="general.behaviorHeading">動作</div>
+            <div class="switch-rows">
               <label class="switch-row">
                 <span>
                   <span class="switch-title" data-i18n="general.llmContext">文脈で語を選ぶ</span>
@@ -475,11 +469,24 @@
                 </span>
                 <input type="checkbox" id="in-llm-context" class="switch" />
               </label>
+              <label class="switch-row">
+                <span>
+                  <span class="switch-title" data-i18n="general.liveCaption">リアルタイム字幕</span>
+                  <span class="switch-desc" data-i18n="general.liveCaptionDesc">録音中に認識途中のテキストをポップアップに表示します（クラウド認識ではリクエスト数が増えます）</span>
+                </span>
+                <input type="checkbox" id="in-live-caption" class="switch" />
+              </label>
             </div>
           </div>
 
           <div class="card">
             <div class="card-title" data-i18n="general.systemHeading">システム</div>
+            <div class="form-grid">
+              <label class="field">
+                <span class="field-label" data-i18n="general.uiLang">表示言語</span>
+                <select id="in-ui-lang"></select>
+              </label>
+            </div>
             <div class="switch-rows">
               <label class="switch-row">
                 <span>
@@ -489,19 +496,12 @@
                 <input type="checkbox" id="in-autostart" class="switch" />
               </label>
             </div>
-            <div class="form-grid">
-              <label class="field">
-                <span class="field-label" data-i18n="general.historyLimit">履歴保存件数</span>
-                <input type="number" id="in-history-limit" min="0" max="1000" />
-              </label>
+            <div class="test-row">
+              <button class="btn btn-ghost btn-sm" id="btn-open-config" data-i18n="setup.openConfig">📂 設定フォルダを開く</button>
             </div>
           </div>
-        </section>
-
-        <!-- アップデート -->
-        <section class="section" id="section-update">
-          <h2 class="section-heading" data-i18n="nav.update">アップデート</h2>
           <div class="card">
+            <div class="card-title" data-i18n="nav.update">アップデート</div>
             <div class="update-version-row">
               <span data-i18n="update.currentVersion">現在のバージョン</span>
               <span class="hotkey-chip" id="update-current-version">—</span>
@@ -522,9 +522,6 @@
                 <span class="test-result" id="update-install-result"></span>
               </div>
             </div>
-          </div>
-
-          <div class="card">
             <div class="switch-rows">
               <label class="switch-row">
                 <span>
@@ -536,20 +533,8 @@
             </div>
           </div>
 
-          <details class="card details-card">
-            <summary data-i18n="common.advanced">詳細設定</summary>
-            <div class="form-grid">
-              <label class="field">
-                <span class="field-label" data-i18n="update.owner">GitHub オーナー</span>
-                <input type="text" id="in-update-owner" spellcheck="false" placeholder="firemio" />
-              </label>
-              <label class="field">
-                <span class="field-label" data-i18n="update.repo">リポジトリ名</span>
-                <input type="text" id="in-update-repo" spellcheck="false" placeholder="fire-speak" />
-              </label>
-            </div>
-          </details>
         </section>
+
       </main>
     </div>
 

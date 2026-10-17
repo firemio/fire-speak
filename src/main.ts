@@ -225,7 +225,7 @@ function flushApiKeySave(): void {
 // navigation
 // ---------------------------------------------------------------------------
 
-const SECTION_NAMES = ["home", "general", "stt", "llm", "modes", "history", "dictionary", "update"];
+const SECTION_NAMES = ["home", "stt", "llm", "dictionary", "history", "general"];
 
 function showSection(name: string): void {
   for (const btn of document.querySelectorAll<HTMLButtonElement>(".nav-item")) {
@@ -288,6 +288,8 @@ function setStatusPill(payload: StatusChangedPayload): void {
 function renderHome(): void {
   if (!settings) return;
   $("home-hotkey").textContent = displayHotkey(settings.hotkey);
+  // what the context feature reads (v0.15): the clipboard is not obvious
+  $("home-context-text").textContent = t(settings.llm_context ? "home.contextOn" : "home.contextOff");
   renderOnboard();
   renderHomeStatus();
   renderHomeModes();
@@ -540,6 +542,7 @@ async function runQuickSetup(): Promise<void> {
 
 function wireOnboard(): void {
   $("btn-quick-setup").addEventListener("click", () => void runQuickSetup());
+  $("btn-home-context").addEventListener("click", () => showSection("general"));
   $("btn-onboard-cloud").addEventListener("click", async () => {
     if (!settings) return;
     settings.stt.engine = "cloud";
@@ -687,8 +690,8 @@ function renderHomeStatus(): void {
   const lang = STT_LANGS.find((l) => l.code === settings?.language);
   card.appendChild(
     lang
-      ? statusRow("ok", t("sys.language"), lang.label, "general")
-      : statusRow("warn", t("sys.language"), t("sys.langAuto"), "general"),
+      ? statusRow("ok", t("sys.language"), lang.label, "stt")
+      : statusRow("warn", t("sys.language"), t("sys.langAuto"), "stt"),
   );
 
   const mode = activeMode();
@@ -1172,7 +1175,10 @@ function renderSttModelList(): void {
     host.appendChild(wrap);
   };
 
-  addRow(
+  // Only large-v3-turbo is offered (v0.14.3); the "auto" row is noise unless
+  // older models are installed alongside it.
+  const single = models.length <= 1;
+  if (!single) addRow(
     t("stt.autoModel"),
     setupStatus?.model_installed ? t("stt.available") : t("stt.modelNotInstalled"),
     currentPath === "",
@@ -1189,7 +1195,9 @@ function renderSttModelList(): void {
 
   for (const m of models) {
     const managed = managedModelPathFor(m.name);
-    const selected = managed !== null && currentPath === managed && currentPath !== "";
+    const selected = single
+      ? m.installed && (currentPath === "" || currentPath === managed)
+      : managed !== null && currentPath === managed && currentPath !== "";
     addRow(
       m.name,
       m.installed
@@ -1204,7 +1212,7 @@ function renderSttModelList(): void {
         renderSttModelList();
         scheduleSave();
       },
-      { name: m.name, installed: m.installed },
+      m.installed ? null : { name: m.name, installed: false },
     );
   }
 }
@@ -2533,8 +2541,6 @@ async function openUpdateUrl(url: string): Promise<void> {
 function renderUpdateSection(): void {
   if (!settings) return;
   input("in-auto-check").checked = settings.update.auto_check;
-  input("in-update-owner").value = settings.update.owner;
-  input("in-update-repo").value = settings.update.repo;
   renderUpdateResult();
 }
 
@@ -2689,16 +2695,6 @@ function wireUpdateSection(): void {
   input("in-auto-check").addEventListener("change", () => {
     if (!settings) return;
     settings.update.auto_check = input("in-auto-check").checked;
-    scheduleSave();
-  });
-  input("in-update-owner").addEventListener("input", () => {
-    if (!settings) return;
-    settings.update.owner = input("in-update-owner").value.trim();
-    scheduleSave();
-  });
-  input("in-update-repo").addEventListener("input", () => {
-    if (!settings) return;
-    settings.update.repo = input("in-update-repo").value.trim();
     scheduleSave();
   });
 }
