@@ -408,6 +408,11 @@
             <button class="btn btn-primary btn-sm" id="btn-dict-add" data-i18n="dict.add">追加</button>
           </div>
           <div id="dict-list" class="stack"></div>
+          <details class="card details-card glossary-card">
+            <summary id="glossary-summary" data-i18n="dict.builtin">組み込みの用語</summary>
+            <div class="hint" data-i18n="dict.builtinHint">アプリに最初から入っている用語です。誤認識の表記はその場で直し、読み(カタカナ)が聞こえたときは AI 整形に正しい表記を伝えます。自分の辞書が優先されます。</div>
+            <div id="glossary-list"></div>
+          </details>
         </section>
 
         <!-- 設定 (v0.15: 一般 + アップデート) -->

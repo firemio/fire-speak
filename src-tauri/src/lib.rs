@@ -1,6 +1,7 @@
 mod audio;
 mod context;
 mod dictionary;
+mod glossary;
 mod history;
 mod hw;
 mod hook;
@@ -464,6 +465,22 @@ fn dict_remove(app: AppHandle, term: String) -> Result<(), String> {
     dictionary::remove(&app, &term)
 }
 
+/// Built-in glossary for the settings screen (v0.15.2).
+#[tauri::command]
+fn glossary_list() -> Vec<serde_json::Value> {
+    glossary::ENTRIES
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "term": e.term,
+                "aliases": e.aliases,
+                "readings": e.readings,
+                "category": e.category,
+            })
+        })
+        .collect()
+}
+
 #[tauri::command]
 async fn copy_text(text: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || paste::copy_only(&text))
@@ -765,6 +782,7 @@ pub fn run() {
             dict_list,
             dict_add,
             dict_remove,
+            glossary_list,
             copy_text,
             test_stt,
             test_llm,

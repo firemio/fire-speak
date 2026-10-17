@@ -741,7 +741,8 @@ async fn run_pipeline(
         return Err("ERR_NO_SPEECH".to_string());
     }
     // known misrecognitions of dictionary terms, replaced without an LLM
-    let corrected = crate::dictionary::apply_aliases(&dict, &raw_text);
+    // (the user's dictionary first, so it can override the built-in glossary)
+    let corrected = crate::glossary::apply_aliases(&crate::dictionary::apply_aliases(&dict, &raw_text));
 
     // 3. LLM polish (optional)
     let mode = settings
@@ -789,7 +790,17 @@ async fn run_pipeline(
                 } else {
                     crate::context::Context::default()
                 };
-                context.terms = dict_terms.iter().take(crate::dictionary::PROMPT_TERMS_MAX).cloned().collect();
+                // built-in glossary terms whose reading was heard come first:
+                // they are about this very dictation (v0.15.2)
+                let (glossary_hint, _) = crate::glossary::hinted_terms(&corrected);
+                let mut terms = glossary_hint;
+                for t in &dict_terms {
+                    if !terms.contains(t) {
+                        terms.push(t.clone());
+                    }
+                }
+                terms.truncate(crate::dictionary::PROMPT_TERMS_MAX);
+                context.terms = terms;
                 let mut result = crate::llm::polish(&p, &mode.instruction, &corrected, &context).await;
                 if let Ok(t) = &result {
                     if !context.is_empty() && crate::context::looks_like_context_leak(&corrected, t) {
@@ -805,8 +816,15 @@ async fn run_pipeline(
                 }
                 match result {
                     Ok(t) if !t.trim().is_empty() => {
-                        final_text = crate::dictionary::apply_aliases(&dict, t.trim());
-                        let terms = crate::context::term_fix_candidates(&clip_terms, &final_text);
+                        final_text = crate::glossary::apply_aliases(&crate::dictionary::apply_aliases(&dict, t.trim()));
+                        // clipboard terms + glossary proper nouns whose reading is still in the text
+                        let mut fix_pool = clip_terms.clone();
+                        for t in crate::glossary::hinted_terms(&final_text).1 {
+                            if !fix_pool.contains(&t) {
+                                fix_pool.push(t);
+                            }
+                        }
+                        let terms = crate::context::term_fix_candidates(&fix_pool, &final_text);
                         if !terms.is_empty() && !is_canceled(&app, gen) {
                             match crate::llm::fix_terms(&p, &final_text, &terms).await {
                                 Ok(fixed) if crate::context::accept_term_fix(&final_text, &fixed, &terms) => {

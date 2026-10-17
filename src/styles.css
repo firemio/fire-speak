@@ -1882,3 +1882,36 @@ dialog.modal[open] {
 .add-provider-row {
   margin-top: 10px;
 }
+
+/* built-in glossary (v0.15.2) */
+.glossary-card {
+  margin-top: 12px;
+}
+
+.glossary-cat {
+  margin: 14px 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+.glossary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 4px 16px;
+}
+
+.glossary-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12.5px;
+}
+
+.glossary-row .dict-aliases {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin: 0;
+}

@@ -1820,7 +1820,47 @@ async function refreshDictionary(): Promise<void> {
   renderDictList();
 }
 
+interface GlossaryEntry {
+  term: string;
+  aliases: string[];
+  readings: string[];
+  category: "ai" | "dev" | "life";
+}
+
+let glossaryEntries: GlossaryEntry[] = [];
+
+/** Built-in glossary (v0.15.2), grouped by category; read-only. */
+function renderGlossary(): void {
+  $("glossary-summary").textContent = t("dict.builtinCount", String(glossaryEntries.length));
+  const host = $("glossary-list");
+  host.textContent = "";
+  for (const cat of ["ai", "dev", "life"] as const) {
+    const items = glossaryEntries.filter((g) => g.category === cat);
+    if (!items.length) continue;
+    host.appendChild(el("div", "glossary-cat", `${t(`dict.cat_${cat}`)} (${items.length})`));
+    const grid = el("div", "glossary-grid");
+    for (const g of items) {
+      const row = el("div", "glossary-row");
+      row.appendChild(el("span", "dict-term", g.term));
+      const heard = [...g.aliases, ...g.readings];
+      row.appendChild(el("span", "dict-aliases", heard.join(", ")));
+      grid.appendChild(row);
+    }
+    host.appendChild(grid);
+  }
+}
+
+async function refreshGlossary(): Promise<void> {
+  try {
+    glossaryEntries = await invoke<GlossaryEntry[]>("glossary_list");
+  } catch {
+    glossaryEntries = [];
+  }
+  renderGlossary();
+}
+
 function wireDictionarySection(): void {
+  void refreshGlossary();
   const add = async () => {
     const termIn = $("in-dict-term") as HTMLInputElement;
     const aliasIn = $("in-dict-aliases") as HTMLInputElement;
@@ -2755,6 +2795,7 @@ function applyLanguage(code: string): void {
   setStatusPill(lastStatusPayload);
   renderAll();
   renderHistoryList();
+  renderGlossary();
   // Persistent one-shot result lines cannot be re-translated (they hold
   // free-form past results) — clear them instead of showing stale language.
   for (const id of ["stt-test-result", "update-check-result"]) {
