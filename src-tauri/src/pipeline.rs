@@ -59,6 +59,26 @@ const SILENT_SKIP_SECS: f32 = 1.5;
 /// Internal result of the gate for short silent recordings; never emitted.
 const SILENT_SKIP: &str = "SILENT_SKIP";
 
+/// Minimum seconds the voice detector must hear (v0.15.1). The peak gate
+/// alone let clicks, typing and room noise through, and Parakeet / Cohere /
+/// Qwen3-ASR answer those with "うん。" "はい。" "フフフ。" — they have no
+/// no-speech signal of their own. Synthetic tests: clicks, typing, room
+/// noise and digital silence score 0–0.1 s; every test sentence 3+ s.
+const MIN_VOICE_SECS: f32 = 0.2;
+/// earshot frame: 256 samples (16 ms) at 16 kHz.
+const VOICE_FRAME: usize = 256;
+
+/// Seconds of 16 ms frames that the earshot voice detector (a small neural
+/// VAD in pure Rust) scores as voice.
+fn voice_seconds(samples: &[i16]) -> f32 {
+    let mut detector = earshot::Detector::default();
+    let voiced = samples
+        .chunks_exact(VOICE_FRAME)
+        .filter(|frame| detector.predict_i16(frame) >= 0.5)
+        .count();
+    voiced as f32 * VOICE_FRAME as f32 / 16_000.0
+}
+
 /// Seconds of 20 ms frames whose peak is above `GATE_FRAME_PEAK`.
 fn speech_seconds(samples: &[i16]) -> f32 {
     let threshold = (GATE_FRAME_PEAK * i16::MAX as f32) as i32;
@@ -541,8 +561,8 @@ fn spawn_live_captions(app: AppHandle, gen: u64) {
                 continue; // not enough new audio yet
             }
             last_end = snap.end;
-            if snap.peak < CAPTION_SILENCE_PEAK {
-                continue; // silence: nothing to transcribe
+            if snap.peak < CAPTION_SILENCE_PEAK || voice_seconds(&snap.samples) < MIN_VOICE_SECS {
+                continue; // silence or noise: nothing to transcribe
             }
             let wav = match crate::audio::wav_bytes(&snap.samples) {
                 Ok(w) => w,
@@ -663,8 +683,10 @@ async fn run_pipeline(
     }
     // Speech gate: a click or a modifier tap holds no speech; sending it
     // would only get a hallucinated sign-off back.
-    if speech_seconds(&samples) < MIN_SPEECH_SECS {
+    let voice = voice_seconds(&samples);
+    if speech_seconds(&samples) < MIN_SPEECH_SECS || voice < MIN_VOICE_SECS {
         let total_secs = samples.len() as f32 / 16_000.0;
+        eprintln!("speech gate: no voice ({voice:.2}s voiced of {total_secs:.1}s)");
         return Err(if total_secs < SILENT_SKIP_SECS {
             SILENT_SKIP.to_string()
         } else {
@@ -975,5 +997,35 @@ mod gate_tests {
             .collect();
         assert!(speech_seconds(&tone) >= MIN_SPEECH_SECS);
         assert_eq!(speech_seconds(&[0i16; 16_000]), 0.0);
+    }
+
+    #[test]
+    fn voice_gate_ignores_clicks() {
+        // 3 s of faint noise with seven 25 ms clicks: loud, but not voice
+        let mut seed = 1u32;
+        let mut rnd = || {
+            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            (seed >> 16) as f32 / 32_768.0 - 1.0
+        };
+        let mut clicks: Vec<i16> = (0..48_000).map(|_| (rnd() * 100.0) as i16).collect();
+        for start in [6_400, 7_200, 19_200, 20_000, 33_600, 34_400, 41_600] {
+            for k in 0..400 {
+                let v = clicks[start + k] as f32 + rnd().signum() * 12_000.0 * (-(k as f32) / 60.0).exp();
+                clicks[start + k] = v.clamp(-32_767.0, 32_767.0) as i16;
+            }
+        }
+        assert!(voice_seconds(&clicks) < MIN_VOICE_SECS);
+        assert_eq!(voice_seconds(&[0i16; 16_000]), 0.0);
+    }
+
+    /// `FIRE_SPEAK_VOICE_WAV=<16 kHz mono speech wav> cargo test --lib voice_gate_passes_speech -- --ignored`
+    #[test]
+    #[ignore]
+    fn voice_gate_passes_speech() {
+        let bytes = std::fs::read(std::env::var("FIRE_SPEAK_VOICE_WAV").unwrap()).unwrap();
+        let samples: Vec<i16> = bytes[44..].chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
+        let v = voice_seconds(&samples);
+        println!("voiced {v:.2}s");
+        assert!(v > 1.0);
     }
 }

@@ -948,3 +948,11 @@ v0.13.0 と同じ 8 文(Windows 音声合成 4 声、200 文字)・同じ正規�
 - README: 用語辞書が自動で育つ仕組みを記載。
 - ロケール 12 言語(`nav.general` の訳を「設定」に、`general.behaviorHeading`、`home.context*`、`llm.addLabel`、`llm.custom`)。
 - 確認: 静的モック(Tauri IPC スタブ)で全 6 ページの表示・遷移、コンソールエラーなし。
+
+# v0.15.1 修正: クリック音・雑音を声と取り違えない (全エンジン)
+
+- 事象(2026-10-17): Parakeet で右Alt を押したままクリック →「うん。うん。」。再現(合成のクリック音 / タイピング音 / 室内ノイズ 3 秒): Parakeet「どうぞ。」「うん。」「え?」、Cohere「あっ。」「フフフ。」、Qwen3-ASR 1.7B「はい。」「あー。」「はい。」。音声区間検出(VAD)が効いていたのは whisper-server(`--vad`)だけで、CrispASR・llama-server・whisper 以外のクラウドは素通しだった。
+- 発話ゲートに声の検出を追加(`pipeline::voice_seconds`): earshot 1.2.2(MIT/Apache-2.0、純 Rust の小型 NN VAD、16 ms フレーム、DLL 不要)でスコア ≥ 0.5 のフレームの合計が **0.2 秒未満**なら認識に送らない(従来のピーク判定 `MIN_SPEECH_SECS` と AND)。短い録音は黙って終了、1.5 秒以上は `ERR_NO_SPEECH`。ログ `speech gate: no voice (Xs voiced of Ys)`。
+- リアルタイム字幕の各窓にも同じ判定(声が無い窓は送らない)。
+- 計測: クリック / タイピング / 室内ノイズ / 無音 = 0〜0.1 秒、v0.14 の 8 文 = 3.2〜4.9 秒。CrispASR の `--vad`(Silero)でも雑音は空になったが、全エンジン共通にするためアプリ側で判定する。
+- 未検証: 小声・遠いマイクでの取りこぼし(実機の声では未計測)。
