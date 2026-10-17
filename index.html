@@ -130,6 +130,8 @@
           <div class="segmented" id="stt-engine-seg">
             <button data-engine="local" data-i18n="stt.engineLocal">ローカル (whisper.cpp)</button>
             <button data-engine="qwen" data-i18n="stt.engineQwen">ローカル (Qwen3-ASR)</button>
+            <button data-engine="parakeet" data-i18n="stt.engineParakeet">ローカル (Parakeet 日本語)</button>
+            <button data-engine="cohere" data-i18n="stt.engineCohere">ローカル (Cohere Transcribe)</button>
             <button data-engine="cloud" data-i18n="stt.engineCloud">クラウド (OpenAI互換)</button>
           </div>
 
@@ -240,6 +242,53 @@
             </details>
           </div>
 
+          <div id="stt-crisp-panel" hidden>
+            <div class="card setup-card">
+              <div class="setup-row">
+                <div class="setup-info">
+                  <div class="setup-name">CrispASR <span class="badge" id="crisp-server-badge">未インストール</span></div>
+                  <div class="setup-path mono" id="crisp-server-path">—</div>
+                </div>
+                <button class="btn btn-primary btn-sm" id="btn-crisp-install-server">インストール</button>
+              </div>
+              <div class="accel-row">
+                <label class="field">
+                  <span class="field-label" data-i18n="stt.accel">処理デバイス</span>
+                  <select id="in-crisp-accel">
+                    <option value="auto" data-i18n="stt.accelAuto">自動（おすすめ）</option>
+                    <option value="gpu" data-i18n="stt.qwenAccelGpu">GPU (Vulkan) — NVIDIA / AMD / Intel</option>
+                    <option value="cpu" data-i18n="stt.accelCpu">CPU</option>
+                  </select>
+                </label>
+                <div class="hint" id="crisp-accel-hint"></div>
+              </div>
+              <div class="progress" id="crisp-server-progress" hidden>
+                <div class="progress-bar"></div>
+                <span class="progress-text"></span>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-title" data-i18n="stt.crispModel">モデル</div>
+              <div class="hint" id="crisp-model-hint"></div>
+              <div class="model-select-list" id="crisp-model-list"></div>
+            </div>
+
+            <details class="card details-card">
+              <summary data-i18n="common.advanced">詳細設定</summary>
+              <div class="form-grid">
+                <label class="field">
+                  <span class="field-label" data-i18n="stt.serverPort">サーバポート</span>
+                  <input type="number" id="in-crisp-port" min="1" max="65535" />
+                </label>
+                <label class="field">
+                  <span class="field-label" data-i18n="stt.threads">スレッド数</span>
+                  <input type="number" id="in-crisp-threads" min="1" max="64" />
+                </label>
+              </div>
+            </details>
+          </div>
+
           <div id="stt-cloud-panel" hidden>
             <div class="card">
               <div class="preset-row">
@@ -247,6 +296,7 @@
                 <button class="btn btn-sm" data-stt-preset="openai">OpenAI</button>
                 <button class="btn btn-sm" data-stt-preset="groq">Groq</button>
                 <button class="btn btn-sm" data-stt-preset="openrouter-qwen">OpenRouter (Qwen3-ASR)</button>
+                <button class="btn btn-sm" data-stt-preset="cohere">Cohere Transcribe</button>
                 <span class="hint" data-i18n="stt.presetHint">Groq は whisper-large-v3-turbo を高速・低価格で提供します</span>
               </div>
               <div class="form-grid">

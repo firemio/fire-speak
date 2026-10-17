@@ -124,6 +124,8 @@ pub struct SetupStatus {
     pub last_save_error: String,
     /// Local Qwen3-ASR engine (v0.12).
     pub qwen: crate::qwen::QwenStatus,
+    /// Local CrispASR engines: Parakeet JA / Cohere Transcribe (v0.14).
+    pub crisp: crate::crisp::CrispStatus,
 }
 
 /// Whether the managed whisper-server process is alive.
@@ -577,6 +579,7 @@ pub fn get_setup_status(app: &AppHandle, settings: &Settings) -> Result<SetupSta
         server_running: server_running(app),
         last_save_error: crate::settings::last_save_error().unwrap_or_default(),
         qwen: crate::qwen::status(app, settings),
+        crisp: crate::crisp::status(app, settings),
         model_installed: model.is_some(),
         model_path: model
             .map(|p| p.to_string_lossy().to_string())
@@ -1215,6 +1218,10 @@ pub fn sync_server_build(app: &AppHandle) {
             crate::qwen::prewarm(&app);
             return;
         }
+        if crate::crisp::is_crisp_engine(&settings.stt.engine) {
+            crate::crisp::prewarm(&app);
+            return;
+        }
         if settings.stt.engine != "local" {
             return;
         }
@@ -1270,8 +1277,12 @@ pub async fn quick_setup(app: AppHandle) -> Result<(), String> {
     }
     let _reset = FlagReset(&QUICK_SETUP);
     let _ = tokio::task::spawn_blocking(crate::hw::get).await;
-    if app.state::<crate::AppState>().settings.lock().unwrap().stt.engine == "qwen" {
+    let engine = app.state::<crate::AppState>().settings.lock().unwrap().stt.engine.clone();
+    if engine == "qwen" {
         return crate::qwen::quick_setup(app.clone()).await;
+    }
+    if crate::crisp::is_crisp_engine(&engine) {
+        return crate::crisp::quick_setup(app.clone()).await;
     }
     let current = |app: &AppHandle| app.state::<crate::AppState>().settings.lock().unwrap().clone();
     let settings = current(&app);

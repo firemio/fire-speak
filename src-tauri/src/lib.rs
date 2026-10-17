@@ -7,6 +7,7 @@ mod hook;
 mod llm;
 mod locale;
 mod paste;
+mod crisp;
 mod qwen;
 mod pipeline;
 mod settings;
@@ -61,6 +62,7 @@ impl AppState {
 fn kill_engines(app: &AppHandle) {
     setup::kill_server(app);
     qwen::kill(app);
+    crisp::kill(app);
 }
 
 fn show_main_window(app: &AppHandle) {
@@ -317,6 +319,9 @@ fn apply_settings(app: &AppHandle, new_settings: Settings) -> Result<(), String>
         if new_settings.stt.engine != "qwen" {
             qwen::kill(app);
         }
+        if !crisp::is_crisp_engine(&new_settings.stt.engine) {
+            crisp::kill(app);
+        }
         if new_settings.stt.engine != "cloud" {
             // ensure_server compares the launch signature, so this restarts
             // the server only when a launch-relevant field changed (v0.8.1)
@@ -477,6 +482,9 @@ async fn test_stt(app: AppHandle) -> Result<String, String> {
     } else if settings.stt.engine == "qwen" {
         qwen::ensure_server(app.clone()).await?;
         Ok("OK_STT".to_string())
+    } else if crisp::is_crisp_engine(&settings.stt.engine) {
+        crisp::ensure_server(app.clone()).await?;
+        Ok("OK_STT".to_string())
     } else {
         setup::ensure_server(app.clone()).await?;
         Ok("OK_STT".to_string())
@@ -534,6 +542,16 @@ async fn qwen_download_server(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn qwen_download_model(app: AppHandle, model: String) -> Result<(), String> {
     qwen::download_model(app, model).await
+}
+
+#[tauri::command]
+async fn crisp_download_server(app: AppHandle) -> Result<(), String> {
+    crisp::download_server(app).await
+}
+
+#[tauri::command]
+async fn crisp_download_model(app: AppHandle, model: String) -> Result<(), String> {
+    crisp::download_model(app, model).await
 }
 
 #[tauri::command]
@@ -757,6 +775,8 @@ pub fn run() {
             quick_setup,
             qwen_download_server,
             qwen_download_model,
+            crisp_download_server,
+            crisp_download_model,
             open_config_dir,
             quit_app,
             check_update,

@@ -51,6 +51,7 @@ pub async fn transcribe(
     match settings.stt.engine.as_str() {
         "cloud" => transcribe_cloud(settings, wav, prompt).await,
         "qwen" => crate::qwen::transcribe(app, settings, wav, prompt).await,
+        e if crate::crisp::is_crisp_engine(e) => crate::crisp::transcribe(app, settings, wav).await,
         _ => transcribe_local(app, settings, wav, prompt).await,
     }
 }
@@ -119,8 +120,8 @@ pub async fn transcribe_cloud(
 
     // OpenAI and Groq take `prompt` and answer `verbose_json` with segments
     // (no_speech_prob). Other OpenAI-style endpoints (OpenRouter's Qwen3-ASR
-    // providers) may reject either with a 400: retry once with only
-    // file/model/language (v0.12).
+    // providers, Cohere's compatibility API) may reject either with a 400:
+    // retry once with only file/model/language (v0.12).
     let mut resp = send_cloud(settings, &url, wav.clone(), prompt, true).await?;
     if resp.0.as_u16() == 400 {
         eprintln!(
@@ -160,9 +161,7 @@ async fn send_cloud(
         .file_name("audio.wav")
         .mime_str("audio/wav")
         .map_err(|e| format!("ERR_INTERNAL|multipart: {e}"))?;
-    let mut form = reqwest::multipart::Form::new()
-        .part("file", file_part)
-        .text("model", cloud.model.clone());
+    let mut form = reqwest::multipart::Form::new().text("model", cloud.model.clone());
     if full {
         form = form.text("response_format", "verbose_json");
     }
@@ -172,6 +171,8 @@ async fn send_cloud(
     if let Some(p) = prompt.filter(|p| !p.trim().is_empty()) {
         form = form.text("prompt", p.to_string());
     }
+    // the file goes last: Cohere's OpenAI-compatible endpoint requires it (v0.14)
+    form = form.part("file", file_part);
     let resp = client()?
         .post(url)
         .bearer_auth(cloud.api_key.trim())

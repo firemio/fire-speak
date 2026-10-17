@@ -1,6 +1,6 @@
 // Shared types mirroring SPEC.md (backend contract). Field names must match exactly.
 
-export type SttEngine = "local" | "cloud" | "qwen";
+export type SttEngine = "local" | "cloud" | "qwen" | "parakeet" | "cohere";
 export type PasteMode = "paste" | "clipboard";
 export type ProviderKind = "anthropic" | "openai";
 /** v0.3: "hold" = record while the hotkey is held (default), "toggle" = press to start/stop. */
@@ -32,11 +32,19 @@ export interface QwenSttSettings {
   accel: string; // "auto" | "gpu" | "cpu"
 }
 
+/** Local CrispASR server (v0.14), shared by the "parakeet" and "cohere" engines. */
+export interface CrispSttSettings {
+  server_port: number;
+  threads: number;
+  accel: string; // "auto" | "gpu" | "cpu"
+}
+
 export interface SttSettings {
   engine: SttEngine;
   local: LocalSttSettings;
   cloud: CloudSttSettings;
   qwen: QwenSttSettings;
+  crisp: CrispSttSettings;
 }
 
 export interface LlmProvider {
@@ -141,6 +149,7 @@ export interface SetupStatus {
   server_running: boolean;
   last_save_error: string; // "" = last save succeeded (v0.9.5)
   qwen: QwenStatus;
+  crisp: CrispStatus;
 }
 
 export interface QwenStatus {
@@ -148,6 +157,16 @@ export interface QwenStatus {
   server_path: string;
   /** The model chosen in `stt.qwen.model` is on disk. */
   model_installed: boolean;
+  models: { id: string; installed: boolean; size_mb: number }[];
+  server_running: boolean;
+  /** "gpu" | "cpu" */
+  effective_accel: string;
+}
+
+export interface CrispStatus {
+  server_installed: boolean;
+  server_path: string;
+  /** One model per engine; `id` is the engine ("parakeet" | "cohere"). */
   models: { id: string; installed: boolean; size_mb: number }[];
   server_running: boolean;
   /** "gpu" | "cpu" */
@@ -207,7 +226,7 @@ export interface UpdateProgressPayload {
 }
 
 export interface DownloadProgressPayload {
-  kind: "server" | "model" | "npu" | "qwen-server" | "qwen-model";
+  kind: "server" | "model" | "npu" | "qwen-server" | "qwen-model" | "crisp-server" | "crisp-model";
   name: string;
   downloaded: number;
   total: number;

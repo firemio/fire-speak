@@ -111,6 +111,9 @@ pub struct SttSettings {
     /// Local Qwen3-ASR through llama-server (v0.12, engine "qwen").
     #[serde(default)]
     pub qwen: QwenSttSettings,
+    /// Local CrispASR server (v0.14, engines "parakeet" and "cohere").
+    #[serde(default)]
+    pub crisp: CrispSttSettings,
 }
 
 impl Default for SttSettings {
@@ -120,6 +123,7 @@ impl Default for SttSettings {
             local: LocalSttSettings::default(),
             cloud: CloudSttSettings::default(),
             qwen: QwenSttSettings::default(),
+            crisp: CrispSttSettings::default(),
         }
     }
 }
@@ -155,6 +159,32 @@ fn default_qwen_model() -> String {
 
 fn default_qwen_port() -> u16 {
     8179
+}
+
+/// Shared by the CrispASR engines; the engine itself picks the model.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CrispSttSettings {
+    #[serde(default = "default_crisp_port")]
+    pub server_port: u16,
+    #[serde(default = "default_threads")]
+    pub threads: u32,
+    /// "auto" (GPU when an NVIDIA / AMD Radeon GPU is present) | "gpu" | "cpu".
+    #[serde(default = "default_accel")]
+    pub accel: String,
+}
+
+impl Default for CrispSttSettings {
+    fn default() -> Self {
+        Self {
+            server_port: default_crisp_port(),
+            threads: default_threads(),
+            accel: default_accel(),
+        }
+    }
+}
+
+fn default_crisp_port() -> u16 {
+    8180
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

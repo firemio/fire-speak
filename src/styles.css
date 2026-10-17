@@ -816,6 +816,7 @@ select {
 
 #stt-local-panel,
 #stt-qwen-panel,
+#stt-crisp-panel,
 #stt-cloud-panel {
   margin-top: 16px;
 }

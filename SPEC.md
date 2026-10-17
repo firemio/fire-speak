@@ -870,3 +870,45 @@ Genspark Speak と同じ「**右Altを押している間だけ録音、離すと
 ## 参考: 日本語の認識精度 (2026-10-17、RTX 4070 Ti SUPER)
 
 - Windows 音声合成 4 声で 8 文(200 文字、数字・同音異義語・地名入り)。句読点を除き、数字表記の違い(三時/3時)は同一視した文字誤り率: whisper large-v3-turbo 0.5%、Qwen3-ASR 1.7B 1.5%(丸ノ内・子どもなど表記ゆれが中心)、0.6B 4.5%(千代田区→都心区など)。合成音声なので実際の話し声とは差がある。既定の推奨エンジンは whisper のまま。
+
+# v0.14.0 追加仕様: Parakeet 日本語 / Cohere Transcribe (ローカル CrispASR / クラウド Cohere)
+
+## 調べたこと (2026-10-17)
+
+- **Parakeet 日本語** = `nvidia/parakeet-tdt_ctc-0.6b-ja`(FastConformer + TDT/CTC、0.6B、CC-BY-4.0、日本語専用、句読点あり)。公式は NeMo(PyTorch)のみ。GGUF 変換は `cstr/parakeet-tdt-0.6b-ja-GGUF`(CrispASR 用)、`kun432/parakeet-cpp-ja-gguf`(mudler/parakeet.cpp 用)ほか、ONNX・CoreML・MLX 版もある。クラウド API は NVIDIA NIM(gRPC、OpenAI 互換ではない)のみ。
+  - 手元の `%APPDATA%\jp.firemio.fire-speak\bin\Release\parakeet-cli.exe` は whisper.cpp 1.9.4 の CUDA ビルドに同梱の parakeet 実装で、既定モデルは多言語の `ggml-parakeet-tdt-0.6b-v3.bin`(日本語非対応、サーバーモード無し)。日本語版には使わない。
+- **Cohere Transcribe** = `CohereLabs/cohere-transcribe-03-2026`(Conformer エンコーダ + Transformer デコーダ、2B、Apache-2.0、日本語を含む 14 言語、言語自動判定なし)。HF の元リポジトリは利用規約への同意が必要(gated)だが、GGUF 変換 `cstr/cohere-transcribe-03-2026-GGUF`・`handy-computer/cohere-transcribe-03-2026-gguf` は同意不要で Apache-2.0。クラウドは Cohere API(`POST /v2/audio/transcriptions`、OpenAI 互換は `/compatibility/v1/audio/transcriptions`、`language` 必須、`file` はフォームの最後、`response_format` は json のみ、`prompt` 非対応、25MB まで。無料枠はレート制限付き)。OpenRouter には無い。
+- ローカル実行手段: どちらも動かせ、Windows/Linux のビルド済みバイナリとサーバーモードがあるのは **CrispASR**(CrispStrobe/CrispASR、MIT、ggml、`crispasr --server` が OpenAI 互換の `/v1/audio/transcriptions`)。transcribe.cpp(handy-computer)は Cohere は動くが Parakeet 日本語版が対象外、parakeet.cpp は Cohere が対象外のため、1 つで両方を賄える CrispASR を採用。
+
+## エンジン "parakeet" / "cohere" (crisp.rs)
+
+- `stt.engine` に `"parakeet"`(Parakeet TDT-CTC 0.6B ja)と `"cohere"`(Cohere Transcribe 03-2026)を追加。どちらも CrispASR で動かし、設定は共通の `stt.crisp { server_port: 8180, threads(既定は whisper と同じ), accel: "auto"|"gpu"|"cpu" }`。モデルはエンジンで決まる(選択肢なし)。
+- 配布物はピン留め+SHA-256 検証:
+  - CrispASR `v0.8.43`: Windows x64 `crispasr-windows-x86_64-vulkan.zip`(36MB)、Linux x64 `crispasr-linux-x86_64-vulkan.tar.gz`、Linux arm64 `crispasr-linux-arm64.tar.gz`(CPU のみ)。Windows arm64 用は配布が無く `ERR_NO_SERVER_ASSET`。置き場所 `{app_data}/crispasr/`(`crispasr.new/` に展開・検証してから入れ替え)。
+  - モデル(Q8_0、HF コミット固定 URL → `{app_data}/models/`): Parakeet `cstr/parakeet-tdt-0.6b-ja-GGUF` の `parakeet-tdt-0.6b-ja-q8_0.gguf`(643MB)、Cohere `cstr/cohere-transcribe-03-2026-GGUF` の `cohere-transcribe-q8_0.gguf`(2312MB)。Parakeet の Q4_K は TDT デコードがループするため使わない。
+- 起動: `crispasr --server -m <model> --host 127.0.0.1 --port <port> -t <threads>`、CPU のとき `-ng`、Linux は `LD_LIBRARY_PATH` に exe のフォルダ(同梱の libopenblas 等)。ヘルス `GET /health` 200、上限 120 秒。シグネチャ(exe・モデル・ポート・スレッド・accel)が変われば再起動するので、parakeet ⇄ cohere の切替でモデルを読み直す。`auto` は Qwen と同じ(NVIDIA / AMD Radeon があれば GPU)。
+- 認識: `POST /v1/audio/transcriptions`(multipart: `response_format=json`、`temperature=0`、認識言語が auto 以外なら `language`、`file`)。**語彙ヒント(prompt)は送らない**(両モデルとも CrispASR では無視され、結果が変わらないことを確認)。用語辞書の alias 置換と LLM の用語置換パスは従来どおり効く。無音は「どうぞ。」等を出すことがあるので、既存の発話量ゲート(`MIN_SPEECH_SECS`)が前提。
+- エンジン切替時: parakeet/cohere 以外になれば CrispASR を停止。終了経路は全サーバー停止(`kill_engines`)。起動時・設定変更時・ダウンロード後は `crisp::prewarm`(1 秒の無音を認識)。
+- ワンクリックセットアップは CrispASR → エンジンのモデルの順。コマンド `crisp_download_server`、`crisp_download_model { model: "parakeet"|"cohere" }`。進捗イベント kind `crisp-server` / `crisp-model`。`SetupStatus.crisp: { server_installed, server_path, models[{id, installed, size_mb}], server_running, effective_accel }`。
+- UI: エンジン選択に「ローカル (Parakeet 日本語)」「ローカル (Cohere Transcribe)」。パネル(両エンジン共通)は CrispASR カード(状態・パス・インストール・処理デバイス)、モデル(エンジンのモデル 1 件・ダウンロード・ライセンス等のヒント `stt.parakeetHint` / `stt.cohereHint`)、詳細設定(ポート・スレッド)。ホームの状態カードはエンジン(CrispASR · デバイス · 稼働状態)とモデル。ロケール 12 言語(`stt.engineParakeet`, `stt.engineCohere`, `stt.crispModel`, `stt.parakeetHint`, `stt.cohereHint`, `setup.crispServerInstalled`)。
+
+## クラウド: Cohere プリセット (stt.rs)
+
+- プリセット `Cohere Transcribe` = `https://api.cohere.com/compatibility/v1` / `cohere-transcribe-03-2026`。
+- multipart の `file` を常に**最後**に送る(Cohere の要件。OpenAI・Groq・OpenRouter にも影響なし)。初回の `verbose_json` が 400 なら従来どおり file/model/language のみで再送。Cohere は `language` 必須なので、認識言語「自動」では失敗する。
+- 未検証: Cohere API 実機での応答(API キーが無く未確認)。
+
+## 参考: 日本語の認識精度 (2026-10-17、RTX 4070 Ti SUPER)
+
+v0.13.0 と同じ 8 文(Windows 音声合成 4 声、200 文字)・同じ正規化。処理時間は 8 文の合計(各サーバー起動・ウォームアップ後、1 文 3〜6 秒の音声)。
+
+| エンジン | 文字誤り率 | 処理時間 (GPU) | 処理時間 (CPU 8 スレッド) | 主な誤り |
+| --- | --- | --- | --- | --- |
+| whisper large-v3-turbo (whisper.cpp CUDA) | 0.5% | 0.87 秒 | — | — |
+| Qwen3-ASR 1.7B (llama.cpp Vulkan) | 1.5% | 1.16 秒 | — | 丸ノ内・子ども |
+| **Parakeet TDT-CTC 0.6B ja** (CrispASR Vulkan) | **2.0%** | **0.87 秒** | 2.56 秒 | 売り上げ・子ども(表記ゆれのみ) |
+| Qwen3-ASR 0.6B (llama.cpp Vulkan) | 4.5% | 0.74 秒 | — | 千代田区→都心区 |
+| **Cohere Transcribe 03-2026** (CrispASR Vulkan) | **7.0%** | 1.15 秒 | 7.01 秒 | 明日→あした、見積書→書(冒頭欠落)、整形→成型、東京都→東京・ |
+
+- Parakeet は誤りが送り仮名の表記ゆれだけで、CPU でも 1 文約 0.3 秒と軽い。Cohere は冒頭の語を落とすことがあり、日本語では他より劣る。合成音声なので実際の話し声とは差がある。既定の推奨エンジンは whisper のまま。
+- 参考: Cohere の日本語追加学習版 `TransWithAI/cohere-transcribe-ja-v0.1-GGUF` は 5.0% だが、ライセンス表記が無いため入れていない。

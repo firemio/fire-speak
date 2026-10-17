@@ -404,6 +404,24 @@ function onboardSteps(s: SetupStatus): OnboardStep[] | null {
       },
     ];
   }
+  if (settings && isCrispEngine(settings.stt.engine)) {
+    const id = settings.stt.engine;
+    const m = s.crisp.models.find((x) => x.id === id);
+    return [
+      {
+        key: downloadKey("crisp-server", "crispasr"),
+        label: t("onboard.stepServer", "CrispASR"),
+        sizeMb: CRISP_SERVER_MB,
+        done: s.crisp.server_installed,
+      },
+      {
+        key: downloadKey("crisp-model", id),
+        label: t("onboard.stepModel", crispModelLabel(id)),
+        sizeMb: m?.size_mb ?? 0,
+        done: !!m?.installed,
+      },
+    ];
+  }
   if (!settings || settings.stt.engine !== "local") return null;
   const accel = s.effective_accel;
   const customServer = settings.stt.local.server_path.trim() !== "";
@@ -603,6 +621,20 @@ function renderHomeStatus(): void {
         ? statusRow("ok", t("sys.model"), qwenModelLabel(settings.stt.qwen.model), "stt")
         : statusRow("missing", t("sys.model"), t("sys.notInstalled"), "stt"),
     );
+  } else if (isCrispEngine(settings.stt.engine)) {
+    const c = s.crisp;
+    const engine = settings.stt.engine;
+    const device = c.effective_accel === "gpu" ? "GPU (Vulkan)" : "CPU";
+    card.appendChild(
+      c.server_installed
+        ? statusRow("ok", t("sys.engine"), `CrispASR · ${device} · ${t(c.server_running ? "sys.running" : "sys.idle")}`, "stt")
+        : statusRow("missing", t("sys.engine"), t("sys.notInstalled"), "stt"),
+    );
+    card.appendChild(
+      c.models.find((m) => m.id === engine)?.installed
+        ? statusRow("ok", t("sys.model"), crispModelLabel(engine), "stt")
+        : statusRow("missing", t("sys.model"), t("sys.notInstalled"), "stt"),
+    );
   } else {
     const cloud = settings.stt.cloud;
     let host = cloud.base_url;
@@ -652,12 +684,18 @@ function renderSttSection(): void {
   }
   $("stt-local-panel").hidden = engine !== "local";
   $("stt-qwen-panel").hidden = engine !== "qwen";
+  $("stt-crisp-panel").hidden = !isCrispEngine(engine);
   $("stt-cloud-panel").hidden = engine !== "cloud";
 
   input("in-qwen-port").value = String(settings.stt.qwen.server_port);
   input("in-qwen-threads").value = String(settings.stt.qwen.threads);
   ($("in-qwen-accel") as HTMLSelectElement).value = settings.stt.qwen.accel || "auto";
   renderQwenPanel();
+
+  input("in-crisp-port").value = String(settings.stt.crisp.server_port);
+  input("in-crisp-threads").value = String(settings.stt.crisp.threads);
+  ($("in-crisp-accel") as HTMLSelectElement).value = settings.stt.crisp.accel || "auto";
+  renderCrispPanel();
 
   input("in-local-port").value = String(settings.stt.local.server_port);
   input("in-local-threads").value = String(settings.stt.local.threads);
@@ -803,6 +841,135 @@ function wireQwenPanel(): void {
     const v = parseInt(input("in-qwen-threads").value, 10);
     if (Number.isFinite(v) && v > 0) {
       settings.stt.qwen.threads = v;
+      scheduleSave();
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// stt section: local CrispASR panel — Parakeet JA / Cohere Transcribe (v0.14)
+// ---------------------------------------------------------------------------
+
+/** Download size of the pinned CrispASR Vulkan build (`crisp::CRISP_TAG`). */
+const CRISP_SERVER_MB = 35;
+
+function isCrispEngine(engine: string): engine is "parakeet" | "cohere" {
+  return engine === "parakeet" || engine === "cohere";
+}
+
+function crispModelLabel(id: string): string {
+  return id === "cohere" ? "Cohere Transcribe 03-2026" : "Parakeet TDT-CTC 0.6B ja";
+}
+
+function renderCrispPanel(): void {
+  if (!settings) return;
+  const engine = settings.stt.engine;
+  const c = setupStatus?.crisp;
+  const badge = $("crisp-server-badge");
+  const installBtn = $("btn-crisp-install-server") as HTMLButtonElement;
+  badge.textContent = !c ? t("setup.checking") : c.server_installed ? t("common.installed") : t("common.notInstalled");
+  badge.className = `badge${c?.server_installed ? " ok" : ""}`;
+  $("crisp-server-path").textContent = c?.server_path || "—";
+  installBtn.textContent = c?.server_installed ? t("setup.reinstall") : t("setup.install");
+  installBtn.className = `btn btn-sm${c?.server_installed ? "" : " btn-primary"}`;
+  installBtn.disabled = !c || activeDownloads.has(downloadKey("crisp-server", "crispasr"));
+  if (setupStatus) {
+    const s = setupStatus;
+    const found = s.hw.gpus.length ? s.hw.gpus.join(" / ") : t("stt.noGpu");
+    const resolved = s.crisp.effective_accel === "gpu" ? "GPU (Vulkan)" : "CPU";
+    $("crisp-accel-hint").textContent = `${t("stt.accelDetected", found)} → ${resolved}`;
+  }
+  $("crisp-model-hint").textContent = t(engine === "cohere" ? "stt.cohereHint" : "stt.parakeetHint");
+
+  const host = $("crisp-model-list");
+  host.textContent = "";
+  if (!c) {
+    host.appendChild(el("div", "hint", t("stt.loadingModels")));
+    return;
+  }
+  const m = c.models.find((x) => x.id === engine);
+  if (!m) return;
+  const key = downloadKey("crisp-model", m.id);
+  const wrap = el("div", "model-row-wrap");
+  const row = el("div", "model-row");
+  const opt = el("div", "model-option");
+  opt.classList.add(m.installed ? "is-selected" : "is-disabled");
+  opt.appendChild(el("span", "radio"));
+  opt.appendChild(el("span", "model-option-name", crispModelLabel(m.id)));
+  opt.appendChild(
+    el("span", "model-option-meta", t(m.installed ? "stt.modelInstalledMeta" : "stt.modelNotInstalledMeta", m.size_mb)),
+  );
+  row.appendChild(opt);
+  if (!m.installed) {
+    const btn = el("button", "btn btn-sm btn-primary", t("setup.download")) as HTMLButtonElement;
+    btn.type = "button";
+    btn.disabled = activeDownloads.has(key);
+    btn.addEventListener("click", () => void startCrispModelDownload(m.id));
+    row.appendChild(btn);
+  }
+  wrap.appendChild(row);
+  wrap.appendChild(buildProgressEl(key));
+  host.appendChild(wrap);
+}
+
+async function startCrispServerDownload(): Promise<void> {
+  const key = downloadKey("crisp-server", "crispasr");
+  activeDownloads.set(key, { kind: "crisp-server", name: "crispasr", downloaded: 0, total: 0, done: false });
+  const wrap = $("crisp-server-progress");
+  wrap.dataset.downloadKey = key;
+  wrap.hidden = false;
+  wrap.classList.add("indeterminate");
+  ($("btn-crisp-install-server") as HTMLButtonElement).disabled = true;
+  try {
+    await invoke("crisp_download_server");
+  } catch (e: unknown) {
+    const stillPending = activeDownloads.has(key);
+    activeDownloads.delete(key);
+    wrap.hidden = true;
+    ($("btn-crisp-install-server") as HTMLButtonElement).disabled = false;
+    if (stillPending) toast(t("setup.serverInstallFailed", errText(e)), true);
+  }
+}
+
+async function startCrispModelDownload(id: string): Promise<void> {
+  const key = downloadKey("crisp-model", id);
+  activeDownloads.set(key, { kind: "crisp-model", name: id, downloaded: 0, total: 0, done: false });
+  renderCrispPanel();
+  try {
+    await invoke("crisp_download_model", { model: id });
+  } catch (e: unknown) {
+    const stillPending = activeDownloads.has(key);
+    activeDownloads.delete(key);
+    renderCrispPanel();
+    if (stillPending) toast(t("setup.modelDownloadFailed", crispModelLabel(id), errText(e)), true);
+  }
+}
+
+function wireCrispPanel(): void {
+  $("btn-crisp-install-server").addEventListener("click", () => void startCrispServerDownload());
+  $("in-crisp-accel").addEventListener("change", async () => {
+    if (!settings) return;
+    settings.stt.crisp.accel = ($("in-crisp-accel") as HTMLSelectElement).value;
+    try {
+      await persistSettings();
+    } catch (e: unknown) {
+      toast(errText(e), true);
+    }
+    await refreshSetupStatus();
+  });
+  input("in-crisp-port").addEventListener("input", () => {
+    if (!settings) return;
+    const v = parseInt(input("in-crisp-port").value, 10);
+    if (Number.isFinite(v) && v > 0 && v < 65536) {
+      settings.stt.crisp.server_port = v;
+      scheduleSave();
+    }
+  });
+  input("in-crisp-threads").addEventListener("input", () => {
+    if (!settings) return;
+    const v = parseInt(input("in-crisp-threads").value, 10);
+    if (Number.isFinite(v) && v > 0) {
+      settings.stt.crisp.threads = v;
       scheduleSave();
     }
   });
@@ -954,6 +1121,7 @@ function wireSttSection(): void {
     openai: { base_url: "https://api.openai.com/v1", model: "whisper-1" },
     groq: { base_url: "https://api.groq.com/openai/v1", model: "whisper-large-v3-turbo" },
     "openrouter-qwen": { base_url: "https://openrouter.ai/api/v1", model: "qwen/qwen3-asr-0.6b" },
+    cohere: { base_url: "https://api.cohere.com/compatibility/v1", model: "cohere-transcribe-03-2026" },
   };
   document.querySelectorAll<HTMLButtonElement>("[data-stt-preset]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
@@ -2029,8 +2197,19 @@ async function startModelDownload(name: string): Promise<void> {
 
 function onDownloadProgress(p: DownloadProgressPayload): void {
   // server events carry the asset file name; their key is fixed
-  const name = p.kind === "server" ? "whisper-server" : p.kind === "qwen-server" ? "llama-server" : p.name;
+  const name =
+    p.kind === "server"
+      ? "whisper-server"
+      : p.kind === "qwen-server"
+        ? "llama-server"
+        : p.kind === "crisp-server"
+          ? "crispasr"
+          : p.name;
   const key = downloadKey(p.kind, name);
+  if (p.kind === "crisp-server" || p.kind === "crisp-model") {
+    onCrispDownloadProgress(p, key);
+    return;
+  }
   if (p.kind === "qwen-server" || p.kind === "qwen-model") {
     onQwenDownloadProgress(p, key);
     return;
@@ -2116,6 +2295,37 @@ function onQwenDownloadProgress(p: DownloadProgressPayload, key: string): void {
   }
 }
 
+function onCrispDownloadProgress(p: DownloadProgressPayload, key: string): void {
+  const isServer = p.kind === "crisp-server";
+  if (p.done) {
+    activeDownloads.delete(key);
+    if (p.error) {
+      toast(
+        isServer
+          ? t("setup.serverInstallFailed", tMsg(p.error))
+          : t("setup.modelDownloadFailed", crispModelLabel(p.name), tMsg(p.error)),
+        true,
+      );
+    } else {
+      toast(isServer ? t("setup.crispServerInstalled") : t("setup.modelDownloaded", crispModelLabel(p.name)));
+    }
+    if (isServer) $("crisp-server-progress").hidden = true;
+    void refreshSetupStatus();
+    return;
+  }
+  activeDownloads.set(key, p);
+  const onboardBar = document.querySelector<HTMLElement>(`#onboard-steps .progress[data-download-key="${key}"]`);
+  if (onboardBar) applyProgress(onboardBar, p);
+  if (isServer) {
+    applyProgress($("crisp-server-progress"), p);
+    ($("btn-crisp-install-server") as HTMLButtonElement).disabled = true;
+  } else {
+    const wrap = document.querySelector<HTMLElement>(`#crisp-model-list .progress[data-download-key="${key}"]`);
+    if (wrap) applyProgress(wrap, p);
+    else renderCrispPanel();
+  }
+}
+
 async function refreshSetupStatus(): Promise<void> {
   try {
     setupStatus = await invoke<SetupStatus>("setup_status");
@@ -2125,6 +2335,7 @@ async function refreshSetupStatus(): Promise<void> {
   renderServerCard();
   renderSttModelList();
   renderQwenPanel();
+  renderCrispPanel();
   renderOnboard();
   renderHomeStatus();
 }
@@ -2500,6 +2711,7 @@ async function init(): Promise<void> {
   wireGeneralSection();
   wireServerCard();
   wireQwenPanel();
+  wireCrispPanel();
   wireOnboard();
   wireUpdateSection();
   wireDialogs();
