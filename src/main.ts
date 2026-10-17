@@ -677,27 +677,116 @@ function renderHomeStatus(): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Measured on the SPEC v0.14 benchmark (8 synthetic Japanese sentences,
- * about 4 s each): character error rate and seconds per sentence on an
- * RTX 4070 Ti SUPER (GPU) and a Ryzen 7 9800X3D with 8 threads (CPU).
- * Qwen spans its 1.7B and 0.6B models.
+ * Engine comparison (SPEC v0.14.2). Measured on the v0.14 benchmark: 8
+ * synthetic Japanese sentences of about 4 s; character error rate and
+ * seconds per sentence on a Ryzen 7 9800X3D with 8 threads. On a GPU every
+ * engine takes 0.1–0.15 s, so only the CPU time is charted.
  */
-const ENGINE_METRICS: Record<string, { err: string; gpu: string; cpu: string }> = {
-  local: { err: "0.5%", gpu: "0.1", cpu: "5.5" },
-  qwen: { err: "1.5–4.5%", gpu: "0.1", cpu: "0.5–1.4" },
-  parakeet: { err: "2.0%", gpu: "0.1", cpu: "0.3" },
-  cohere: { err: "7.0%", gpu: "0.1", cpu: "0.9" },
-};
+interface EngineChoice {
+  engine: SttEngine;
+  /** Qwen rows also pick the model. */
+  qwenModel?: string;
+  name: string;
+  /** i18n key: the kind of PC the engine suits */
+  fit: string;
+  err: number; // %
+  cpu: number; // s per sentence
+  mb: number; // download size (model + runtime)
+}
+
+const ENGINE_CHOICES: EngineChoice[] = [
+  { engine: "local", name: "whisper.cpp · large-v3-turbo", fit: "stt.fitWhisper", err: 0.5, cpu: 5.5, mb: 1645 },
+  { engine: "qwen", qwenModel: "1.7b", name: "Qwen3-ASR 1.7B", fit: "stt.fitQwen17", err: 1.5, cpu: 1.36, mb: 2434 },
+  { engine: "parakeet", name: "Parakeet TDT-CTC 0.6B ja", fit: "stt.fitParakeet", err: 2.0, cpu: 0.32, mb: 678 },
+  { engine: "qwen", qwenModel: "0.6b", name: "Qwen3-ASR 0.6B", fit: "stt.fitQwen06", err: 4.5, cpu: 0.54, mb: 1002 },
+  { engine: "cohere", name: "Cohere Transcribe 2B", fit: "stt.fitCohere", err: 7.0, cpu: 0.88, mb: 2347 },
+];
+
+type EngineSort = "accuracy" | "speed" | "size";
+let engineSort: EngineSort = "accuracy";
+
+/**
+ * The row recommended for this PC: whisper with an NVIDIA / Radeon GPU; on
+ * a CPU-only PC, Parakeet for Japanese (or auto) and Qwen 0.6B otherwise.
+ */
+function recommendedChoice(): EngineChoice | null {
+  const hw = setupStatus?.hw;
+  if (!hw || !settings) return null;
+  if (hw.nvidia || hw.amd_gpu) return ENGINE_CHOICES[0];
+  const ja = settings.language === "ja" || settings.language === "auto" || settings.language === "";
+  return ENGINE_CHOICES.find((c) => (ja ? c.engine === "parakeet" : c.qwenModel === "0.6b")) ?? null;
+}
+
+function isChoiceActive(c: EngineChoice): boolean {
+  if (!settings || settings.stt.engine !== c.engine) return false;
+  return !c.qwenModel || settings.stt.qwen.model === c.qwenModel;
+}
+
+function bar(value: number, max: number, label: string): HTMLElement {
+  const wrap = el("span", "engine-bar");
+  const track = el("span", "engine-bar-track");
+  const fill = el("span", "engine-bar-fill");
+  fill.style.width = `${Math.max(3, (value / max) * 100)}%`;
+  track.appendChild(fill);
+  wrap.appendChild(track);
+  wrap.appendChild(el("span", "engine-bar-val", label));
+  return wrap;
+}
+
+function renderEngineCompare(): void {
+  if (!settings) return;
+  for (const b of document.querySelectorAll<HTMLButtonElement>("#engine-sort-seg button")) {
+    b.classList.toggle("is-active", b.dataset.sort === engineSort);
+  }
+  const key: Record<EngineSort, (c: EngineChoice) => number> = {
+    accuracy: (c) => c.err,
+    speed: (c) => c.cpu,
+    size: (c) => c.mb,
+  };
+  const rows = [...ENGINE_CHOICES].sort((x, y) => key[engineSort](x) - key[engineSort](y));
+  const maxErr = Math.max(...ENGINE_CHOICES.map((c) => c.err));
+  const maxCpu = Math.max(...ENGINE_CHOICES.map((c) => c.cpu));
+  const reco = recommendedChoice();
+  const host = $("engine-rows");
+  host.textContent = "";
+  const row = (c: EngineChoice | null): HTMLButtonElement => {
+    const r = el("button", "engine-row") as HTMLButtonElement;
+    r.type = "button";
+    r.dataset.engine = c ? c.engine : "cloud";
+    if (c?.qwenModel) r.dataset.qwenModel = c.qwenModel;
+    r.classList.toggle("is-active", c ? isChoiceActive(c) : settings?.stt.engine === "cloud");
+    r.appendChild(el("span", "engine-radio"));
+    const name = el("span", "engine-name");
+    const title = el("b", "", c ? c.name : t("stt.engineCloud"));
+    if (c && c === reco) title.appendChild(el("span", "engine-reco", t("stt.recommended")));
+    name.appendChild(title);
+    name.appendChild(el("span", "engine-fit", t(c ? c.fit : "stt.fitCloud")));
+    r.appendChild(name);
+    if (c) {
+      r.appendChild(bar(c.err, maxErr, `${c.err.toFixed(1)}%`));
+      r.appendChild(bar(c.cpu, maxCpu, t("stt.seconds", c.cpu.toFixed(1))));
+      r.appendChild(el("span", "engine-size", formatBytes(c.mb * 1024 * 1024)));
+    } else {
+      r.appendChild(el("span", "engine-na", t("stt.engineMetaCloud")));
+    }
+    return r;
+  };
+  for (const c of rows) host.appendChild(row(c));
+  host.appendChild(row(null));
+
+  let note = t("stt.engineNote");
+  const hw = setupStatus?.hw;
+  if (hw && reco) {
+    const found = hw.gpus.length ? hw.gpus.join(" / ") : t("stt.noGpu");
+    note = `${t("stt.recoThisPc", found, reco.name)} ${note}`;
+  }
+  $("engine-note").textContent = note;
+}
 
 function renderSttSection(): void {
   if (!settings) return;
   const engine = settings.stt.engine;
-  for (const btn of document.querySelectorAll<HTMLButtonElement>("#stt-engine-seg button")) {
-    btn.classList.toggle("is-active", btn.dataset.engine === engine);
-    const meta = btn.querySelector<HTMLElement>(".seg-meta");
-    const m = ENGINE_METRICS[btn.dataset.engine ?? ""];
-    if (meta) meta.textContent = m ? t("stt.engineMeta", m.err, m.gpu, m.cpu) : t("stt.engineMetaCloud");
-  }
+  renderEngineCompare();
   $("stt-local-panel").hidden = engine !== "local";
   $("stt-qwen-panel").hidden = engine !== "qwen";
   $("stt-crisp-panel").hidden = !isCrispEngine(engine);
@@ -1086,11 +1175,21 @@ function renderSttModelList(): void {
 
 function wireSttSection(): void {
   $("stt-engine-seg").addEventListener("click", (e) => {
-    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-engine]");
+    const target = e.target as HTMLElement;
+    const sortBtn = target.closest<HTMLButtonElement>("button[data-sort]");
+    if (sortBtn) {
+      engineSort = sortBtn.dataset.sort as EngineSort;
+      renderEngineCompare();
+      return;
+    }
+    const btn = target.closest<HTMLButtonElement>("button[data-engine]");
     if (!btn || !settings) return;
     settings.stt.engine = btn.dataset.engine as SttEngine;
+    if (btn.dataset.qwenModel) settings.stt.qwen.model = btn.dataset.qwenModel;
     renderSttSection();
     scheduleSave();
+    // a different model changes what the home setup card offers
+    void refreshSetupStatus();
   });
 
   input("in-local-port").addEventListener("input", () => {
@@ -2352,6 +2451,7 @@ async function refreshSetupStatus(): Promise<void> {
   renderSttModelList();
   renderQwenPanel();
   renderCrispPanel();
+  renderEngineCompare();
   renderOnboard();
   renderHomeStatus();
 }

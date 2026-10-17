@@ -918,3 +918,13 @@ v0.13.0 と同じ 8 文(Windows 音声合成 4 声、200 文字)・同じ正規�
 - 背景: エンジンが 5 つになり、ボタン名だけでは何を選べばよいか分からない。
 - `#stt-engine-seg` をグリッド(1 列 210px 以上)にし、各ボタンの 2 行目に実測値 `誤り {文字誤り率} · GPU {秒} · CPU {秒}`(`stt.engineMeta`)。クラウドは「精度・速度はサービス次第」(`stt.engineMetaCloud`)。値は main.ts の `ENGINE_METRICS`(v0.14.0 のベンチマーク、1 文 約 4 秒あたり)。下に測定条件とおすすめ(GPU あり → whisper.cpp、GPU なし → Parakeet)の注記(`stt.engineNote`)。12 言語。
 - CPU の値は Ryzen 7 9800X3D・8 スレッドで追加測定(8 文合計): whisper large-v3-turbo 43.6 秒、Qwen3-ASR 1.7B 10.9 秒、0.6B 4.3 秒、Parakeet 2.6 秒、Cohere 7.0 秒。1 文あたり 5.5 / 1.4 / 0.5 / 0.3 / 0.9 秒。古い CPU(第 8 世代 Core i5 など)は数倍かかる見込み(未計測)。
+
+# v0.14.2 追加仕様: エンジン選択を比較表に / この PC へのおすすめ
+
+- 背景: 数値の文字表示だけでは比べにくい。環境(古めのノート PC など)から選べるようにしたい。
+- `#stt-engine-seg` を比較表のカードにした。行は whisper.cpp large-v3-turbo / Qwen3-ASR 1.7B / Parakeet 0.6B ja / Qwen3-ASR 0.6B / Cohere 2B(`ENGINE_CHOICES`)+ クラウド(常に最後、数値なし)。各行: ラジオ・名前・向いている環境(`stt.fit*`)・誤り率の棒・CPU 処理時間の棒(どちらも最大値に対する線形、短いほど良い)・ダウンロード量。GPU ではどれも 0.1〜0.15 秒なので棒は CPU のみ。
+- 並び順: 精度順(既定)/ 速さ順 (CPU) / 軽さ順。セッション内のみ保持。
+- 行のクリックでエンジンを選ぶ。Qwen の行は `stt.qwen.model` も切り替える(未インストールならホームのセットアップがそのモデルを入れる)。
+- おすすめ(`recommendedChoice`): NVIDIA / AMD Radeon があれば whisper.cpp、無ければ認識言語が日本語か自動なら Parakeet、それ以外は Qwen3-ASR 0.6B。その行に「この PC におすすめ」バッジ、表の下に「この PC({GPU 名 / GPU なし})には {名前} がおすすめです。」+ 測定条件。
+- ロケール 12 言語(`stt.sortBy`, `stt.sort*`, `stt.col*`, `stt.seconds`, `stt.recommended`, `stt.fit*`, `stt.recoThisPc`, `stt.engineNote`)。v0.14.1 の `stt.engineMeta` は削除。
+- 確認: 静的モック(Tauri IPC スタブ)で GPU なし / NVIDIA の表示、並び替え、Qwen 0.6B 行の選択でパネルが Qwen に切り替わることを確認。

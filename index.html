@@ -127,14 +127,25 @@
         <!-- 音声認識 -->
         <section class="section" id="section-stt">
           <h2 class="section-heading" data-i18n="stt.engineHeading">音声認識エンジン</h2>
-          <div class="segmented" id="stt-engine-seg">
-            <button data-engine="local"><span class="seg-name" data-i18n="stt.engineLocal">ローカル (whisper.cpp)</span><span class="seg-meta"></span></button>
-            <button data-engine="qwen"><span class="seg-name" data-i18n="stt.engineQwen">ローカル (Qwen3-ASR)</span><span class="seg-meta"></span></button>
-            <button data-engine="parakeet"><span class="seg-name" data-i18n="stt.engineParakeet">ローカル (Parakeet 日本語)</span><span class="seg-meta"></span></button>
-            <button data-engine="cohere"><span class="seg-name" data-i18n="stt.engineCohere">ローカル (Cohere Transcribe)</span><span class="seg-meta"></span></button>
-            <button data-engine="cloud"><span class="seg-name" data-i18n="stt.engineCloud">クラウド (OpenAI互換)</span><span class="seg-meta"></span></button>
+          <div class="card engine-compare" id="stt-engine-seg">
+            <div class="engine-sort">
+              <span class="field-label" data-i18n="stt.sortBy">並び順</span>
+              <div class="segmented engine-sort-seg" id="engine-sort-seg">
+                <button type="button" data-sort="accuracy" data-i18n="stt.sortAccuracy">精度順</button>
+                <button type="button" data-sort="speed" data-i18n="stt.sortSpeed">速さ順 (CPU)</button>
+                <button type="button" data-sort="size" data-i18n="stt.sortSize">軽さ順</button>
+              </div>
+            </div>
+            <div class="engine-row engine-head" aria-hidden="true">
+              <span></span>
+              <span data-i18n="stt.colEngine">エンジン</span>
+              <span data-i18n="stt.colError">誤り率（短いほど正確）</span>
+              <span data-i18n="stt.colCpu">CPU 処理時間（短いほど速い）</span>
+              <span data-i18n="stt.colSize">サイズ</span>
+            </div>
+            <div id="engine-rows"></div>
           </div>
-          <div class="hint engine-note" data-i18n="stt.engineNote"></div>
+          <div class="hint engine-note" id="engine-note"></div>
 
           <div id="stt-local-panel">
             <div class="card setup-card" id="setup-server-card">

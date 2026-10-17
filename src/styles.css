@@ -814,27 +814,145 @@ select {
   color: #1a0d06;
 }
 
-/* engine choice (v0.14.1): name + measured accuracy / speed */
-#stt-engine-seg {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  width: 100%;
+/* engine choice (v0.14.2): comparison rows with bars, sortable */
+.engine-compare {
+  margin-top: 6px;
+  padding: 10px 12px;
 }
 
-#stt-engine-seg button {
+.engine-sort {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.engine-sort .segmented {
+  margin-top: 0;
+}
+
+.engine-sort-seg button {
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+.engine-row {
+  display: grid;
+  grid-template-columns: 18px minmax(220px, 1.7fr) 1fr 1fr 64px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+button.engine-row {
+  cursor: pointer;
+}
+
+button.engine-row:hover {
+  background: var(--accent-soft);
+}
+
+button.engine-row.is-active {
+  border-color: rgba(255, 138, 42, 0.7);
+  background: var(--accent-soft);
+}
+
+.engine-head {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding-top: 0;
+  padding-bottom: 2px;
+}
+
+.engine-radio {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--text-dim);
+}
+
+.engine-row.is-active .engine-radio {
+  border-color: var(--accent, #ff8a2a);
+  background: radial-gradient(circle, var(--accent, #ff8a2a) 45%, transparent 50%);
+}
+
+.engine-name {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
   gap: 2px;
-  text-align: left;
-  padding: 8px 12px;
+  min-width: 0;
 }
 
-#stt-engine-seg .seg-meta {
+.engine-name b {
+  font-weight: 600;
+}
+
+.engine-fit {
   font-size: 11px;
-  font-weight: 500;
-  opacity: 0.8;
+  color: var(--text-dim);
+}
+
+.engine-reco {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #1f0a02;
+  background: var(--accent-grad);
+  vertical-align: 1px;
+}
+
+.engine-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.engine-bar-track {
+  display: block;
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.engine-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--accent-grad);
+}
+
+.engine-bar-val {
+  min-width: 44px;
+  text-align: right;
+}
+
+.engine-size {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.engine-na {
+  grid-column: 3 / 6;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 .engine-note {
