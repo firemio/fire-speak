@@ -128,12 +128,13 @@
         <section class="section" id="section-stt">
           <h2 class="section-heading" data-i18n="stt.engineHeading">音声認識エンジン</h2>
           <div class="segmented" id="stt-engine-seg">
-            <button data-engine="local" data-i18n="stt.engineLocal">ローカル (whisper.cpp)</button>
-            <button data-engine="qwen" data-i18n="stt.engineQwen">ローカル (Qwen3-ASR)</button>
-            <button data-engine="parakeet" data-i18n="stt.engineParakeet">ローカル (Parakeet 日本語)</button>
-            <button data-engine="cohere" data-i18n="stt.engineCohere">ローカル (Cohere Transcribe)</button>
-            <button data-engine="cloud" data-i18n="stt.engineCloud">クラウド (OpenAI互換)</button>
+            <button data-engine="local"><span class="seg-name" data-i18n="stt.engineLocal">ローカル (whisper.cpp)</span><span class="seg-meta"></span></button>
+            <button data-engine="qwen"><span class="seg-name" data-i18n="stt.engineQwen">ローカル (Qwen3-ASR)</span><span class="seg-meta"></span></button>
+            <button data-engine="parakeet"><span class="seg-name" data-i18n="stt.engineParakeet">ローカル (Parakeet 日本語)</span><span class="seg-meta"></span></button>
+            <button data-engine="cohere"><span class="seg-name" data-i18n="stt.engineCohere">ローカル (Cohere Transcribe)</span><span class="seg-meta"></span></button>
+            <button data-engine="cloud"><span class="seg-name" data-i18n="stt.engineCloud">クラウド (OpenAI互換)</span><span class="seg-meta"></span></button>
           </div>
+          <div class="hint engine-note" data-i18n="stt.engineNote"></div>
 
           <div id="stt-local-panel">
             <div class="card setup-card" id="setup-server-card">

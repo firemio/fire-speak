@@ -912,3 +912,9 @@ v0.13.0 と同じ 8 文(Windows 音声合成 4 声、200 文字)・同じ正規�
 
 - Parakeet は誤りが送り仮名の表記ゆれだけで、CPU でも 1 文約 0.3 秒と軽い。Cohere は冒頭の語を落とすことがあり、日本語では他より劣る。合成音声なので実際の話し声とは差がある。既定の推奨エンジンは whisper のまま。
 - 参考: Cohere の日本語追加学習版 `TransWithAI/cohere-transcribe-ja-v0.1-GGUF` は 5.0% だが、ライセンス表記が無いため入れていない。
+
+# v0.14.1 追加仕様: エンジン選択に精度と速度を表示
+
+- 背景: エンジンが 5 つになり、ボタン名だけでは何を選べばよいか分からない。
+- `#stt-engine-seg` をグリッド(1 列 210px 以上)にし、各ボタンの 2 行目に実測値 `誤り {文字誤り率} · GPU {秒} · CPU {秒}`(`stt.engineMeta`)。クラウドは「精度・速度はサービス次第」(`stt.engineMetaCloud`)。値は main.ts の `ENGINE_METRICS`(v0.14.0 のベンチマーク、1 文 約 4 秒あたり)。下に測定条件とおすすめ(GPU あり → whisper.cpp、GPU なし → Parakeet)の注記(`stt.engineNote`)。12 言語。
+- CPU の値は Ryzen 7 9800X3D・8 スレッドで追加測定(8 文合計): whisper large-v3-turbo 43.6 秒、Qwen3-ASR 1.7B 10.9 秒、0.6B 4.3 秒、Parakeet 2.6 秒、Cohere 7.0 秒。1 文あたり 5.5 / 1.4 / 0.5 / 0.3 / 0.9 秒。古い CPU(第 8 世代 Core i5 など)は数倍かかる見込み(未計測)。

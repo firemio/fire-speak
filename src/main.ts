@@ -676,11 +676,27 @@ function renderHomeStatus(): void {
 // stt section
 // ---------------------------------------------------------------------------
 
+/**
+ * Measured on the SPEC v0.14 benchmark (8 synthetic Japanese sentences,
+ * about 4 s each): character error rate and seconds per sentence on an
+ * RTX 4070 Ti SUPER (GPU) and a Ryzen 7 9800X3D with 8 threads (CPU).
+ * Qwen spans its 1.7B and 0.6B models.
+ */
+const ENGINE_METRICS: Record<string, { err: string; gpu: string; cpu: string }> = {
+  local: { err: "0.5%", gpu: "0.1", cpu: "5.5" },
+  qwen: { err: "1.5–4.5%", gpu: "0.1", cpu: "0.5–1.4" },
+  parakeet: { err: "2.0%", gpu: "0.1", cpu: "0.3" },
+  cohere: { err: "7.0%", gpu: "0.1", cpu: "0.9" },
+};
+
 function renderSttSection(): void {
   if (!settings) return;
   const engine = settings.stt.engine;
   for (const btn of document.querySelectorAll<HTMLButtonElement>("#stt-engine-seg button")) {
     btn.classList.toggle("is-active", btn.dataset.engine === engine);
+    const meta = btn.querySelector<HTMLElement>(".seg-meta");
+    const m = ENGINE_METRICS[btn.dataset.engine ?? ""];
+    if (meta) meta.textContent = m ? t("stt.engineMeta", m.err, m.gpu, m.cpu) : t("stt.engineMetaCloud");
   }
   $("stt-local-panel").hidden = engine !== "local";
   $("stt-qwen-panel").hidden = engine !== "qwen";

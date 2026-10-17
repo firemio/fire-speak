@@ -814,6 +814,33 @@ select {
   color: #1a0d06;
 }
 
+/* engine choice (v0.14.1): name + measured accuracy / speed */
+#stt-engine-seg {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  width: 100%;
+}
+
+#stt-engine-seg button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  padding: 8px 12px;
+}
+
+#stt-engine-seg .seg-meta {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+
+.engine-note {
+  margin-top: 6px;
+}
+
 #stt-local-panel,
 #stt-qwen-panel,
 #stt-crisp-panel,
