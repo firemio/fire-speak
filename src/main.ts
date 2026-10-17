@@ -6,6 +6,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { applyDom, displayHotkey, getLang, LANGS, setLang, t, tMsg } from "./i18n";
 import type {
   AppStatus,
+  DictEntry,
   DownloadProgressPayload,
   HistoryEntry,
   LlmProvider,
@@ -224,7 +225,7 @@ function flushApiKeySave(): void {
 // navigation
 // ---------------------------------------------------------------------------
 
-const SECTION_NAMES = ["home", "general", "stt", "llm", "modes", "history", "update"];
+const SECTION_NAMES = ["home", "general", "stt", "llm", "modes", "history", "dictionary", "update"];
 
 function showSection(name: string): void {
   for (const btn of document.querySelectorAll<HTMLButtonElement>(".nav-item")) {
@@ -1441,6 +1442,86 @@ function wireHistorySection(): void {
 }
 
 // ---------------------------------------------------------------------------
+// term dictionary section (v0.12.5)
+// ---------------------------------------------------------------------------
+
+let dictEntries: DictEntry[] = [];
+
+function renderDictList(): void {
+  const host = $("dict-list");
+  host.textContent = "";
+  if (dictEntries.length === 0) {
+    const empty = el("div", "empty-state");
+    empty.appendChild(el("span", "empty-icon", "📖"));
+    empty.appendChild(el("span", undefined, t("dict.empty")));
+    host.appendChild(empty);
+    return;
+  }
+  for (const e of dictEntries) {
+    const item = el("div", "dict-item");
+    const head = el("div", "dict-head");
+    head.appendChild(el("span", "dict-term", e.term));
+    head.appendChild(el("span", `dict-source${e.source === "user" ? " user" : ""}`, t(e.source === "user" ? "dict.sourceUser" : "dict.sourceAuto")));
+    if (e.hits > 0) head.appendChild(el("span", "dict-hits", t("dict.hits", String(e.hits))));
+    const del = el("button", "icon-btn", "🗑");
+    del.title = t("common.delete");
+    del.addEventListener("click", async () => {
+      try {
+        await invoke("dict_remove", { term: e.term });
+        await refreshDictionary();
+      } catch (err: unknown) {
+        toast(errText(err), true);
+      }
+    });
+    const actions = el("div", "history-actions");
+    actions.appendChild(del);
+    head.appendChild(actions);
+    item.appendChild(head);
+    if (e.aliases.length) {
+      item.appendChild(el("div", "dict-aliases", `${t("dict.aliases")}: ${e.aliases.join(", ")}`));
+    }
+    host.appendChild(item);
+  }
+}
+
+async function refreshDictionary(): Promise<void> {
+  try {
+    dictEntries = await invoke<DictEntry[]>("dict_list");
+  } catch {
+    dictEntries = [];
+  }
+  renderDictList();
+}
+
+function wireDictionarySection(): void {
+  const add = async () => {
+    const termIn = $("in-dict-term") as HTMLInputElement;
+    const aliasIn = $("in-dict-aliases") as HTMLInputElement;
+    const term = termIn.value.trim();
+    if (!term) return;
+    const aliases = aliasIn.value
+      .split(/[,、，]/)
+      .map((a) => a.trim())
+      .filter((a) => a.length > 0);
+    try {
+      await invoke("dict_add", { term, aliases });
+      termIn.value = "";
+      aliasIn.value = "";
+      await refreshDictionary();
+      toast(t("dict.added", term));
+    } catch (err: unknown) {
+      toast(errText(err), true);
+    }
+  };
+  $("btn-dict-add").addEventListener("click", () => void add());
+  for (const id of ["in-dict-term", "in-dict-aliases"]) {
+    $(id).addEventListener("keydown", (e) => {
+      if ((e as KeyboardEvent).key === "Enter") void add();
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // general section
 // ---------------------------------------------------------------------------
 
@@ -2385,6 +2466,9 @@ async function setupListeners(): Promise<void> {
   await listen<null>("history-updated", () => {
     void refreshHistory();
   });
+  await listen<null>("dictionary-updated", () => {
+    void refreshDictionary();
+  });
 
   // whisper-server started / stopped: the home status card shows it
   await listen<boolean>("server-state", () => {
@@ -2412,6 +2496,7 @@ async function init(): Promise<void> {
   wireLlmSection();
   wireModesSection();
   wireHistorySection();
+  wireDictionarySection();
   wireGeneralSection();
   wireServerCard();
   wireQwenPanel();
@@ -2482,6 +2567,7 @@ async function init(): Promise<void> {
 
   renderAll();
   void refreshHistory();
+  void refreshDictionary();
   void refreshSetupStatus();
 
   // the backend may already know of a release (the window opens later than

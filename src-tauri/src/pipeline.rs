@@ -688,7 +688,14 @@ async fn run_pipeline(
     } else {
         Vec::new()
     };
-    let stt_hint = crate::context::stt_hint(&clipboard, now_ms, &settings.language);
+    // Term dictionary (v0.12.5): always used; learning follows llm_context.
+    let dict = crate::dictionary::load(&app);
+    let dict_terms = crate::dictionary::ranked_terms(&dict);
+    let stt_hint = crate::context::stt_hint(&clipboard, &dict_terms, now_ms, &settings.language);
+    // clipboard terms alone: what the term-fix pass and learning look at
+    let clip_terms = crate::context::stt_hint(&clipboard, &[], now_ms, &settings.language)
+        .map(|h| h.terms)
+        .unwrap_or_default();
 
     // 2. STT (with the clipboard vocabulary as whisper's prompt)
     let prompt = stt_hint.as_ref().map(|h| h.prompt.as_str());
@@ -711,6 +718,8 @@ async fn run_pipeline(
     if raw_text.is_empty() || transcript.no_speech || is_hallucination(&raw_text) {
         return Err("ERR_NO_SPEECH".to_string());
     }
+    // known misrecognitions of dictionary terms, replaced without an LLM
+    let corrected = crate::dictionary::apply_aliases(&dict, &raw_text);
 
     // 3. LLM polish (optional)
     let mode = settings
@@ -734,7 +743,8 @@ async fn run_pipeline(
         .cloned();
 
     let mut warning: Option<String> = None;
-    let mut final_text = raw_text.clone();
+    let mut final_text = corrected.clone();
+    let mut term_fix: Option<(String, String, Vec<String>)> = None;
     if mode.use_llm {
         match provider.filter(crate::llm::is_configured) {
             // The mode asks for polishing but nothing can run it: paste the
@@ -752,26 +762,46 @@ async fn run_pipeline(
                     *status = Status::Polishing;
                 }
                 emit_status(&app, "polishing", None);
-                let context = if settings.llm_context {
+                let mut context = if settings.llm_context {
                     crate::context::build(&crate::history::load(&app), now_ms, &clipboard)
                 } else {
                     crate::context::Context::default()
                 };
-                let mut result = crate::llm::polish(&p, &mode.instruction, &raw_text, &context).await;
+                context.terms = dict_terms.iter().take(crate::dictionary::PROMPT_TERMS_MAX).cloned().collect();
+                let mut result = crate::llm::polish(&p, &mode.instruction, &corrected, &context).await;
                 if let Ok(t) = &result {
-                    if !context.is_empty() && crate::context::looks_like_context_leak(&raw_text, t) {
+                    if !context.is_empty() && crate::context::looks_like_context_leak(&corrected, t) {
                         crate::settings::log_line(&app, "llm: output much longer than dictation; polishing again without context");
                         result = crate::llm::polish(
                             &p,
                             &mode.instruction,
-                            &raw_text,
+                            &corrected,
                             &crate::context::Context::default(),
                         )
                         .await;
                     }
                 }
                 match result {
-                    Ok(t) if !t.trim().is_empty() => final_text = t.trim().to_string(),
+                    Ok(t) if !t.trim().is_empty() => {
+                        final_text = crate::dictionary::apply_aliases(&dict, t.trim());
+                        let terms = crate::context::term_fix_candidates(&clip_terms, &final_text);
+                        if !terms.is_empty() && !is_canceled(&app, gen) {
+                            match crate::llm::fix_terms(&p, &final_text, &terms).await {
+                                Ok(fixed) if crate::context::accept_term_fix(&final_text, &fixed, &terms) => {
+                                    let fixed = fixed.trim().to_string();
+                                    let added: Vec<String> = terms
+                                        .iter()
+                                        .filter(|t| fixed.contains(t.as_str()) && !final_text.contains(t.as_str()))
+                                        .cloned()
+                                        .collect();
+                                    term_fix = Some((final_text.clone(), fixed.clone(), added));
+                                    final_text = fixed;
+                                }
+                                Ok(_) => {}
+                                Err(e) => eprintln!("llm term fix failed: {e}"),
+                            }
+                        }
+                    }
                     Ok(_) => {
                         warning = Some("WARN_LLM_FALLBACK".to_string());
                     }
@@ -812,6 +842,16 @@ async fn run_pipeline(
         settings.history_limit,
     ) {
         eprintln!("history save failed: {e}");
+    }
+    if settings.llm_context {
+        crate::dictionary::learn(
+            &app,
+            &crate::dictionary::Lesson {
+                final_text: &final_text,
+                clipboard_terms: &clip_terms,
+                fix: term_fix.as_ref().map(|(b, a, t)| (b.as_str(), a.as_str(), t.as_slice())),
+            },
+        );
     }
 
     paste_result?; // paste failure -> error flow

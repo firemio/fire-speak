@@ -55,6 +55,9 @@
           <button class="nav-item" data-section="history">
             <span class="nav-icon">🕘</span><span data-i18n="nav.history">履歴</span>
           </button>
+          <button class="nav-item" data-section="dictionary">
+            <span class="nav-icon">📖</span><span data-i18n="nav.dictionary">用語辞書</span>
+          </button>
           <button class="nav-item" data-section="update">
             <span class="nav-icon">🔄</span><span data-i18n="nav.update">アップデート</span>
             <span class="nav-badge" id="nav-update-badge" hidden></span>
@@ -314,6 +317,26 @@
             <button class="btn btn-danger btn-sm" id="btn-clear-history" data-i18n="history.clear">🗑 全消去</button>
           </div>
           <div id="history-list" class="stack"></div>
+        </section>
+
+        <!-- 用語辞書 (v0.12.5) -->
+        <section class="section" id="section-dictionary">
+          <h2 class="section-heading" data-i18n="nav.dictionary">用語辞書</h2>
+          <div class="hint" data-i18n="dict.hint">
+            人名・製品名・専門用語など、決まった表記で入力したい語です。クリップボードにコピーした用語を音声入力で使うと自動で覚え、誤認識された表記も学習して次から直します。
+          </div>
+          <div class="card dict-add">
+            <label class="field">
+              <span class="field-label" data-i18n="dict.term">用語</span>
+              <input type="text" id="in-dict-term" spellcheck="false" placeholder="Qwen3-ASR" />
+            </label>
+            <label class="field">
+              <span class="field-label" data-i18n="dict.aliases">誤認識・読み</span>
+              <input type="text" id="in-dict-aliases" spellcheck="false" placeholder="クエン3ASR, クエンスリー" />
+            </label>
+            <button class="btn btn-primary btn-sm" id="btn-dict-add" data-i18n="dict.add">追加</button>
+          </div>
+          <div id="dict-list" class="stack"></div>
         </section>
 
         <!-- 一般 -->

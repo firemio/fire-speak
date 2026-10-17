@@ -91,6 +91,16 @@ export interface Settings {
   modes_version: number;
 }
 
+/** Term dictionary entry (v0.12.5). */
+export interface DictEntry {
+  term: string;
+  aliases: string[];
+  source: "user" | "auto";
+  hits: number;
+  added: number;
+  last_used: number;
+}
+
 export interface HistoryEntry {
   id: string;
   timestamp: number; // unix ms

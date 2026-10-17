@@ -1613,3 +1613,77 @@ dialog.modal[open] {
 .model-row-wrap .progress {
   margin-top: 6px;
 }
+
+/* ---------- term dictionary (v0.12.5) ---------- */
+
+.dict-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-top: 12px;
+}
+
+.dict-add .field {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 220px;
+}
+
+.dict-add .field-label {
+  white-space: nowrap;
+}
+
+.dict-add input {
+  flex: 1;
+  min-width: 0;
+}
+
+.dict-item {
+  background: var(--bg-raise);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 16px;
+}
+
+.dict-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dict-term {
+  font-weight: 700;
+  font-size: 14px;
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+
+.dict-source {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-faint);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 0 8px;
+}
+
+.dict-source.user {
+  color: var(--accent-2);
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+
+.dict-hits {
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.dict-aliases {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+  user-select: text;
+}

@@ -34,11 +34,13 @@ pub struct Context {
     pub clipboard: Vec<String>,
     /// Oldest first.
     pub recent: Vec<String>,
+    /// Term dictionary, best first (v0.12.5).
+    pub terms: Vec<String>,
 }
 
 impl Context {
     pub fn is_empty(&self) -> bool {
-        self.clipboard.is_empty() && self.recent.is_empty()
+        self.clipboard.is_empty() && self.recent.is_empty() && self.terms.is_empty()
     }
 
     /// System-prompt section, or "" when there is nothing to add.
@@ -57,6 +59,11 @@ impl Context {
                 s.push_str("</item>");
             }
             s.push_str("\n</clipboard_history>");
+        }
+        if !self.terms.is_empty() {
+            s.push_str("\n\n<terms>");
+            s.push_str(&self.terms.join(" / "));
+            s.push_str("</terms>\n<terms> はユーザーの用語辞書(正しい表記)です。口述テキストの中にこれらの語を読み上げたように聞こえる部分(カタカナ読み・英字の読み・数字が漢数字になったものなど)があれば、この表記にしてください。");
         }
         if !self.recent.is_empty() {
             s.push_str("\n\n<recent_dictations>");
@@ -203,7 +210,7 @@ pub fn build(
     }
     clip.reverse();
 
-    Context { clipboard: clip, recent }
+    Context { clipboard: clip, recent, terms: Vec::new() }
 }
 
 /// Polishing with context produced far more text than was dictated — the
@@ -213,6 +220,62 @@ pub fn build(
 pub fn looks_like_context_leak(raw: &str, polished: &str) -> bool {
     let raw_len = raw.trim().chars().count();
     polished.trim().chars().count() > raw_len * 2 + 20
+}
+
+fn is_katakana(c: char) -> bool {
+    matches!(c as u32, 0x30A1..=0x30FA | 0x30FC)
+}
+
+/// Clipboard terms for the term-fix pass (v0.12.5): only names that STT
+/// spells phonetically — ASCII words (`Qwen3-ASR` → "クエン三ASR") and
+/// katakana — and only those not already in `text`. Kanji terms are left to
+/// the polish prompt (a generic kanji word would invite false replacements).
+/// Empty when `text` has nothing a misheard term could be: no katakana run
+/// and no ASCII letter (each pass costs a second LLM call, 1-4 s on Poolside).
+pub fn term_fix_candidates(terms: &[String], text: &str) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let suspicious = chars.windows(2).any(|w| is_katakana(w[0]) && is_katakana(w[1]))
+        || chars.iter().any(|c| c.is_ascii_alphabetic());
+    if !suspicious {
+        return Vec::new();
+    }
+    let lower = text.to_lowercase();
+    terms
+        .iter()
+        .filter(|t| t.chars().any(|c| c.is_ascii_alphabetic() || is_katakana(c)))
+        .filter(|t| !lower.contains(&t.to_lowercase()))
+        .cloned()
+        .collect()
+}
+
+/// Accept the term-fix output only when it put a whole term in and changed
+/// nothing else much: with the newly added terms removed, at least 80% of
+/// what is left must be the original text in order (LCS). Rejects partial
+/// fixes ("クエン3-ASR") and rewrites.
+pub fn accept_term_fix(before: &str, after: &str, terms: &[String]) -> bool {
+    let after = after.trim();
+    if after.is_empty() || after == before.trim() {
+        return false;
+    }
+    let added: Vec<&String> = terms.iter().filter(|t| after.contains(t.as_str()) && !before.contains(t.as_str())).collect();
+    if added.is_empty() {
+        return false;
+    }
+    let mut rest = after.to_string();
+    for t in &added {
+        rest = rest.replace(t.as_str(), "");
+    }
+    let (a, b): (Vec<char>, Vec<char>) = (rest.chars().collect(), before.trim().chars().collect());
+    if a.len() > 2000 || b.len() > 2000 {
+        return false;
+    }
+    let mut dp = vec![vec![0u16; b.len() + 1]; a.len() + 1];
+    for i in 0..a.len() {
+        for j in 0..b.len() {
+            dp[i + 1][j + 1] = if a[i] == b[j] { dp[i][j] + 1 } else { dp[i][j + 1].max(dp[i + 1][j]) };
+        }
+    }
+    dp[a.len()][b.len()] as usize * 10 >= a.len() * 8
 }
 
 /// Whisper keeps only the last ~224 tokens of a prompt, and a kanji can cost
@@ -294,7 +357,9 @@ fn extract_terms(text: &str) -> Vec<String> {
 
 /// Build the STT prompt from the clipboard history (newest first). Newest
 /// terms go LAST: whisper truncates a long prompt from the front.
-pub fn stt_hint(clipboard: &[ClipEntry], now_ms: u64, language: &str) -> Option<SttHint> {
+/// `dict` (term dictionary, best first) fills the budget the clipboard
+/// leaves and goes in front of the clipboard terms (whisper keeps the tail).
+pub fn stt_hint(clipboard: &[ClipEntry], dict: &[String], now_ms: u64, language: &str) -> Option<SttHint> {
     let window_ms = CLIP_WINDOW.as_millis() as u64;
     // One block per clipboard entry, newest entry first.
     let mut blocks: Vec<Vec<String>> = Vec::new();
@@ -319,7 +384,22 @@ pub fn stt_hint(clipboard: &[ClipEntry], now_ms: u64, language: &str) -> Option<
         }
         blocks.push(block);
     }
-    let terms: Vec<String> = blocks.into_iter().rev().flatten().collect();
+    let clip_terms: Vec<String> = blocks.into_iter().rev().flatten().collect();
+    let mut dict_terms: Vec<String> = Vec::new();
+    for t in dict {
+        let n = t.chars().count() + 1;
+        if chars + n > STT_PROMPT_MAX_CHARS || count >= STT_PROMPT_MAX_TERMS {
+            break;
+        }
+        if clip_terms.contains(t) || dict_terms.contains(t) {
+            continue;
+        }
+        chars += n;
+        count += 1;
+        dict_terms.push(t.clone());
+    }
+    dict_terms.reverse();
+    let terms: Vec<String> = dict_terms.into_iter().chain(clip_terms).collect();
     if terms.is_empty() {
         return None;
     }
@@ -467,13 +547,13 @@ mod tests {
     fn stt_hint_order_and_limits() {
         let now = 200 * 60 * 1000;
         let c = vec![clip(now - 1_000, "新しい用語 Tauri"), clip(now - 2_000, "古い単語 Whisper Tauri")];
-        let h = stt_hint(&c, now, "ja").unwrap();
+        let h = stt_hint(&c, &[], now, "ja").unwrap();
         // older entry first, newest entry last (whisper keeps the tail), deduped
         assert_eq!(h.terms, vec!["単語", "Whisper", "用語", "Tauri"]);
         assert_eq!(h.prompt, "単語、Whisper、用語、Tauri。");
-        assert!(stt_hint(&[clip(now - 61 * 60 * 1000, "古すぎる用語")], now, "ja").is_none());
+        assert!(stt_hint(&[clip(now - 61 * 60 * 1000, "古すぎる用語")], &[], now, "ja").is_none());
         let many: Vec<ClipEntry> = (0..50).map(|i| clip(now - i, &format!("用語{i}番目 word{i}"))).collect();
-        let h = stt_hint(&many, now, "en").unwrap();
+        let h = stt_hint(&many, &[], now, "en").unwrap();
         assert!(h.terms.iter().map(|t| t.chars().count() + 1).sum::<usize>() <= STT_PROMPT_MAX_CHARS);
         assert!(h.prompt.contains(", "));
         // the newest entry's terms survive the cap
@@ -494,6 +574,20 @@ mod tests {
     }
 
     #[test]
+    fn term_fix() {
+        let terms: Vec<String> = ["Qwen3-ASR", "講演会", "タウリ"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(term_fix_candidates(&terms, "クエン三ASRを推奨にしたい。"), vec!["Qwen3-ASR", "タウリ"]);
+        assert!(term_fix_candidates(&terms, "明日はこうえんかいです。").is_empty());
+        assert!(term_fix_candidates(&terms, "明日の会議は十時からです。").is_empty());
+        assert!(term_fix_candidates(&terms, "Qwen3-ASRとタウリ").is_empty());
+        // 2026-10-17 on Poolside
+        assert!(accept_term_fix("クエン三ASRを推奨にしたい。", "Qwen3-ASRを推奨にしたい。", &terms));
+        assert!(!accept_term_fix("クエンさんを推奨にしたい。", "クエン3-ASRを推奨にしたい。", &terms));
+        assert!(!accept_term_fix("クエン三ASRを推奨。", "クエン三ASRを推奨。", &terms));
+        assert!(!accept_term_fix("クエンが好き", "Qwen3-ASRについての全く別の長い文章を書きました", &terms));
+    }
+
+    #[test]
     fn context_leak() {
         // 2026-10-17 on Poolside: "これ要約して。" -> a summary of recent dictations
         assert!(looks_like_context_leak(
@@ -510,9 +604,22 @@ mod tests {
     #[test]
     fn prompt_section() {
         assert_eq!(Context::default().prompt_section(), "");
-        let c = Context { clipboard: vec!["X".into(), "Z".into()], recent: vec!["Y".into()] };
+        let c = Context { clipboard: vec!["X".into(), "Z".into()], recent: vec!["Y".into()], terms: vec!["Qwen3-ASR".into()] };
         let s = c.prompt_section();
         assert!(s.contains("<clipboard_history>\n<item>X</item>\n<item>Z</item>\n</clipboard_history>"));
         assert!(s.contains("<item>Y</item>"));
+        assert!(s.contains("<terms>Qwen3-ASR</terms>"));
+    }
+
+    #[test]
+    fn stt_hint_with_dictionary() {
+        let now = 10_000_000;
+        let dict: Vec<String> = vec!["Qwen3-ASR".into(), "Tauri".into()];
+        // no clipboard: dictionary alone
+        let h = stt_hint(&[], &dict, now, "ja").unwrap();
+        assert_eq!(h.terms, vec!["Tauri", "Qwen3-ASR"]); // best last
+        // clipboard terms stay at the tail; duplicates once
+        let h = stt_hint(&[clip(now, "Tauri と Whisper")], &dict, now, "ja").unwrap();
+        assert_eq!(h.terms, vec!["Qwen3-ASR", "Tauri", "Whisper"]);
     }
 }

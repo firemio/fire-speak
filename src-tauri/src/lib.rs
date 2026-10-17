@@ -1,5 +1,6 @@
 mod audio;
 mod context;
+mod dictionary;
 mod history;
 mod hw;
 mod hook;
@@ -441,6 +442,23 @@ async fn clear_history(app: AppHandle) -> Result<(), String> {
     history::clear(&app)
 }
 
+/// Term dictionary (v0.12.5), user entries first, then learned by recency.
+#[tauri::command]
+fn dict_list(app: AppHandle) -> Vec<dictionary::DictEntry> {
+    let list = dictionary::load(&app);
+    dictionary::ranked(&list).into_iter().cloned().collect()
+}
+
+#[tauri::command]
+fn dict_add(app: AppHandle, term: String, aliases: Vec<String>) -> Result<(), String> {
+    dictionary::add_user(&app, &term, &aliases)
+}
+
+#[tauri::command]
+fn dict_remove(app: AppHandle, term: String) -> Result<(), String> {
+    dictionary::remove(&app, &term)
+}
+
 #[tauri::command]
 async fn copy_text(text: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || paste::copy_only(&text))
@@ -726,6 +744,9 @@ pub fn run() {
             set_active_mode,
             get_history,
             clear_history,
+            dict_list,
+            dict_add,
+            dict_remove,
             copy_text,
             test_stt,
             test_llm,
