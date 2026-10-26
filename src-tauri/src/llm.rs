@@ -59,6 +59,18 @@ pub async fn fix_terms(provider: &LlmProvider, text: &str, terms: &[String]) -> 
     chat(provider, Some(TERM_FIX_SYSTEM), &user).await.map(|t| t.trim().to_string())
 }
 
+/// The model talked about the prompt instead of processing the dictation
+/// (v0.15.4): on 2026-10-26 Poolside answered "{{口述のテキストが `<dictation>`
+/// タグで囲まれていないため、実際の入力を取得できません。}}" twice, and it was
+/// pasted. A reply that names our wrapper tag, or is wholly wrapped in `{{ }}`,
+/// when the dictation itself does neither, is not text the user said.
+pub fn looks_like_meta_reply(raw: &str, polished: &str) -> bool {
+    let raw_l = raw.to_lowercase();
+    let out = polished.trim();
+    (out.to_lowercase().contains("dictation") && !raw_l.contains("dictation"))
+        || (out.starts_with("{{") && out.ends_with("}}") && !raw.contains("{{"))
+}
+
 /// Some models echo the wrapper back around their answer.
 fn strip_dictation_tags(s: &str) -> String {
     let t = s.trim();
@@ -192,5 +204,26 @@ fn truncate(s: &str, max: usize) -> String {
         s.to_string()
     } else {
         s.chars().take(max).collect::<String>() + "…"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn meta_replies_are_detected() {
+        assert!(looks_like_meta_reply(
+            "あと注文時にinfo@v-vmax.comに注文メールを送る。",
+            "{{口述のテキストが `<dictation>` タグで囲まれていないため、実際の入力を取得できません。}}"
+        ));
+        assert!(looks_like_meta_reply("明日は雨です", "{{入力がありません}}"));
+        assert!(!looks_like_meta_reply(
+            "あと注文時にinfo@v-vmax.comに注文メールを送る。",
+            "注文時にinfo@v-vmax.comに注文メールを送る。"
+        ));
+        // the user may dictate these themselves
+        assert!(!looks_like_meta_reply("dictation タグを外す", "dictation タグを外す。"));
+        assert!(!looks_like_meta_reply("{{name}} を差し込む", "{{name}} を差し込む。"));
     }
 }

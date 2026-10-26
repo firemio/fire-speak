@@ -217,9 +217,15 @@ pub fn build(
 /// model most likely summarized or quoted the context (a dictated "これ要約して"
 /// came out as a summary of the recent dictations). The pipeline then polishes
 /// again without context (v0.12.3).
+///
+/// Far less text is the same failure the other way (v0.15.4): with an email
+/// address in the clipboard, "注文時にinfo@…に注文メールを送る。" came out as
+/// the bare address. Polishing again without context costs one more call even
+/// when a filler-heavy dictation really did shrink that much.
 pub fn looks_like_context_leak(raw: &str, polished: &str) -> bool {
     let raw_len = raw.trim().chars().count();
-    polished.trim().chars().count() > raw_len * 2 + 20
+    let out_len = polished.trim().chars().count();
+    out_len > raw_len * 2 + 20 || (raw_len >= 15 && out_len * 2 < raw_len)
 }
 
 fn is_katakana(c: char) -> bool {
@@ -599,6 +605,12 @@ mod tests {
             "えーと明日はこうえんかいであたらしいきかいのどうにゅうについて話します",
             "明日は講演会で新しい機械の導入について話します。"
         ));
+        // 2026-10-26: the clipboard's address came out instead of the sentence
+        assert!(looks_like_context_leak(
+            "あと注文時にinfo@v-vmax.comに注文メールを送る。",
+            "info@v-vmax.com"
+        ));
+        assert!(!looks_like_context_leak("えー、あの、はい", "はい。"));
     }
 
     #[test]

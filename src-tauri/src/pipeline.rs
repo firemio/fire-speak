@@ -830,8 +830,16 @@ async fn run_pipeline(
                 context.terms = terms;
                 let mut result = crate::llm::polish(&p, &mode.instruction, &corrected, &context).await;
                 if let Ok(t) = &result {
-                    if !context.is_empty() && crate::context::looks_like_context_leak(&corrected, t) {
-                        crate::settings::log_line(&app, "llm: output much longer than dictation; polishing again without context");
+                    let meta = crate::llm::looks_like_meta_reply(&corrected, t);
+                    if !context.is_empty() && (meta || crate::context::looks_like_context_leak(&corrected, t)) {
+                        crate::settings::log_line(
+                            &app,
+                            if meta {
+                                "llm: reply is about the prompt, not the dictation; polishing again without context"
+                            } else {
+                                "llm: output length far from dictation; polishing again without context"
+                            },
+                        );
                         result = crate::llm::polish(
                             &p,
                             &mode.instruction,
@@ -840,6 +848,11 @@ async fn run_pipeline(
                         )
                         .await;
                     }
+                }
+                // never paste a reply about the prompt: the transcript is better (v0.15.4)
+                if matches!(&result, Ok(t) if crate::llm::looks_like_meta_reply(&corrected, t)) {
+                    crate::settings::log_line(&app, "llm: reply is about the prompt again; pasting the transcript");
+                    result = Err("ERR_LLM_META_REPLY".to_string());
                 }
                 match result {
                     Ok(t) if !t.trim().is_empty() => {
