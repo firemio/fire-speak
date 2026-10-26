@@ -966,3 +966,15 @@ v0.13.0 と同じ 8 文(Windows 音声合成 4 声、200 文字)・同じ正規�
 - 用語置換パスの system 文言を「ユーザーが直前にコピーした、**または辞書にある**正しい表記」に変更。置換が採用されれば従来どおりユーザー辞書に自動学習(読みが alias になり、次からはコードで置換される)。
 - 設定「用語辞書」の一覧の下に折りたたみ「組み込みの用語（N 語）」: カテゴリ別に用語と誤認識・読みを表示(読み取り専用)。コマンド `glossary_list`。ロケール 12 言語(`dict.builtin`, `dict.builtinHint`, `dict.builtinCount`, `dict.cat_ai|dev|life`)。
 - 確認(2026-10-18、ローカル Ollama gemma4:12b-it-qat、`glossary::tests::glossary_live`): 「クロードとジェミニを比べてみた。」→「ClaudeとGeminiを比べてみた。」、「エーアイの話をチャットジーピーティーとした。」→「AIの話をChatGPTとした。」(コード置換のみ)、「ディープシークとクウェンはオラマで動く。」→「DeepSeekとQwenはOllamaで動く。」(同)、「パイソンで書いたスクリプトをギットハブに上げた。」→「Pythonで書いたスクリプトをGitHubに上げた。」、「明日はラストの打ち合わせです。」→ 変更なし(Rust は weak)。
+
+# v0.15.3 追加仕様: 古い HUD ウィンドウを作り直す
+
+## 背景
+
+- 2026-10-26: 約 12 時間常駐した v0.15.2 で、右Alt で録音・文字起こし・貼り付けは動くが HUD が見えない状態が再発した。録音中に `fire-speak.log` へ `overlay: no paint ack` は記録されていない。HUD の rAF が回って ack を返していたか、窓が非表示のままでウォッチドッグが黙って終了したかのどちらかで、v0.10.3 の描画ウォッチドッグ(rAF が止まることが前提)はどちらも検知できない。アプリ再起動で直る。
+- 注: この透過 HUD は GDI の `CopyFromScreen` には写らない(正常時も背後だけが写る)。外から確認するときは `PrintWindow(hwnd, dc, PW_RENDERFULLCONTENT)` を使う。
+
+## 対策 (pipeline.rs)
+
+- `hide_overlay` は隠したあと、overlay ウィンドウが作られてから **10 分**以上経っていれば(起動時に tauri.conf が作ったものは経過時間不明として対象)、v0.10.3 の `recreate_overlay` で作り直す。次の表示は新しい WebView2 で行われる。作り直し中に録音が始まった場合は、従来どおり作り直し後に再表示する。
+- 描画ウォッチドッグ: 表示 1.5 秒後、overlay が**非表示なのに status がまだ recording** なら(表示が効いていない。HUD のページは非表示でも ack を返しうるので、可視判定を ack 判定より先に行う)`fire-speak.log` に `overlay: hidden while recording; recreating HUD window` を記録して作り直す。表示中で ack が無い場合は従来どおり `overlay: no paint ack ...`。

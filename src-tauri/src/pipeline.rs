@@ -295,31 +295,49 @@ static OVERLAY_SHOW_SEQ: AtomicU64 = AtomicU64::new(0);
 static OVERLAY_ACK_SEQ: AtomicU64 = AtomicU64::new(0);
 /// How long the HUD has to acknowledge a paint after being shown.
 const OVERLAY_PAINT_TIMEOUT_MS: u64 = 1500;
+/// When the current overlay window was built (`None` = the one tauri.conf
+/// created at startup, age unknown).
+static OVERLAY_BORN: Mutex<Option<Instant>> = Mutex::new(None);
+/// On hide, an overlay older than this is rebuilt so the next show gets a
+/// fresh WebView2. The paint watchdog cannot catch every stall: on
+/// 2026-10-26 (~12 h uptime) the HUD kept acking rAF while nothing reached
+/// the screen.
+const OVERLAY_MAX_AGE: Duration = Duration::from_secs(10 * 60);
 
 /// Position the overlay at the bottom-center of the primary monitor's work
 /// area and show it without stealing focus (the window is focus:false).
 ///
 /// A paint watchdog follows every show: after a long run the HUD window was
 /// observed to become visible while its WebView2 painted nothing (only a
-/// restart fixed it). If the HUD does not acknowledge a paint in time, the
-/// overlay window is recreated.
+/// restart fixed it). If the HUD does not acknowledge a paint in time, or the
+/// window is not visible while the recording is still running, the overlay
+/// window is recreated.
 pub fn show_overlay(app: &AppHandle) {
     let seq = OVERLAY_SHOW_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
     show_overlay_window(app);
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_millis(OVERLAY_PAINT_TIMEOUT_MS)).await;
-        if OVERLAY_SHOW_SEQ.load(Ordering::SeqCst) != seq
-            || OVERLAY_ACK_SEQ.load(Ordering::SeqCst) >= seq
-        {
-            return; // superseded by a newer show, or painted fine
+        if OVERLAY_SHOW_SEQ.load(Ordering::SeqCst) != seq {
+            return; // superseded by a newer show
         }
         let visible = app2
             .get_webview_window("overlay")
             .and_then(|w| w.is_visible().ok())
             .unwrap_or(false);
         if !visible {
-            return; // already hidden again (short tap / cancel)
+            let recording =
+                *app2.state::<AppState>().status.lock().unwrap() == Status::Recording;
+            if !recording {
+                return; // already hidden again (short tap / cancel)
+            }
+            // still recording, so the show did not take (the page may ack anyway)
+            crate::settings::log_line(&app2, "overlay: hidden while recording; recreating HUD window");
+            recreate_overlay(&app2);
+            return;
+        }
+        if OVERLAY_ACK_SEQ.load(Ordering::SeqCst) >= seq {
+            return; // painted fine
         }
         crate::settings::log_line(&app2, "overlay: no paint ack after show; recreating HUD window");
         recreate_overlay(&app2);
@@ -350,6 +368,14 @@ pub fn hide_overlay(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("overlay") {
         set_webview_visible(&window, false);
         let _ = window.hide();
+    }
+    let stale = OVERLAY_BORN
+        .lock()
+        .unwrap()
+        .map(|t| t.elapsed() >= OVERLAY_MAX_AGE)
+        .unwrap_or(true);
+    if stale {
+        recreate_overlay(app);
     }
 }
 
@@ -406,6 +432,7 @@ fn recreate_overlay(app: &AppHandle) {
             crate::settings::log_line(&app2, &format!("overlay: recreate failed: {e}"));
             return;
         }
+        *OVERLAY_BORN.lock().unwrap() = Some(Instant::now());
         let busy = *app2.state::<AppState>().status.lock().unwrap() != Status::Idle;
         if busy {
             // no further watchdog here: one recreate per show is enough
