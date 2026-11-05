@@ -594,6 +594,30 @@ fn request_body(family: Family, language: &str, wav: &[u8], prompt: Option<&str>
     })
 }
 
+/// Nemotron's transcript with a leaked reasoning block (`<think>…</think>`)
+/// and speaker tags (`<spk:0>`) removed. `--reasoning off` normally keeps
+/// both out; this is the fallback so they never get pasted.
+pub fn clean_nemotron_output(raw: &str) -> String {
+    let s = match raw.find("</think>") {
+        Some(end) => &raw[end + "</think>".len()..],
+        None => raw,
+    };
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find("<spk:") {
+        out.push_str(&rest[..i]);
+        rest = rest[i..].find('>').map_or("", |j| &rest[i + j + 1..]);
+    }
+    out.push_str(rest);
+    // a removed tag can leave two spaces or a leading space on a line
+    let lines: Vec<String> = out
+        .lines()
+        .map(|l| l.split(' ').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" "))
+        .collect();
+    lines.join("
+").trim().to_string()
+}
+
 async fn transcribe_at(
     port: u16,
     family: Family,
@@ -628,7 +652,10 @@ async fn transcribe_at(
     let v: serde_json::Value = serde_json::from_str(&text)
         .map_err(|e| format!("ERR_STT_NETWORK|invalid response: {e}"))?;
     let raw = v["choices"][0]["message"]["content"].as_str().unwrap_or("");
-    let (lang, text) = parse_asr_output(raw);
+    let (lang, text) = match family {
+        Family::Nemotron => (None, clean_nemotron_output(raw)),
+        Family::Qwen3Asr => parse_asr_output(raw),
+    };
     // Qwen3-ASR tags audio it hears no speech in as "language None".
     let no_speech = lang.as_deref() == Some("None");
     Ok(crate::stt::Transcript { text, no_speech })
@@ -855,6 +882,12 @@ mod tests {
         assert!(text.ends_with("Context terms: fire-speak, Tauri."));
         assert_eq!(msgs[0]["content"][1]["type"], "input_audio");
         assert!(nemotron_instruction("auto", None).contains("Language: as spoken."));
+        assert_eq!(clean_nemotron_output("<think>x</think> 明日です。"), "明日です。");
+        assert_eq!(clean_nemotron_output("<spk:0> hello <spk:1> world"), "hello world");
+        assert_eq!(clean_nemotron_output("一行目。
+二行目。"), "一行目。
+二行目。");
+        assert_eq!(clean_nemotron_output("そのまま"), "そのまま");
         assert!(!nemotron_instruction("ja", Some("  ")).contains("Context terms"));
         assert!(nemotron_instruction("ja", Some("Tauri、ラグナ。")).ends_with("Context terms: Tauri、ラグナ."));
         // Qwen3-ASR keeps its own shape

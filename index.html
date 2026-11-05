@@ -155,6 +155,10 @@
           </div>
           <div class="hint engine-note" id="engine-note"></div>
 
+          <!-- v0.16.2: the selected engine's settings open under its row in
+               the list above (placeEnginePanel); the panels wait here -->
+          <div id="engine-panel-park" hidden>
+
           <div id="stt-local-panel">
             <div class="card setup-card" id="setup-server-card">
               <div class="setup-row">
@@ -339,7 +343,9 @@
             </div>
           </div>
 
-          <div class="test-row">
+          </div>
+
+          <div class="test-row" id="stt-test-row">
             <button class="btn" id="btn-test-stt" data-i18n="stt.testBtn">🔌 接続テスト</button>
             <span class="test-result" id="stt-test-result"></span>
           </div>

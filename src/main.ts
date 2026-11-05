@@ -788,6 +788,7 @@ function renderEngineCompare(): void {
   const maxCpu = Math.max(...ENGINE_CHOICES.map((c) => c.cpu));
   const reco = recommendedChoice();
   const host = $("engine-rows");
+  parkEnginePanels();
   host.textContent = "";
   const row = (c: EngineChoice | null): HTMLButtonElement => {
     const r = el("button", "engine-row") as HTMLButtonElement;
@@ -813,6 +814,7 @@ function renderEngineCompare(): void {
   };
   for (const c of rows) host.appendChild(row(c));
   host.appendChild(row(null));
+  placeEnginePanel();
 
   let note = t("stt.engineNote");
   const hw = setupStatus?.hw;
@@ -823,10 +825,42 @@ function renderEngineCompare(): void {
   $("engine-note").textContent = note;
 }
 
+const ENGINE_PANEL_IDS = ["stt-local-panel", "stt-qwen-panel", "stt-crisp-panel", "stt-cloud-panel"];
+
+/** Settings panel of an engine. */
+function enginePanelId(engine: string): string {
+  if (engine === "qwen") return "stt-qwen-panel";
+  if (isCrispEngine(engine)) return "stt-crisp-panel";
+  return engine === "cloud" ? "stt-cloud-panel" : "stt-local-panel";
+}
+
+/** Move every panel (and the test row) back out of the list before it is rebuilt. */
+function parkEnginePanels(): void {
+  const park = $("engine-panel-park");
+  for (const id of ENGINE_PANEL_IDS) park.appendChild($(id));
+  park.appendChild($("stt-test-row"));
+}
+
+/**
+ * v0.16.2: the selected engine row opens its own settings (server, device,
+ * model, advanced, connection test) right below it, so the engine and its
+ * model read as one choice instead of panels stacked under the list.
+ */
+function placeEnginePanel(): void {
+  if (!settings) return;
+  const active = document.querySelector<HTMLElement>("#engine-rows .engine-row.is-active");
+  if (!active) return;
+  const detail = el("div", "engine-detail");
+  const panel = $(enginePanelId(settings.stt.engine));
+  panel.hidden = false;
+  detail.appendChild(panel);
+  detail.appendChild($("stt-test-row"));
+  active.after(detail);
+}
+
 function renderSttSection(): void {
   if (!settings) return;
   const engine = settings.stt.engine;
-  renderEngineCompare();
   $("stt-local-panel").hidden = engine !== "local";
   $("stt-qwen-panel").hidden = engine !== "qwen";
   $("stt-crisp-panel").hidden = !isCrispEngine(engine);
@@ -852,6 +886,8 @@ function renderSttSection(): void {
   input("in-cloud-model").value = settings.stt.cloud.model;
 
   renderSttModelList();
+  // last: places the panel just made visible under the selected row
+  renderEngineCompare();
 }
 
 // ---------------------------------------------------------------------------

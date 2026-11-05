@@ -1053,3 +1053,15 @@ v0.14 と同じ 8 文・同じ正規化、llama.cpp b12110 Vulkan。処理時間
 ## Qwen パネルのモデル欄
 
 - エンジン一覧がモデルごとに 1 行(Qwen3-ASR 0.6B / 1.7B / Nemotron)なので、v0.16.0 までの「モデル選択」一覧は重複していた(Nemotron を選んでも Qwen が並び、押すとエンジン行も切り替わる)。v0.16.1 からカード名は「モデル」(`sys.model`)で、**選択中のモデル 1 行だけ**(サイズ・インストール状態・ダウンロード・進捗)を出す。クリックで切り替えない。`stt.qwenModelHint` は削除。
+
+# v0.16.2 追加仕様: エンジンの設定をエンジン行の下に開く / Nemotron 出力の後処理
+
+クラウドセッション(ブランチ `ccr-140e9dfd-nmj49w`、ピン未記入のまま push、未マージ)の案のうち、次の 2 つだけを main に取り込む。同ブランチの MoE 配置の自動化(`--fit on` → 失敗時 `--n-cpu-moe 999`、`n_cpu_moe` 設定)は、v0.16.1 の計測で CPU より遅かった(`--fit` 3.01 秒・`--cpu-moe` 3.52 秒 / CPU 2.46 秒)ので採らない。
+
+## 音声認識画面
+
+- エンジン一覧(`#engine-rows`)で選択中の行の直下に、そのエンジンの設定パネル(サーバー・処理デバイス・モデル・詳細設定)と接続テストを開く(`placeEnginePanel`、`.engine-detail`)。一覧の下にパネルを並べる配置はやめる。パネルは `#engine-panel-park`(hidden)に置いてあり、一覧を描き直す前に戻す(`parkEnginePanels`)。`renderSttSection` は最後に `renderEngineCompare` を呼ぶ。
+
+## Nemotron の出力 (qwen.rs `clean_nemotron_output`)
+
+- `</think>` までの推論ブロックと話者タグ `<spk:N>` を取り除き、行ごとに余った空白を詰めて前後を trim。改行は残す。通常は `--reasoning off` で出ない(貼り付けの保険)。Qwen3-ASR は従来どおり `parse_asr_output`。

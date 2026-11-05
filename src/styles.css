@@ -968,11 +968,26 @@ button.engine-row.is-active {
   margin-top: 6px;
 }
 
-#stt-local-panel,
-#stt-qwen-panel,
-#stt-crisp-panel,
-#stt-cloud-panel {
-  margin-top: 16px;
+/* v0.16.2: the selected engine's settings open inside the list, under its row */
+.engine-detail {
+  margin: 2px 0 10px 28px;
+  padding: 4px 0 4px 14px;
+  border-left: 2px solid var(--accent);
+}
+
+.engine-detail .card {
+  margin: 8px 0 0;
+}
+
+.engine-detail .test-row {
+  margin-top: 10px;
+}
+
+@media (max-width: 720px) {
+  .engine-detail {
+    margin-left: 6px;
+    padding-left: 8px;
+  }
 }
 
 /* ---------- model select list (stt) ---------- */
