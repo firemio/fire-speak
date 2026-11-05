@@ -32,7 +32,7 @@ Linux は[Linux でのインストール](#linux-でのインストール)を必
 - **文字起こしエンジン切替**
   - ローカル: whisper.cpp（完全無料・オフライン・プライバシー安全。アプリ内からサーバ/モデルをワンクリック導入）
     - 処理デバイス: NVIDIA GPU (CUDA) / AMD・その他 GPU (Vulkan) / AMD NPU (Ryzen AI) / Intel NPU (OpenVINO、Core Ultra の AI Boost。実機未検証) / CPU
-  - ローカル: Qwen3-ASR（llama.cpp）、Parakeet 日本語版・Cohere Transcribe（CrispASR）。GPU の無い古めのノート PC には Parakeet が軽くて正確です。音声認識タブの比較表に精度と速さを並べ、この PC へのおすすめを表示します
+  - ローカル: Qwen3-ASR・NVIDIA Nemotron 3.5 Transcribe（llama.cpp）、Parakeet 日本語版・Cohere Transcribe（CrispASR）。GPU の無い古めのノート PC には Parakeet が軽くて正確です。Nemotron は最も正確ですが 19GB あり、メモリ 32GB 以上の PC 向けです。音声認識タブの比較表に精度と速さを並べ、この PC へのおすすめを表示します
   - クラウド: OpenAI互換 `audio/transcriptions` API（OpenAI / Groq など）
 - **AI整形プロバイダ切替**
   - Anthropic API（Claude Haiku 等）

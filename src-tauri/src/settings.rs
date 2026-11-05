@@ -130,7 +130,7 @@ impl Default for SttSettings {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QwenSttSettings {
-    /// "0.6b" | "1.7b" (see `qwen::MODELS`).
+    /// "0.6b" | "1.7b" | "nemotron" (see `qwen::MODELS`).
     #[serde(default = "default_qwen_model")]
     pub model: String,
     #[serde(default = "default_qwen_port")]

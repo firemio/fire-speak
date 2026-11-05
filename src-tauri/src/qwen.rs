@@ -18,8 +18,21 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
+/// How a model is asked to transcribe (both run on the same llama-server).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Family {
+    /// Qwen3-ASR: audio only, the vocabulary hint as the system message, a
+    /// fixed language forced by prefilling `language X<asr_text>`.
+    Qwen3Asr,
+    /// NVIDIA Nemotron 3.5 Transcribe (v0.16): the instruction and the
+    /// context terms in the user message next to the audio, no system
+    /// message; the server needs `--reasoning off`.
+    Nemotron,
+}
+
 pub struct QwenModel {
     pub id: &'static str,
+    family: Family,
     repo: &'static str,
     /// Hugging Face commit the files are pinned to.
     rev: &'static str,
@@ -36,6 +49,7 @@ pub struct QwenModel {
 pub const MODELS: &[QwenModel] = &[
     QwenModel {
         id: "0.6b",
+        family: Family::Qwen3Asr,
         repo: "ggml-org/Qwen3-ASR-0.6B-GGUF",
         rev: "928ab958557df9aa2ef1c93e0e83c7ad0933fae2",
         model_file: "Qwen3-ASR-0.6B-Q8_0.gguf",
@@ -46,6 +60,7 @@ pub const MODELS: &[QwenModel] = &[
     },
     QwenModel {
         id: "1.7b",
+        family: Family::Qwen3Asr,
         repo: "ggml-org/Qwen3-ASR-1.7B-GGUF",
         rev: "36a678687ba7d07a74ca70ccb0e36902e005fb80",
         model_file: "Qwen3-ASR-1.7B-Q8_0.gguf",
@@ -53,6 +68,22 @@ pub const MODELS: &[QwenModel] = &[
         mmproj_file: "mmproj-Qwen3-ASR-1.7B-Q8_0.gguf",
         mmproj_sha256: "46c1d533af3f354ceb37ce855dbceff7da7fa7cf1e6a523df3b13440bd164c0d",
         size_mb: 2404,
+    },
+    // 30B MoE (about 4B active). IQ4_NL is the type the llama.cpp PR
+    // (#31471) validated next to Q8_0 (LibriSpeech WER 1.02 vs 1.03) at half
+    // the size; the model's row widths (2688, 1856) are not multiples of 256,
+    // so K-quants do not apply. maternion's conversion is made with upstream
+    // llama.cpp after the merge (sakasegawa's GGUF is speech.cpp-only).
+    QwenModel {
+        id: "nemotron",
+        family: Family::Nemotron,
+        repo: "maternion/Nemotron-3.5-Transcribe-30B-A4B-IQ-GGUF",
+        rev: "5965081f1dc2f58eacdb65f594c43a0ec2fa0ee1",
+        model_file: "NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-IQ4_NL.gguf",
+        model_sha256: "17e4459dcaebf6ffa4fb0203f6c07962007ad6d4deea95c373add685a4106d6b",
+        mmproj_file: "mmproj-NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-F16.gguf",
+        mmproj_sha256: "f28378cd7ebb8494012f78b8c3a271402d0daecb8acdfe61565c80196662facb",
+        size_mb: 19276,
     },
 ];
 
@@ -65,35 +96,38 @@ pub const MODELS: &[QwenModel] = &[
 /// 1.7B 0.29 s vs 0.31 s) for a 630 MB download, and the OpenVINO build
 /// (Intel GPU/NPU) fails on the audio encoder ("failed to process mtmd
 /// chunk"). llama.cpp has no AMD NPU backend.
-const LLAMA_TAG: &str = "b11684";
+///
+/// b12110 (v0.16): the first builds with Nemotron 3.5 Transcribe (merged in
+/// 28b812d, 2026-11-03). Asset SHA-256 from the GitHub release digests.
+const LLAMA_TAG: &str = "b12110";
 
 fn llama_asset() -> Option<(&'static str, &'static str)> {
     #[cfg(all(windows, target_arch = "x86_64"))]
     {
         Some((
-            "llama-b11684-bin-win-vulkan-x64.zip",
-            "aaf1be43e50527d09b59d4a9eb048252b44dd267eec42bac882fe6086d771c8a",
+            "llama-b12110-bin-win-vulkan-x64.zip",
+            "9732a5e48887ca54d0bfe4af4324dc85fd56cd8cda19b52df3542fa6ebe6874f",
         ))
     }
     #[cfg(all(windows, target_arch = "aarch64"))]
     {
         Some((
-            "llama-b11684-bin-win-vulkan-arm64.zip",
-            "4bac3b04f6f84cf0e81e9a994f44fb6ccd118f8c9ad1a77658c11d092634f523",
+            "llama-b12110-bin-win-vulkan-arm64.zip",
+            "2be672cf538aabfc9fcb22c21648422b01d623673f15c2742bd43a9bd1a11ce2",
         ))
     }
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
         Some((
-            "llama-b11684-bin-ubuntu-vulkan-x64.tar.gz",
-            "7d68d9267d26b58ce3f518d9c7144b51aa5a8ed57cc7da58eeb4722f50f68c80",
+            "llama-b12110-bin-ubuntu-vulkan-x64.tar.gz",
+            "a5d741940956ec62e8783aee7e5a4c7c761af867d6f027c3277a51e1a3ac59b0",
         ))
     }
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     {
         Some((
-            "llama-b11684-bin-ubuntu-vulkan-arm64.tar.gz",
-            "d67f8704a71dbd9a2c5ed82fd08cd04b7ffa6e245becf3385d884fb98fef3165",
+            "llama-b12110-bin-ubuntu-vulkan-arm64.tar.gz",
+            "1c68bf23d35230cc607e3d30f8d447d21fef500d9fa8d65e15520dfa3619ad73",
         ))
     }
     #[cfg(not(any(
@@ -113,7 +147,11 @@ const CTX_SIZE: &str = "16384";
 const SLOTS: &str = "2";
 const MAX_TOKENS: u32 = 4096;
 const HEALTH_TIMEOUT_SECS: u64 = 120;
+/// Nemotron's 19 GB load from a cold disk, and its slower CPU decode of a
+/// long recording, outlast the Qwen limits.
+const NEMOTRON_HEALTH_TIMEOUT_SECS: u64 = 600;
 const STT_TIMEOUT_SECS: u64 = 120;
+const NEMOTRON_STT_TIMEOUT_SECS: u64 = 300;
 
 const SETUP_REQUIRED_MSG: &str = "ERR_SETUP_REQUIRED";
 
@@ -173,8 +211,30 @@ fn server_path(app: &AppHandle) -> Option<PathBuf> {
     find_exe(&llama_dir(app).ok()?)
 }
 
+/// Written next to the install with `LLAMA_TAG` (v0.16); installs from
+/// before have none.
+const BUILD_FILE: &str = "BUILD";
+
+/// The installed llama.cpp is the pinned build. An older one still runs
+/// Qwen3-ASR but not Nemotron, which needs b12110+.
+fn server_current(app: &AppHandle) -> bool {
+    llama_dir(app)
+        .ok()
+        .and_then(|d| std::fs::read_to_string(d.join(BUILD_FILE)).ok())
+        .is_some_and(|t| t.trim() == LLAMA_TAG)
+}
+
+/// The installed server can run `model`.
+fn server_ready(app: &AppHandle, model: &str) -> bool {
+    server_path(app).is_some() && (family_of(model) != Family::Nemotron || server_current(app))
+}
+
 fn model_def(id: &str) -> Option<&'static QwenModel> {
     MODELS.iter().find(|m| m.id == id)
+}
+
+fn family_of(id: &str) -> Family {
+    model_def(id).map_or(Family::Qwen3Asr, |m| m.family)
 }
 
 /// (model, mmproj) paths of `id` when both are on disk.
@@ -189,6 +249,11 @@ pub fn effective_accel(settings: &Settings) -> &'static str {
     match settings.stt.qwen.accel.as_str() {
         "gpu" => "gpu",
         "cpu" => "cpu",
+        // The 19 GB model does not fit a typical 8–16 GB card, and a partial
+        // Vulkan offload of its experts is slower than the CPU (v0.16, RTX
+        // 4070 Ti SUPER 16 GB with 8 GB in use: 2.75–3.6 s per sentence on
+        // the GPU, 2.0 s on 8 Ryzen threads). A 24 GB+ card picks "gpu".
+        _ if family_of(&settings.stt.qwen.model) == Family::Nemotron => "cpu",
         _ => {
             // An iGPU (Intel, the 2-CU Radeon of desktop Ryzen) can be slower
             // than the CPU; only offload to a real GPU.
@@ -213,7 +278,7 @@ fn running() -> bool {
 pub fn status(app: &AppHandle, settings: &Settings) -> QwenStatus {
     let server = server_path(app);
     QwenStatus {
-        server_installed: server.is_some(),
+        server_installed: server_ready(app, &settings.stt.qwen.model),
         server_path: server
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default(),
@@ -249,7 +314,9 @@ pub async fn ensure_server(app: AppHandle) -> Result<u16, String> {
 
 fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, String> {
     let q = &settings.stt.qwen;
-    let exe = server_path(app).ok_or_else(|| SETUP_REQUIRED_MSG.to_string())?;
+    let exe = server_path(app)
+        .filter(|_| server_ready(app, &q.model))
+        .ok_or_else(|| SETUP_REQUIRED_MSG.to_string())?;
     let (model, mmproj) =
         model_paths(app, &q.model).ok_or_else(|| SETUP_REQUIRED_MSG.to_string())?;
     let accel = effective_accel(settings);
@@ -302,6 +369,11 @@ fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, S
         .arg("-np")
         .arg(SLOTS)
         .arg("--no-webui");
+    if family_of(&q.model) == Family::Nemotron {
+        // its chat template thinks by default: without this the server
+        // answers only reasoning and an empty transcript
+        cmd.arg("--reasoning").arg("off");
+    }
     if accel == "cpu" {
         cmd.arg("-dev").arg("none");
     }
@@ -309,7 +381,11 @@ fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, S
 
     // The port opens before the model is loaded (`/health` answers 503
     // "Loading model" until then), so wait for 200 rather than a connect.
-    let deadline = Instant::now() + Duration::from_secs(HEALTH_TIMEOUT_SECS);
+    let health_secs = match family_of(&q.model) {
+        Family::Nemotron => NEMOTRON_HEALTH_TIMEOUT_SECS,
+        Family::Qwen3Asr => HEALTH_TIMEOUT_SECS,
+    };
+    let deadline = Instant::now() + Duration::from_secs(health_secs);
     loop {
         if let Ok(Some(status)) = managed.child.try_wait() {
             eprintln!("llama-server exited immediately (exit: {status})");
@@ -321,7 +397,7 @@ fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, S
         if Instant::now() >= deadline {
             setup::terminate(&mut managed.child);
             return Err(format!(
-                "ERR_SERVER_START|health check timeout ({HEALTH_TIMEOUT_SECS}s)"
+                "ERR_SERVER_START|health check timeout ({health_secs}s)"
             ));
         }
         std::thread::sleep(Duration::from_millis(400));
@@ -368,10 +444,21 @@ pub fn prewarm(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let settings = app.state::<crate::AppState>().settings.lock().unwrap().clone();
-        if settings.stt.engine != "qwen"
-            || server_path(&app).is_none()
-            || model_paths(&app, &settings.stt.qwen.model).is_none()
-        {
+        if settings.stt.engine != "qwen" || server_path(&app).is_none() {
+            return;
+        }
+        // an install from before v0.16: swap in the pinned build (36 MB),
+        // whose success path prewarms again
+        if !server_current(&app) {
+            if !SERVER_DOWNLOADING.load(Ordering::SeqCst) {
+                eprintln!("qwen: llama.cpp is not {LLAMA_TAG}; updating");
+                if let Err(e) = download_server(app.clone()).await {
+                    eprintln!("qwen: llama.cpp update failed: {e}");
+                }
+            }
+            return;
+        }
+        if model_paths(&app, &settings.stt.qwen.model).is_none() {
             return;
         }
         if let Ok(wav) = crate::audio::wav_bytes(&[0i16; 16000]) {
@@ -431,44 +518,83 @@ pub async fn transcribe(
     prompt: Option<&str>,
 ) -> Result<crate::stt::Transcript, String> {
     let port = ensure_server(app.clone()).await?;
-    transcribe_at(port, &settings.language, wav, prompt).await
+    let family = family_of(&settings.stt.qwen.model);
+    transcribe_at(port, family, &settings.language, wav, prompt).await
+}
+
+/// The model card's "readable text" instruction (fillers and accidental
+/// repetitions dropped, the rest kept as spoken) — dictation wants clean
+/// text, and the LLM pass does any further rewriting. Vocabulary goes in
+/// as the card's contextual-transcription "Context terms:".
+pub fn nemotron_instruction(language: &str, prompt: Option<&str>) -> String {
+    let lang = language_name(language).unwrap_or("as spoken");
+    let mut s = format!(
+        "Audio transcription. Language: {lang}. Wording: omit fillers and accidental repetitions; \
+         keep the remaining spoken wording unchanged. Formatting: punctuation and capitalization; \
+         numbers in their standard written form. Output: transcript only."
+    );
+    // the hint is "A、B。" / "A, B." (context.rs); drop its own full stop
+    let terms = prompt.map(|p| p.trim().trim_end_matches(['。', '.']).trim_end());
+    if let Some(p) = terms.filter(|p| !p.is_empty()) {
+        s.push_str(&format!(" Context terms: {p}."));
+    }
+    s
+}
+
+fn request_body(family: Family, language: &str, wav: &[u8], prompt: Option<&str>) -> serde_json::Value {
+    use base64::Engine;
+    let audio = serde_json::json!({
+        "type": "input_audio",
+        "input_audio": {
+            "data": base64::engine::general_purpose::STANDARD.encode(wav),
+            "format": "wav",
+        },
+    });
+    let mut messages = Vec::new();
+    match family {
+        Family::Qwen3Asr => {
+            if let Some(p) = prompt.filter(|p| !p.trim().is_empty()) {
+                messages.push(serde_json::json!({ "role": "system", "content": p }));
+            }
+            messages.push(serde_json::json!({ "role": "user", "content": [audio] }));
+            if let Some(name) = language_name(language) {
+                messages.push(serde_json::json!({
+                    "role": "assistant",
+                    "content": format!("language {name}<asr_text>"),
+                }));
+            }
+        }
+        Family::Nemotron => {
+            messages.push(serde_json::json!({
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": nemotron_instruction(language, prompt) },
+                    audio,
+                ],
+            }));
+        }
+    }
+    serde_json::json!({
+        "messages": messages,
+        "temperature": 0,
+        "max_tokens": MAX_TOKENS,
+    })
 }
 
 async fn transcribe_at(
     port: u16,
+    family: Family,
     language: &str,
     wav: Vec<u8>,
     prompt: Option<&str>,
 ) -> Result<crate::stt::Transcript, String> {
-    use base64::Engine;
-    let mut messages = Vec::new();
-    if let Some(p) = prompt.filter(|p| !p.trim().is_empty()) {
-        messages.push(serde_json::json!({ "role": "system", "content": p }));
-    }
-    messages.push(serde_json::json!({
-        "role": "user",
-        "content": [{
-            "type": "input_audio",
-            "input_audio": {
-                "data": base64::engine::general_purpose::STANDARD.encode(&wav),
-                "format": "wav",
-            },
-        }],
-    }));
-    if let Some(name) = language_name(language) {
-        messages.push(serde_json::json!({
-            "role": "assistant",
-            "content": format!("language {name}<asr_text>"),
-        }));
-    }
-    let body = serde_json::json!({
-        "messages": messages,
-        "temperature": 0,
-        "max_tokens": MAX_TOKENS,
-    });
+    let body = request_body(family, language, &wav, prompt);
 
     let resp = reqwest::Client::builder()
-        .timeout(Duration::from_secs(STT_TIMEOUT_SECS))
+        .timeout(Duration::from_secs(match family {
+            Family::Nemotron => NEMOTRON_STT_TIMEOUT_SECS,
+            Family::Qwen3Asr => STT_TIMEOUT_SECS,
+        }))
         .build()
         .map_err(|e| format!("ERR_INTERNAL|http client: {e}"))?
         .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
@@ -555,6 +681,8 @@ async fn download_server_inner(app: &AppHandle) -> Result<(), String> {
         }
         #[cfg(not(unix))]
         let _ = exe;
+        std::fs::write(staging.join(BUILD_FILE), LLAMA_TAG)
+            .map_err(|e| format!("ERR_FILE_IO|write build tag: {e}"))?;
         Ok::<(u64, u64), String>((downloaded, total))
     }
     .await;
@@ -643,16 +771,16 @@ fn downloading_model(id: &str) -> bool {
 /// One-click setup for engine = qwen: server, then the selected model, then
 /// prewarm. Steps already done are skipped.
 pub async fn quick_setup(app: AppHandle) -> Result<(), String> {
-    if server_path(&app).is_none() {
+    let id = app.state::<crate::AppState>().settings.lock().unwrap().stt.qwen.model.clone();
+    if !server_ready(&app, &id) {
         download_server(app.clone()).await?;
         while SERVER_DOWNLOADING.load(Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
-        if server_path(&app).is_none() {
+        if !server_ready(&app, &id) {
             return Err(SETUP_REQUIRED_MSG.to_string());
         }
     }
-    let id = app.state::<crate::AppState>().settings.lock().unwrap().stt.qwen.model.clone();
     if model_paths(&app, &id).is_none() {
         download_model(app.clone(), id.clone()).await?;
         while downloading_model(&id) {
@@ -689,19 +817,46 @@ mod tests {
     #[ignore]
     async fn live_server() {
         let wav = std::fs::read(std::env::var("FIRE_SPEAK_QWEN_WAV").unwrap()).unwrap();
-        let t = transcribe_at(8179, "ja", wav.clone(), Some("fire-speak")).await.unwrap();
+        // FIRE_SPEAK_QWEN_FAMILY=nemotron for a server running Nemotron
+        let family = match std::env::var("FIRE_SPEAK_QWEN_FAMILY").as_deref() {
+            Ok("nemotron") => Family::Nemotron,
+            _ => Family::Qwen3Asr,
+        };
+        let t = transcribe_at(8179, family, "ja", wav.clone(), Some("fire-speak")).await.unwrap();
         println!("ja+prompt: {:?}", t);
         assert!(!t.text.is_empty() && !t.text.contains("<asr_text>"));
-        let t = transcribe_at(8179, "auto", wav, None).await.unwrap();
+        let t = transcribe_at(8179, family, "auto", wav, None).await.unwrap();
         println!("auto: {:?}", t);
         let silence = crate::audio::wav_bytes(&[0i16; 16000]).unwrap();
-        println!("silence: {:?}", transcribe_at(8179, "ja", silence, None).await.unwrap());
+        println!("silence: {:?}", transcribe_at(8179, family, "ja", silence, None).await.unwrap());
+    }
+
+    #[test]
+    fn nemotron_request_puts_the_instruction_next_to_the_audio() {
+        let b = request_body(Family::Nemotron, "ja", b"RIFF", Some("fire-speak, Tauri"));
+        let msgs = b["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 1, "no system message, no prefill");
+        assert_eq!(msgs[0]["role"], "user");
+        let text = msgs[0]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Language: Japanese."));
+        assert!(text.ends_with("Context terms: fire-speak, Tauri."));
+        assert_eq!(msgs[0]["content"][1]["type"], "input_audio");
+        assert!(nemotron_instruction("auto", None).contains("Language: as spoken."));
+        assert!(!nemotron_instruction("ja", Some("  ")).contains("Context terms"));
+        assert!(nemotron_instruction("ja", Some("Tauri、ラグナ。")).ends_with("Context terms: Tauri、ラグナ."));
+        // Qwen3-ASR keeps its own shape
+        let b = request_body(Family::Qwen3Asr, "ja", b"RIFF", Some("x"));
+        let msgs = b["messages"].as_array().unwrap();
+        assert_eq!(msgs[0]["role"], "system");
+        assert_eq!(msgs[2]["content"], "language Japanese<asr_text>");
     }
 
     #[test]
     fn models_are_known() {
         assert!(model_def("0.6b").is_some());
         assert!(model_def("1.7b").is_some());
+        assert_eq!(family_of("nemotron"), Family::Nemotron);
+        assert_eq!(family_of("1.7b"), Family::Qwen3Asr);
         assert!(model_def("small").is_none());
         assert_eq!(language_name("ja"), Some("Japanese"));
         assert_eq!(language_name("auto"), None);

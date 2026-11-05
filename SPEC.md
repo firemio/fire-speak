@@ -986,3 +986,48 @@ v0.13.0 と同じ 8 文(Windows 音声合成 4 声、200 文字)・同じ正規�
 - 参考文脈ありの結果がこれに当たれば、参考文脈なしでもう一度整形する(ログ `llm: reply is about the prompt, not the dictation; polishing again without context`)。
 - 参考文脈なしの結果もこれに当たれば、口述(STT の結果)をそのまま貼り付け、HUD に `WARN_LLM_FALLBACK` を出す(ログ `llm: reply is about the prompt again; pasting the transcript`)。
 - `context::looks_like_context_leak` は、口述が 15 文字以上で結果が半分未満の長さのときも真になる(参考文脈の一部だけが出力された場合)。そのときも参考文脈なしで整形し直す。
+
+# v0.16.0 追加仕様: NVIDIA Nemotron 3.5 Transcribe (ローカル llama-server / クラウド OpenRouter)
+
+## 調べたこと (2026-11-05)
+
+- **Nemotron 3.5 Transcribe** = `nvidia/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B`(音声エンコーダ + Nemotron-H MoE 30B、動くのは約 4B、40 言語、OpenMDW-1.1)。日本語は Production-ready、FLEURS CER 4.42%。文字起こしは温度 0・reasoning off が推奨。system は空にし、指示は音声と同じ user メッセージに入れる。
+- llama.cpp 本体が PR #31471(`28b812d`、2026-11-03)で対応。最初のリリースは b12096 前後。llama-server は **`--reasoning off` が必須**(無いと reasoning だけ返り、本文が空)。
+- GGUF: **sakasegawa 版は speech.cpp 専用の配置で llama.cpp では読めない**。llama.cpp 用は、マージ後の本体で作られた `maternion/Nemotron-3.5-Transcribe-30B-A4B-IQ-GGUF`(IQ4_NL / Q8_0 / Q2_0 と mmproj。IQ2_NL・IQ3_NL は未マージの型なので使わない)。行幅 2688・1856 が 256 の倍数ではないので K-quant は効かない。PR の検証では IQ4_NL と Q8_0 の精度はほぼ同じ(LibriSpeech WER 1.02 / 1.03)。
+- OpenRouter: `nvidia/nemotron-3.5-transcribe`(提供元 DeepInfra、$0.000033/秒)。`/audio/transcriptions` は JSON + base64 と OpenAI 形式の multipart の両方を受けるので、既存のクラウド STT のまま使える。
+
+## ローカル: Qwen エンジンのモデル "nemotron" (qwen.rs)
+
+- 別エンジンにはせず、llama-server を使う Qwen エンジンの `qwen::MODELS` に `"nemotron"` を追加(`stt.qwen.model = "nemotron"`)。インストール先・ポート・スレッド・処理デバイスの設定は Qwen と共通。モデルを切り替えるとシグネチャが変わり、サーバーを起動し直す。
+- モデル: `maternion/Nemotron-3.5-Transcribe-30B-A4B-IQ-GGUF` @ `5965081f1dc2f58eacdb65f594c43a0ec2fa0ee1` の `NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-IQ4_NL.gguf`(18,744,137,472 バイト)と `mmproj-NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-F16.gguf`(1,468,544,224 バイト)。SHA-256 は HF の LFS 情報で固定し、手元のダウンロードで一致を確認。合計 19,276 MB。
+- llama.cpp を **b11684 → b12110** に更新(Vulkan 版 4 種、SHA-256 は GitHub のリリース digest。Windows x64 は手元でも一致を確認)。Qwen3-ASR も同じビルドで動く(下の計測)。
+- 版の記録: llama.cpp のインストール時に `{app_data}/llama/BUILD` へ `LLAMA_TAG` を書く(v0.15 以前のインストールには無い)。BUILD が `LLAMA_TAG` と違えば古い版とみなす。古い版でも Qwen3-ASR はそのまま使えるが、Nemotron では「未インストール」扱い(`SetupStatus.qwen.server_installed` が false、認識は `ERR_SETUP_REQUIRED`、ワンクリックセットアップが入れ直す)。エンジンが qwen の prewarm(起動時・設定変更時)で古い版を見つけたら、裏で新しい版をダウンロードして入れ替える(36MB、成功後に改めて prewarm)。
+- 起動: モデルの family が Nemotron なら `--reasoning off` を追加。ヘルスの待ち時間は 600 秒(Qwen は 120 秒)、認識のタイムアウトは 300 秒(Qwen は 120 秒)。
+- 処理デバイス `auto` は Nemotron では **CPU**。19GB のモデルは 8〜16GB の GPU に収まらず、エキスパートを一部だけ Vulkan に載せると CPU より遅い(下の計測)。VRAM 24GB 以上の GPU なら「GPU」を選ぶ。
+- リクエスト(`request_body`): system なし、user に `[text, input_audio]`、assistant の先埋めなし。指示はモデルカードの「読みやすい文」の文言: `Audio transcription. Language: {Japanese 等 | as spoken}. Wording: omit fillers and accidental repetitions; keep the remaining spoken wording unchanged. Formatting: punctuation and capitalization; numbers in their standard written form. Output: transcript only.` 語彙ヒントがあれば末尾に ` Context terms: {ヒント(末尾の 。/. は除く)}.`(カードの文脈付き文字起こし)。出力はそのまま本文(言語タグなし)。
+- 無音: 1 秒の無音に「I'm.」を返すことがある。録音は既存の発話ゲート(v0.15.1 の声の判定)を通ってから STT に送られるので、実際の口述では起きない想定。prewarm の結果は捨てる。
+
+## クラウド: OpenRouter (Nemotron) プリセット
+
+- クラウド STT のプリセットに `OpenRouter (Nemotron)` = `https://openrouter.ai/api/v1` / `nvidia/nemotron-3.5-transcribe`。送信は既存の multipart(400 なら file/model/language だけで再送)。
+- 未検証: OpenRouter 実機での応答(API キーが無く未確認)。
+
+## UI
+
+- エンジン比較表に `Nemotron 3.5 Transcribe 30B`(誤り 0.0%・CPU 2.0 秒・19.3GB、`stt.fitNemotron`)。おすすめの判定(`recommendedChoice`)は変えない。Qwen パネルのモデル一覧に 3 つ目として出る(`qwenModelLabel`)。
+- ロケール 12 言語: `stt.fitNemotron` を追加。`stt.engineQwen`(「ローカル (Qwen3-ASR / Nemotron)」)、`stt.qwenModelHint`、`stt.engineNote`(GPU では Nemotron 以外 0.1〜0.15 秒)、`stt.presetHint` を更新。
+- 組み込み用語辞書に `Nemotron`(alias「ネモトロン」)。
+
+## 参考: 日本語の認識精度 (2026-11-05、RTX 4070 Ti SUPER 16GB・うち 8GB は他のアプリが使用中 / Ryzen 7 9800X3D 8 スレッド / メモリ 64GB)
+
+v0.14 と同じ 8 文・同じ正規化、llama.cpp b12110 Vulkan。処理時間は 1 文あたり(ウォームアップ後)。
+
+| モデル | 文字誤り率 | 1 文あたり |
+| --- | --- | --- |
+| Nemotron 3.5 Transcribe IQ4_NL・CPU(`-dev none`) | **0.0%**(0/200) | 2.02 秒 |
+| 同・GPU 一部(既定の `--fit`) | 0.0% | 3.62 秒(初回はシェーダ生成で 17 秒) |
+| 同・GPU 一部(`--load-mode none`) | 0.0% | 2.75 秒 |
+| Qwen3-ASR 1.7B・GPU | 1.5%(b11684 と同じ) | 0.15 秒 |
+| Qwen3-ASR 0.6B・GPU | 5.5%(b11684 は 4.5%。差は「子ども→子供」の表記ゆれ 1 か所) | 0.08 秒 |
+
+- Nemotron は 8 文すべて正解(数字・地名・同音異義語を含む)。読み込みは CPU で約 35 秒、メモリを約 20GB 使う。合成音声なので実際の話し声とは差がある。

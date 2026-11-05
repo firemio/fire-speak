@@ -733,6 +733,7 @@ const ENGINE_CHOICES: EngineChoice[] = [
   { engine: "parakeet", name: "Parakeet TDT-CTC 0.6B ja", fit: "stt.fitParakeet", err: 2.0, cpu: 0.32, mb: 678 },
   { engine: "qwen", qwenModel: "0.6b", name: "Qwen3-ASR 0.6B", fit: "stt.fitQwen06", err: 4.5, cpu: 0.54, mb: 1002 },
   { engine: "cohere", name: "Cohere Transcribe 2B", fit: "stt.fitCohere", err: 7.0, cpu: 0.88, mb: 2347 },
+  { engine: "qwen", qwenModel: "nemotron", name: "Nemotron 3.5 Transcribe 30B", fit: "stt.fitNemotron", err: 0.0, cpu: 2.02, mb: 19306 },
 ];
 
 type EngineSort = "accuracy" | "speed" | "size";
@@ -858,10 +859,10 @@ function renderSttSection(): void {
 // ---------------------------------------------------------------------------
 
 /** Download size of the pinned llama.cpp Vulkan build (`qwen::LLAMA_TAG`). */
-const LLAMA_SERVER_MB = 30;
+const LLAMA_SERVER_MB = 36;
 
 function qwenModelLabel(id: string): string {
-  return `Qwen3-ASR ${id.toUpperCase()}`;
+  return id === "nemotron" ? "Nemotron 3.5 Transcribe 30B" : `Qwen3-ASR ${id.toUpperCase()}`;
 }
 
 function renderQwenPanel(): void {
@@ -1280,6 +1281,7 @@ function wireSttSection(): void {
     openai: { base_url: "https://api.openai.com/v1", model: "whisper-1" },
     groq: { base_url: "https://api.groq.com/openai/v1", model: "whisper-large-v3-turbo" },
     "openrouter-qwen": { base_url: "https://openrouter.ai/api/v1", model: "qwen/qwen3-asr-0.6b" },
+    "openrouter-nemotron": { base_url: "https://openrouter.ai/api/v1", model: "nvidia/nemotron-3.5-transcribe" },
     cohere: { base_url: "https://api.cohere.com/compatibility/v1", model: "cohere-transcribe-03-2026" },
   };
   document.querySelectorAll<HTMLButtonElement>("[data-stt-preset]").forEach((btn) => {
