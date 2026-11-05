@@ -24,12 +24,14 @@ export interface CloudSttSettings {
   model: string;
 }
 
-/** Local Qwen3-ASR through llama-server (v0.12). */
+/** Local llama-server engine (v0.12): Qwen3-ASR, and Nemotron 3.5 Transcribe (v0.16). */
 export interface QwenSttSettings {
-  model: string; // "0.6b" | "1.7b"
+  model: string; // "0.6b" | "1.7b" | "nemotron"
   server_port: number;
   threads: number;
   accel: string; // "auto" | "gpu" | "cpu"
+  /** MoE expert layers in system RAM (Nemotron); -1 = automatic */
+  n_cpu_moe: number;
 }
 
 /** Local CrispASR server (v0.14), shared by the "parakeet" and "cohere" engines. */
@@ -161,6 +163,10 @@ export interface QwenStatus {
   server_running: boolean;
   /** "gpu" | "cpu" */
   effective_accel: string;
+  /** The installed llama.cpp predates the pinned build (replaced in the background). */
+  server_outdated: boolean;
+  /** Running Nemotron: "fit" | "cpu" | a layer count; "" otherwise. */
+  moe_placement: string;
 }
 
 export interface CrispStatus {

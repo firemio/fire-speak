@@ -130,7 +130,7 @@ impl Default for SttSettings {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QwenSttSettings {
-    /// "0.6b" | "1.7b" (see `qwen::MODELS`).
+    /// "0.6b" | "1.7b" | "nemotron" (see `qwen::MODELS`).
     #[serde(default = "default_qwen_model")]
     pub model: String,
     #[serde(default = "default_qwen_port")]
@@ -140,6 +140,10 @@ pub struct QwenSttSettings {
     /// "auto" (GPU when an NVIDIA / AMD Radeon GPU is present) | "gpu" | "cpu".
     #[serde(default = "default_accel")]
     pub accel: String,
+    /// MoE expert layers kept in system RAM (`--n-cpu-moe`, Nemotron only,
+    /// v0.16). -1 = automatic: fit to the free VRAM, else all in RAM.
+    #[serde(default = "default_n_cpu_moe")]
+    pub n_cpu_moe: i32,
 }
 
 impl Default for QwenSttSettings {
@@ -149,8 +153,13 @@ impl Default for QwenSttSettings {
             server_port: default_qwen_port(),
             threads: default_threads(),
             accel: default_accel(),
+            n_cpu_moe: default_n_cpu_moe(),
         }
     }
+}
+
+fn default_n_cpu_moe() -> i32 {
+    -1
 }
 
 fn default_qwen_model() -> String {

@@ -986,3 +986,31 @@ v0.13.0 と同じ 8 文(Windows 音声合成 4 声、200 文字)・同じ正規�
 - 参考文脈ありの結果がこれに当たれば、参考文脈なしでもう一度整形する(ログ `llm: reply is about the prompt, not the dictation; polishing again without context`)。
 - 参考文脈なしの結果もこれに当たれば、口述(STT の結果)をそのまま貼り付け、HUD に `WARN_LLM_FALLBACK` を出す(ログ `llm: reply is about the prompt again; pasting the transcript`)。
 - `context::looks_like_context_leak` は、口述が 15 文字以上で結果が半分未満の長さのときも真になる(参考文脈の一部だけが出力された場合)。そのときも参考文脈なしで整形し直す。
+
+# v0.16.0 追加仕様: Nemotron 3.5 Transcribe / エンジン一覧に設定を統合
+
+## モデルと実行手段
+
+- **NVIDIA Nemotron 3.5 Transcribe 30B-A4B**(2026-10-28 公開)。音声エンコーダ 0.6B と話者分離モデルに、Mamba-Transformer MoE の LLM(30B、そのうち約 4B が動く)を組み合わせたもの。40 言語で、日本語は Production-ready(FLEURS CER 4.42%)。ライセンスは OpenMDW-1.1。
+- llama.cpp は ggml-org/llama.cpp#31471(2026-11-03 マージ、`28b812d`)で対応。`llama-server` は `--reasoning off` が必須(チャットテンプレートの既定が thinking のため、付けないと reasoning だけが返る)。
+- 量子化は **IQ4_NL**(約 19.0GB。#31471 の検証で LibriSpeech WER 1.02、Q8_0 は 1.03)と、mmproj F16(約 1.47GB、音声エンコーダと話者エンコーダ)。IQ3_NL / IQ2_NL は未マージの #27322 が必要なので入れない。
+- エンジンは既存の `"qwen"`(llama-server)のモデル `"nemotron"`(`qwen::Family::Nemotron`)。サーバー・ポート・スレッド・処理デバイスは Qwen3-ASR と共通。
+- リクエスト: user メッセージに text(`nemotron_instruction`: "Transcribe the following audio with punctuation." に、固定言語なら "The speech is in X."、"Output only the transcript."、語彙ヒントがあれば "Words that may appear: …" を続ける)と `input_audio` を入れる。`chat_template_kwargs.enable_thinking=false`、temperature 0。出力に `<think>…</think>` や `<spk:N>` があれば取り除く。無音判定タグは無いので、無音は STT 前のスピーチゲートに任せる。
+- ヘルスチェックの上限は 600 秒(約 20GB を読み込むため)。
+
+## MoE エキスパートの配置 (`stt.qwen.n_cpu_moe`)
+
+- `-1`(既定)は自動: 1 回目は `--fit on`(llama.cpp が空き VRAM に合わせて配置)で起動し、起動に失敗したら `--n-cpu-moe 999`(エキスパートをすべて RAM に置く。VRAM は数 GB で済む)で起動し直す。`0` 以上はその層数を `--n-cpu-moe N` で RAM に置く。CPU モード(`-dev none`)と Qwen3-ASR では何も付けない。
+- 実際の配置は `QwenStatus.moe_placement`("fit" / "cpu" / 層数)で返し、詳細設定に表示する。
+
+## llama.cpp ビルドの更新
+
+- `LLAMA_TAG` を #31471 を含むビルドに上げた。インストール時に `{app_data}/llama/.fire-speak-llama-tag` へタグを書く。印が無い、またはタグが違うときは `server_outdated` とし、エンジンが qwen なら起動時の `sync_server_build` が裏で入れ直す。古いままだと Nemotron は `ERR_SETUP_REQUIRED` になる(Qwen3-ASR はそのまま動く)。
+- `qwen::tests::pins_are_filled` は、HF コミット・ファイル名・SHA-256・llama.cpp タグとアセットの SHA-256 が埋まるまで失敗する(未固定のままリリースさせないため)。
+
+## UI: エンジン一覧に統合
+
+- 比較表で選んだ行の**直下**に、そのエンジンの設定(サーバーカード・処理デバイス・モデル・詳細設定・接続テスト)を開く(`placeEnginePanel`)。比較表の下にパネルを積み重ねる方式はやめた。パネルの DOM は `#engine-panel-park` で待機させ、再描画のたびに選択中の行の下へ移す。
+- llama-server パネルのモデル欄には、行で選んだモデルだけを表示する(ダウンロードはここから)。Nemotron のときだけ詳細設定に「RAM に置く MoE 層数(空 = 自動)」と現在の配置を表示する。
+- Nemotron の行は未計測なので、棒グラフの代わりに「未計測」と表示し、精度順と速さ順では最後に並べる。
+- ロケール 12 言語: `stt.fitNemotron`, `stt.nemotronHint`, `stt.nCpuMoe`, `stt.nCpuMoeHint`, `stt.moeNowFit|Cpu|Manual`, `stt.notMeasured`, `stt.llamaOutdated`。

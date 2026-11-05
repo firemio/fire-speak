@@ -722,8 +722,10 @@ interface EngineChoice {
   name: string;
   /** i18n key: the kind of PC the engine suits */
   fit: string;
-  err: number; // %
-  cpu: number; // s per sentence
+  /** % — absent until measured on the benchmark */
+  err?: number;
+  /** s per sentence on the CPU — absent until measured */
+  cpu?: number;
   mb: number; // download size (model + runtime)
 }
 
@@ -733,6 +735,8 @@ const ENGINE_CHOICES: EngineChoice[] = [
   { engine: "parakeet", name: "Parakeet TDT-CTC 0.6B ja", fit: "stt.fitParakeet", err: 2.0, cpu: 0.32, mb: 678 },
   { engine: "qwen", qwenModel: "0.6b", name: "Qwen3-ASR 0.6B", fit: "stt.fitQwen06", err: 4.5, cpu: 0.54, mb: 1002 },
   { engine: "cohere", name: "Cohere Transcribe 2B", fit: "stt.fitCohere", err: 7.0, cpu: 0.88, mb: 2347 },
+  // v0.16: not yet on the benchmark, so no bars; ~20 GB, needs VRAM + RAM
+  { engine: "qwen", qwenModel: "nemotron", name: "Nemotron 3.5 Transcribe 30B-A4B", fit: "stt.fitNemotron", mb: 19530 },
 ];
 
 type EngineSort = "accuracy" | "speed" | "size";
@@ -777,16 +781,18 @@ function renderEngineCompare(): void {
   for (const h of document.querySelectorAll<HTMLElement>(".engine-head [data-col]")) {
     h.classList.toggle("is-sorted", h.dataset.col === engineSort);
   }
+  // unmeasured rows sort last
   const key: Record<EngineSort, (c: EngineChoice) => number> = {
-    accuracy: (c) => c.err,
-    speed: (c) => c.cpu,
+    accuracy: (c) => c.err ?? Infinity,
+    speed: (c) => c.cpu ?? Infinity,
     size: (c) => c.mb,
   };
   const rows = [...ENGINE_CHOICES].sort((x, y) => key[engineSort](x) - key[engineSort](y));
-  const maxErr = Math.max(...ENGINE_CHOICES.map((c) => c.err));
-  const maxCpu = Math.max(...ENGINE_CHOICES.map((c) => c.cpu));
+  const maxErr = Math.max(...ENGINE_CHOICES.map((c) => c.err ?? 0));
+  const maxCpu = Math.max(...ENGINE_CHOICES.map((c) => c.cpu ?? 0));
   const reco = recommendedChoice();
   const host = $("engine-rows");
+  parkEnginePanels();
   host.textContent = "";
   const row = (c: EngineChoice | null): HTMLButtonElement => {
     const r = el("button", "engine-row") as HTMLButtonElement;
@@ -802,8 +808,12 @@ function renderEngineCompare(): void {
     name.appendChild(el("span", "engine-fit", t(c ? c.fit : "stt.fitCloud")));
     r.appendChild(name);
     if (c) {
-      r.appendChild(bar(c.err, maxErr, `${c.err.toFixed(1)}%`));
-      r.appendChild(bar(c.cpu, maxCpu, t("stt.seconds", c.cpu.toFixed(1))));
+      if (c.err !== undefined && c.cpu !== undefined) {
+        r.appendChild(bar(c.err, maxErr, `${c.err.toFixed(1)}%`));
+        r.appendChild(bar(c.cpu, maxCpu, t("stt.seconds", c.cpu.toFixed(1))));
+      } else {
+        r.appendChild(el("span", "engine-na engine-na-2", t("stt.notMeasured")));
+      }
       r.appendChild(el("span", "engine-size", formatBytes(c.mb * 1024 * 1024)));
     } else {
       r.appendChild(el("span", "engine-na", t("stt.engineMetaCloud")));
@@ -812,6 +822,7 @@ function renderEngineCompare(): void {
   };
   for (const c of rows) host.appendChild(row(c));
   host.appendChild(row(null));
+  placeEnginePanel();
 
   let note = t("stt.engineNote");
   const hw = setupStatus?.hw;
@@ -822,10 +833,42 @@ function renderEngineCompare(): void {
   $("engine-note").textContent = note;
 }
 
+/** Settings panel of the selected engine (v0.16). */
+function enginePanelId(engine: SttEngine): string {
+  if (engine === "qwen") return "stt-qwen-panel";
+  if (isCrispEngine(engine)) return "stt-crisp-panel";
+  return engine === "cloud" ? "stt-cloud-panel" : "stt-local-panel";
+}
+
+const ENGINE_PANEL_IDS = ["stt-local-panel", "stt-qwen-panel", "stt-crisp-panel", "stt-cloud-panel"];
+
+/** Move every panel (and the test row) back out of the list before it is rebuilt. */
+function parkEnginePanels(): void {
+  const park = $("engine-panel-park");
+  for (const id of ENGINE_PANEL_IDS) park.appendChild($(id));
+  park.appendChild($("stt-test-row"));
+}
+
+/**
+ * v0.16: the engine list is the whole STT screen — the selected row opens
+ * its own settings (server, device, model, advanced, connection test)
+ * right below it, instead of panels stacked under the list.
+ */
+function placeEnginePanel(): void {
+  if (!settings) return;
+  const active = document.querySelector<HTMLElement>("#engine-rows .engine-row.is-active");
+  if (!active) return;
+  const detail = el("div", "engine-detail");
+  const panel = $(enginePanelId(settings.stt.engine));
+  panel.hidden = false;
+  detail.appendChild(panel);
+  detail.appendChild($("stt-test-row"));
+  active.after(detail);
+}
+
 function renderSttSection(): void {
   if (!settings) return;
   const engine = settings.stt.engine;
-  renderEngineCompare();
   $("stt-local-panel").hidden = engine !== "local";
   $("stt-qwen-panel").hidden = engine !== "qwen";
   $("stt-crisp-panel").hidden = !isCrispEngine(engine);
@@ -833,6 +876,7 @@ function renderSttSection(): void {
 
   input("in-qwen-port").value = String(settings.stt.qwen.server_port);
   input("in-qwen-threads").value = String(settings.stt.qwen.threads);
+  input("in-qwen-n-cpu-moe").value = settings.stt.qwen.n_cpu_moe >= 0 ? String(settings.stt.qwen.n_cpu_moe) : "";
   ($("in-qwen-accel") as HTMLSelectElement).value = settings.stt.qwen.accel || "auto";
   renderQwenPanel();
 
@@ -851,6 +895,8 @@ function renderSttSection(): void {
   input("in-cloud-model").value = settings.stt.cloud.model;
 
   renderSttModelList();
+  // last: places the panel just made visible inside the selected row
+  renderEngineCompare();
 }
 
 // ---------------------------------------------------------------------------
@@ -861,7 +907,7 @@ function renderSttSection(): void {
 const LLAMA_SERVER_MB = 30;
 
 function qwenModelLabel(id: string): string {
-  return `Qwen3-ASR ${id.toUpperCase()}`;
+  return id === "nemotron" ? "Nemotron 3.5 Transcribe 30B-A4B (IQ4_NL)" : `Qwen3-ASR ${id.toUpperCase()}`;
 }
 
 function renderQwenPanel(): void {
@@ -882,6 +928,18 @@ function renderQwenPanel(): void {
     const npuNote = s.hw.npu || s.hw.intel_npu ? ` ${t("stt.qwenNoNpu")}` : "";
     $("qwen-accel-hint").textContent = `${t("stt.accelDetected", found)} → ${resolved}${npuNote}`;
   }
+  const nemotron = settings.stt.qwen.model === "nemotron";
+  $("qwen-model-hint").textContent = t(nemotron ? "stt.nemotronHint" : "stt.qwenModelHint");
+  $("qwen-moe-field").hidden = !nemotron;
+  const moeHint = $("qwen-moe-hint");
+  moeHint.hidden = !nemotron;
+  if (nemotron) {
+    const p = q?.moe_placement ?? "";
+    const now =
+      p === "fit" ? t("stt.moeNowFit") : p === "cpu" ? t("stt.moeNowCpu") : p ? t("stt.moeNowManual", p) : "";
+    moeHint.textContent = `${t("stt.nCpuMoeHint")}${now ? ` ${now}` : ""}`;
+  }
+  if (q?.server_outdated) badge.textContent = t("stt.llamaOutdated");
 
   const host = $("qwen-model-list");
   host.textContent = "";
@@ -889,7 +947,8 @@ function renderQwenPanel(): void {
     host.appendChild(el("div", "hint", t("stt.loadingModels")));
     return;
   }
-  for (const m of q.models) {
+  // the engine list picks the model; show only the selected one here
+  for (const m of q.models.filter((m) => m.id === settings?.stt.qwen.model)) {
     const key = downloadKey("qwen-model", m.id);
     const wrap = el("div", "model-row-wrap");
     const row = el("div", "model-row");
@@ -987,6 +1046,13 @@ function wireQwenPanel(): void {
       settings.stt.qwen.threads = v;
       scheduleSave();
     }
+  });
+  input("in-qwen-n-cpu-moe").addEventListener("input", () => {
+    if (!settings) return;
+    const raw = input("in-qwen-n-cpu-moe").value.trim();
+    const v = parseInt(raw, 10);
+    settings.stt.qwen.n_cpu_moe = raw === "" || !Number.isFinite(v) || v < 0 ? -1 : v;
+    scheduleSave();
   });
 }
 

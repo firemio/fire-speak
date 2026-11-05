@@ -103,6 +103,7 @@ pub static ENTRIES: &[Entry] = &[
     s("OpenRouter", &["オープンルーター"], &[], AI),
     s("Cohere", &[], &["コヒア", "コーヒア"], AI),
     w("Parakeet", &[], &["パラキート"], AI),
+    s("Nemotron", &[], &["ネモトロン"], AI),
     s("Qwen3-ASR", &["クエン3ASR", "クウェン3ASR", "クエン三ASR"], &[], AI),
     s("DeepL", &["ディープL", "ディープエル"], &[], AI),
     s("ElevenLabs", &["イレブンラボ", "イレブンラボズ", "イレブンラブス"], &[], AI),

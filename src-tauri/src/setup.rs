@@ -1217,6 +1217,14 @@ pub fn sync_server_build(app: &AppHandle) {
         let _ = tokio::task::spawn_blocking(crate::hw::get).await;
         let settings = app.state::<crate::AppState>().settings.lock().unwrap().clone();
         if settings.stt.engine == "qwen" {
+            // v0.16: a llama.cpp older than the pinned build cannot run
+            // Nemotron; replace it (download_server prewarms on success)
+            if crate::qwen::server_outdated(&app) {
+                if let Err(e) = crate::qwen::download_server(app.clone()).await {
+                    eprintln!("llama.cpp update failed: {e}");
+                }
+                return;
+            }
             // restarts the server when a launch-relevant setting changed
             crate::qwen::prewarm(&app);
             return;
