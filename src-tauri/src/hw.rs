@@ -25,6 +25,9 @@ pub struct Hardware {
     pub intel_npu: bool,
     /// Display names of the GPUs, for the settings screen.
     pub gpus: Vec<String>,
+    /// Dedicated memory of the largest present GPU in MiB (0 = unknown).
+    /// From the display driver's registry key: WMI's AdapterRAM stops at 4 GiB.
+    pub vram_mb: u64,
 }
 
 static HW: OnceLock<Hardware> = OnceLock::new();
@@ -48,12 +51,16 @@ fn probe() -> Hardware {
 
     // Same device names Lemonade keys on: Win32_VideoController for GPUs and
     // the PnP entity the AMD NPU driver registers. Driver-provided names are
-    // not localized.
+    // not localized. VRAM comes from the driver keys of the adapters WMI
+    // lists, so a detached GPU's stale key (an eGPU, a disabled iGPU) is skipped.
     let script = "$ErrorActionPreference='SilentlyContinue';\
         $g=@(Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name });\
         $n=@(Get-CimInstance Win32_PnPEntity -Filter \"Name LIKE '%NPU Compute Accelerator%'\").Count;\
         $i=@(Get-CimInstance Win32_PnPEntity -Filter \"Name LIKE '%AI Boost%'\").Count;\
-        ConvertTo-Json -Compress @{gpus=$g;npu=$n;intel_npu=$i}";
+        $v=(@(Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0*' | \
+        Where-Object { $g -contains $_.DriverDesc } | \
+        ForEach-Object { [int64]$_.'HardwareInformation.qwMemorySize' / 1MB }) | Measure-Object -Maximum).Maximum;\
+        ConvertTo-Json -Compress @{gpus=$g;npu=$n;intel_npu=$i;vram=[int64]$v}";
     if let Some(stdout) = run_with_timeout(
         std::process::Command::new("powershell.exe")
             .args(["-NoProfile", "-NonInteractive", "-Command", script])
@@ -70,6 +77,7 @@ fn probe() -> Hardware {
             };
             hw.npu = v["npu"].as_u64().unwrap_or(0) > 0;
             hw.intel_npu = v["intel_npu"].as_u64().unwrap_or(0) > 0;
+            hw.vram_mb = v["vram"].as_u64().unwrap_or(0);
         }
     }
     hw.amd_gpu = hw.gpus.iter().any(|n| is_amd_gpu_name(n));
@@ -203,7 +211,7 @@ mod tests {
     use super::*;
 
     fn hw(nvidia: bool, amd_gpu: bool, vulkan: bool, npu: bool) -> Hardware {
-        Hardware { nvidia, amd_gpu, vulkan, npu, intel_npu: false, gpus: Vec::new() }
+        Hardware { nvidia, amd_gpu, vulkan, npu, intel_npu: false, gpus: Vec::new(), vram_mb: 0 }
     }
 
     #[test]

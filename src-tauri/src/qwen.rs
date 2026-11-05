@@ -150,6 +150,9 @@ const HEALTH_TIMEOUT_SECS: u64 = 120;
 /// Nemotron's 19 GB load from a cold disk, and its slower CPU decode of a
 /// long recording, outlast the Qwen limits.
 const NEMOTRON_HEALTH_TIMEOUT_SECS: u64 = 600;
+/// Smallest dedicated GPU memory (MiB) that "auto" offloads Nemotron to: the
+/// 17.9 GiB model + 1.4 GiB mmproj + KV cache. A 24 GB card reports 24 576.
+const NEMOTRON_MIN_VRAM_MB: u64 = 23 * 1024;
 const STT_TIMEOUT_SECS: u64 = 120;
 const NEMOTRON_STT_TIMEOUT_SECS: u64 = 300;
 
@@ -252,8 +255,18 @@ pub fn effective_accel(settings: &Settings) -> &'static str {
         // The 19 GB model does not fit a typical 8–16 GB card, and a partial
         // Vulkan offload of its experts is slower than the CPU (v0.16, RTX
         // 4070 Ti SUPER 16 GB with 8 GB in use: 2.75–3.6 s per sentence on
-        // the GPU, 2.0 s on 8 Ryzen threads). A 24 GB+ card picks "gpu".
-        _ if family_of(&settings.stt.qwen.model) == Family::Nemotron => "cpu",
+        // the GPU, 2.0 s on 8 Ryzen threads; keeping the experts on the CPU
+        // with --cpu-moe was slower still, 3.5 s). So "auto" offloads only to
+        // a GPU that holds the whole model: a 24 GB card, or a Radeon APU
+        // with that much memory assigned to graphics.
+        _ if family_of(&settings.stt.qwen.model) == Family::Nemotron => {
+            let hw = crate::hw::get();
+            if (hw.nvidia || hw.amd_gpu) && hw.vram_mb >= NEMOTRON_MIN_VRAM_MB {
+                "gpu"
+            } else {
+                "cpu"
+            }
+        }
         _ => {
             // An iGPU (Intel, the 2-CU Radeon of desktop Ryzen) can be slower
             // than the CPU; only offload to a real GPU.

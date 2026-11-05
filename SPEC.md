@@ -1031,3 +1031,25 @@ v0.14 と同じ 8 文・同じ正規化、llama.cpp b12110 Vulkan。処理時間
 | Qwen3-ASR 0.6B・GPU | 5.5%(b11684 は 4.5%。差は「子ども→子供」の表記ゆれ 1 か所) | 0.08 秒 |
 
 - Nemotron は 8 文すべて正解(数字・地名・同音異義語を含む)。読み込みは CPU で約 35 秒、メモリを約 20GB 使う。合成音声なので実際の話し声とは差がある。
+
+# v0.16.1 追加仕様: Nemotron の処理デバイス自動判定と、モデル欄の整理
+
+## 処理デバイス `auto` (qwen.rs `effective_accel`)
+
+- v0.16.0 は Nemotron の `auto` を常に CPU にしていた(GPU を持つ PC でも GPU を使わない)。v0.16.1 から、**モデル全体が載る GPU なら GPU**: NVIDIA または AMD Radeon(`hw.nvidia || hw.amd_gpu`)で、VRAM が `NEMOTRON_MIN_VRAM_MB` = 23,552 MiB 以上(24GB カードは 24,576 と報告。モデル 17.9GiB + mmproj 1.4GiB + KV)。それ以外は CPU。Qwen3-ASR の判定は変えない。
+- VRAM(`Hardware.vram_mb`): 表示アダプタのドライバキー(`HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-…}\0*` の `HardwareInformation.qwMemorySize`)の最大値。WMI の `AdapterRAM` は 4GiB で頭打ちなので使わない。`Win32_VideoController` が列挙するアダプタ(=接続中)の `DriverDesc` だけを数える。外した eGPU や無効の iGPU のキーも残るため(この PC では外した Radeon 8060S のキーが 96GiB と出る)。Linux は 0(判定は CPU)。
+- 処理デバイスのヒント: Nemotron が `auto` で CPU になったとき「(Nemotron は VRAM {n}GB に収まらず、CPU の方が速いため)」を添える(`stt.nemotronVramNote`)。`stt.fitNemotron` も「VRAM 24GB 以上の GPU なら GPU、それ以外は CPU」に変更。
+
+### 計測 (2026-11-05、v0.16.0 と同じ PC・同じ 8 文、VRAM 16GB のうち約 7.5GB 使用中)
+
+| 方式 | 文字誤り率 | 1 文あたり |
+| --- | --- | --- |
+| CPU(`-dev none`) | 0.0% | 2.46 秒 |
+| GPU 一部(既定の `--fit`) | 0.0% | 3.01 秒 |
+| GPU + エキスパートは CPU(`--cpu-moe`) | 3.0% | 3.52 秒 |
+
+`--cpu-moe`(注意層と KV だけ GPU)も CPU より遅く、精度も落ちたので採らない。
+
+## Qwen パネルのモデル欄
+
+- エンジン一覧がモデルごとに 1 行(Qwen3-ASR 0.6B / 1.7B / Nemotron)なので、v0.16.0 までの「モデル選択」一覧は重複していた(Nemotron を選んでも Qwen が並び、押すとエンジン行も切り替わる)。v0.16.1 からカード名は「モデル」(`sys.model`)で、**選択中のモデル 1 行だけ**(サイズ・インストール状態・ダウンロード・進捗)を出す。クリックで切り替えない。`stt.qwenModelHint` は削除。

@@ -182,6 +182,7 @@ export interface Hardware {
   npu: boolean;
   intel_npu: boolean; // Intel AI Boost (v0.10)
   gpus: string[];
+  vram_mb: number; // largest present GPU, MiB (v0.16.1)
 }
 
 export type AppStatus =

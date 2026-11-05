@@ -1915,3 +1915,10 @@ dialog.modal[open] {
   white-space: nowrap;
   margin: 0;
 }
+
+/* v0.16.1: a model card that only shows the engine's selected model */
+.model-option.is-static,
+.model-option.is-static:hover {
+  cursor: default;
+  border-color: var(--border);
+}

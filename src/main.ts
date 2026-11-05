@@ -881,7 +881,12 @@ function renderQwenPanel(): void {
     const found = s.hw.gpus.length ? s.hw.gpus.join(" / ") : t("stt.noGpu");
     const resolved = s.qwen.effective_accel === "gpu" ? "GPU (Vulkan)" : "CPU";
     const npuNote = s.hw.npu || s.hw.intel_npu ? ` ${t("stt.qwenNoNpu")}` : "";
-    $("qwen-accel-hint").textContent = `${t("stt.accelDetected", found)} → ${resolved}${npuNote}`;
+    // say why a GPU PC still runs Nemotron on the CPU
+    const vramNote =
+      settings.stt.qwen.model === "nemotron" && s.qwen.effective_accel === "cpu" && s.hw.vram_mb > 0
+        ? ` (${t("stt.nemotronVramNote", Math.round(s.hw.vram_mb / 1024))})`
+        : "";
+    $("qwen-accel-hint").textContent = `${t("stt.accelDetected", found)} → ${resolved}${vramNote}${npuNote}`;
   }
 
   const host = $("qwen-model-list");
@@ -890,28 +895,18 @@ function renderQwenPanel(): void {
     host.appendChild(el("div", "hint", t("stt.loadingModels")));
     return;
   }
-  for (const m of q.models) {
+  // The engine list above already picks the model (one row per model), so
+  // this card shows only the selected one: its size and download.
+  for (const m of q.models.filter((x) => x.id === settings!.stt.qwen.model)) {
     const key = downloadKey("qwen-model", m.id);
     const wrap = el("div", "model-row-wrap");
     const row = el("div", "model-row");
-    const opt = el("div", "model-option");
-    if (settings.stt.qwen.model === m.id) opt.classList.add("is-selected");
+    const opt = el("div", "model-option is-static");
     if (!m.installed) opt.classList.add("is-disabled");
-    opt.appendChild(el("span", "radio"));
     opt.appendChild(el("span", "model-option-name", qwenModelLabel(m.id)));
     opt.appendChild(
       el("span", "model-option-meta", t(m.installed ? "stt.modelInstalledMeta" : "stt.modelNotInstalledMeta", m.size_mb)),
     );
-    if (m.installed) {
-      opt.addEventListener("click", () => {
-        if (!settings) return;
-        settings.stt.qwen.model = m.id;
-        renderQwenPanel();
-        persistSettings()
-          .then(() => refreshSetupStatus())
-          .catch((e: unknown) => toast(errText(e), true));
-      });
-    }
     row.appendChild(opt);
     // verified model files are kept and skipped, so there is no re-download
     if (!m.installed) {
