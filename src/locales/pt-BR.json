@@ -83,6 +83,8 @@
   "stt.colError": "Taxa de erro (mais curto = mais preciso)",
   "stt.colCpu": "Tempo de CPU (mais curto = mais rápido)",
   "stt.colSize": "Tamanho",
+  "stt.engineSettings": "Configurações",
+  "stt.testLoading": "Iniciando o servidor e carregando o modelo… {0} s (modelos grandes levam alguns minutos)",
   "stt.seconds": "{0} s",
   "stt.recommended": "Recomendado para este PC",
   "stt.fitWhisper": "Para PCs com GPU. O mais preciso, multilíngue. Lento só com CPU",

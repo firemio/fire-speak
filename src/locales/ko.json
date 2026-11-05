@@ -83,6 +83,8 @@
   "stt.colError": "오류율 (짧을수록 정확)",
   "stt.colCpu": "CPU 처리 시간 (짧을수록 빠름)",
   "stt.colSize": "용량",
+  "stt.engineSettings": "설정",
+  "stt.testLoading": "서버를 시작하고 모델을 불러오는 중… {0}초 (큰 모델은 몇 분 걸립니다)",
   "stt.seconds": "{0}초",
   "stt.recommended": "이 PC에 추천",
   "stt.fitWhisper": "GPU가 있는 PC용. 가장 정확, 다국어. CPU만으로는 느림",

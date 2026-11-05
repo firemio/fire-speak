@@ -83,6 +83,8 @@
   "stt.colError": "錯誤率（越短越準確）",
   "stt.colCpu": "CPU 處理時間（越短越快）",
   "stt.colSize": "大小",
+  "stt.engineSettings": "設定",
+  "stt.testLoading": "正在啟動伺服器並載入模型… {0} 秒（大模型需要幾分鐘）",
   "stt.seconds": "{0} 秒",
   "stt.recommended": "推薦用於此電腦",
   "stt.fitWhisper": "適合有 GPU 的電腦。最準確，多語言。僅用 CPU 時較慢",

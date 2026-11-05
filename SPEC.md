@@ -1072,3 +1072,9 @@ v0.14 と同じ 8 文・同じ正規化、llama.cpp b12110 Vulkan。処理時間
 - 既存の設定: `MODES_VERSION` 4 → 5。起動時に一度だけ、base_url に `api.groq.com` を含み、モデルが `llama-3.3-70b-versatile` のプロバイダを `openai/gpt-oss-120b` に書き換える(`migrate_groq_model`)。別のモデルにしてあるプロバイダや、Groq 以外の同名モデルは触らない。
 - gpt-oss は推論モデルだが、Groq は推論を `message.reasoning` に分けて返すので、本文(`message.content`)はそのまま使える。API キーが無く、実機での応答は未確認。
 - 音声認識の Groq プリセットは従来どおり `whisper-large-v3-turbo`(変更なし)。
+
+# v0.16.4 追加仕様: エンジン設定は開閉式、接続テストに経過秒
+
+- エンジン一覧で行を選んでも設定パネルは開かない。選択中の行の下には「▸ 設定」ボタンと接続テストだけを出し、パネルは「設定」を押したときだけ開く(`engineSettingsOpen`)。別のエンジンを選ぶと閉じる。選択中の行をもう一度押しても何もしない。
+- ローカルエンジンの接続テストはサーバー起動とモデル読み込みを待つ(Nemotron は数分)。その間「サーバーを起動してモデルを読み込み中… N秒(大きいモデルは数分かかります)」と 1 秒ごとに経過秒を出す(`stt.testLoading`)。クラウドは従来どおり「テスト中…」。
+- Nemotron の小型版(maternion の IQ3_NL 14.9GB / IQ2_NL 11GB)は llama.cpp PR #27983 の量子化型で、本体にも b12110 にも無く、maternion のフォーク `nemo-transcribe-iq23nl` でしか動かない。このリリースでは追加しない。

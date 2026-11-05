@@ -83,6 +83,8 @@
   "stt.colError": "Tingkat galat (lebih pendek = lebih akurat)",
   "stt.colCpu": "Waktu CPU (lebih pendek = lebih cepat)",
   "stt.colSize": "Ukuran",
+  "stt.engineSettings": "Pengaturan",
+  "stt.testLoading": "Menyalakan server dan memuat model… {0} dtk (model besar butuh beberapa menit)",
   "stt.seconds": "{0} dtk",
   "stt.recommended": "Disarankan untuk PC ini",
   "stt.fitWhisper": "Untuk PC dengan GPU. Paling akurat, multibahasa. Lambat hanya dengan CPU",

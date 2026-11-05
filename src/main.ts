@@ -841,20 +841,28 @@ function parkEnginePanels(): void {
   park.appendChild($("stt-test-row"));
 }
 
+/** v0.16.4: the selected engine's settings stay folded until asked for. */
+let engineSettingsOpen = false;
+let sttTestRunning = false;
+
 /**
- * v0.16.2: the selected engine row opens its own settings (server, device,
- * model, advanced, connection test) right below it, so the engine and its
- * model read as one choice instead of panels stacked under the list.
+ * v0.16.2: the selected engine row carries its own settings (server, device,
+ * model, advanced) right below it, so the engine and its model read as one
+ * choice. v0.16.4: only the "Settings" toggle and the connection test show
+ * there; the panel opens on the toggle, not on selecting the row.
  */
 function placeEnginePanel(): void {
   if (!settings) return;
   const active = document.querySelector<HTMLElement>("#engine-rows .engine-row.is-active");
   if (!active) return;
   const detail = el("div", "engine-detail");
-  const panel = $(enginePanelId(settings.stt.engine));
-  panel.hidden = false;
-  detail.appendChild(panel);
+  const toggle = $("btn-engine-settings");
+  toggle.textContent = `${engineSettingsOpen ? "▾" : "▸"} ${t("stt.engineSettings")}`;
+  toggle.setAttribute("aria-expanded", String(engineSettingsOpen));
   detail.appendChild($("stt-test-row"));
+  const panel = $(enginePanelId(settings.stt.engine));
+  panel.hidden = !engineSettingsOpen;
+  detail.appendChild(panel);
   active.after(detail);
 }
 
@@ -1260,8 +1268,15 @@ function wireSttSection(): void {
     }
     const btn = target.closest<HTMLButtonElement>("button[data-engine]");
     if (!btn || !settings) return;
+    if (btn.classList.contains("is-active")) return;
     settings.stt.engine = btn.dataset.engine as SttEngine;
     if (btn.dataset.qwenModel) settings.stt.qwen.model = btn.dataset.qwenModel;
+    engineSettingsOpen = false;
+    const testResult = $("stt-test-result");
+    if (!sttTestRunning) {
+      testResult.className = "test-result";
+      testResult.textContent = "";
+    }
     renderSttSection();
     scheduleSave();
     // a different model changes what the home setup card offers
@@ -1341,21 +1356,40 @@ function wireSttSection(): void {
     cloudKey.type = cloudKey.type === "password" ? "text" : "password";
   });
 
+  $("btn-engine-settings").addEventListener("click", () => {
+    engineSettingsOpen = !engineSettingsOpen;
+    renderEngineCompare();
+  });
+
   const testBtn = $("btn-test-stt") as HTMLButtonElement;
   testBtn.addEventListener("click", async () => {
+    if (!settings) return;
     const result = $("stt-test-result");
     testBtn.disabled = true;
-    result.className = "test-result";
-    result.textContent = t("common.testing");
+    sttTestRunning = true;
+    result.className = "test-result is-running";
+    // A local engine's test starts its server and loads the model, which
+    // takes from seconds (whisper) to minutes (Nemotron, 19 GB): count up so
+    // it does not look stuck.
+    const local = settings.stt.engine !== "cloud";
+    const started = Date.now();
+    const tick = () => {
+      const secs = Math.floor((Date.now() - started) / 1000);
+      result.textContent = local ? t("stt.testLoading", String(secs)) : t("common.testing");
+    };
+    tick();
+    const timer = window.setInterval(tick, 1000);
     try {
       await doSave();
       const msg = await invoke<string>("test_stt");
-      result.classList.add("ok");
+      result.className = "test-result ok";
       result.textContent = `✓ ${tMsg(msg)}`;
     } catch (e: unknown) {
-      result.classList.add("err");
+      result.className = "test-result err";
       result.textContent = `✗ ${errText(e)}`;
     } finally {
+      window.clearInterval(timer);
+      sttTestRunning = false;
       testBtn.disabled = false;
     }
   });

@@ -83,6 +83,8 @@
   "stt.colError": "Error rate (shorter = more accurate)",
   "stt.colCpu": "CPU time (shorter = faster)",
   "stt.colSize": "Size",
+  "stt.engineSettings": "Settings",
+  "stt.testLoading": "Starting the server and loading the model… {0}s (large models take a few minutes)",
   "stt.seconds": "{0}s",
   "stt.recommended": "Best for this PC",
   "stt.fitWhisper": "For PCs with a GPU. Most accurate, multilingual. Slow on a CPU alone",

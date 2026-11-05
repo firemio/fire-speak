@@ -83,6 +83,8 @@
   "stt.colError": "誤り率（短いほど正確）",
   "stt.colCpu": "CPU 処理時間（短いほど速い）",
   "stt.colSize": "サイズ",
+  "stt.engineSettings": "設定",
+  "stt.testLoading": "サーバーを起動してモデルを読み込み中… {0}秒（大きいモデルは数分かかります）",
   "stt.seconds": "{0}秒",
   "stt.recommended": "この PC におすすめ",
   "stt.fitWhisper": "GPU 搭載 PC 向け。最も正確・多言語。CPU だけだと遅い",
