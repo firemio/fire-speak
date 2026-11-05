@@ -1,0 +1,162 @@
+name: llama-nl
+
+# Builds llama-server from maternion's llama.cpp fork (branch
+# nemo-transcribe-iq23nl) for the small Nemotron 3.5 Transcribe files
+# (IQ3_NL / IQ2_NL, v0.17). Those quant types come from llama.cpp PR #27983,
+# which is not merged upstream, and the fork publishes no binaries, so this is
+# our own build. Same layout as the official Vulkan archives: the Vulkan
+# backend plus every CPU variant, loaded at runtime (GGML_BACKEND_DL), so one
+# download serves GPU and CPU (`-dev none`).
+#
+# Output: a prerelease on THIS repo named by `release_tag` carrying
+#   llama-nl-<short sha>-bin-win-vulkan-x64.zip
+#   llama-nl-<short sha>-bin-ubuntu-vulkan-x64.tar.gz
+#   SHA256SUMS.txt
+# The app pins the tag and the digests (qwen.rs `llama_nl_asset`). Marked
+# prerelease so the in-app updater (releases/latest) never sees it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit of maternion/llama.cpp to build
+        default: 58f922d77344cf7a8d1e78689bc8a2bdf3e37c48
+      release_tag:
+        description: Release tag to create or update on this repo
+        default: llama-nl-58f922d
+
+permissions:
+  contents: write
+
+env:
+  CMAKE_ARGS: "-DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=ON -DLLAMA_BUILD_SERVER=ON -DLLAMA_BUILD_UI=OFF -DLLAMA_USE_PREBUILT_UI=OFF"
+
+jobs:
+  windows:
+    name: llama-server (Vulkan + CPU, Windows x64)
+    runs-on: windows-2025-vs2026
+    env:
+      VULKAN_VERSION: 1.4.357.0
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: maternion/llama.cpp
+          ref: ${{ github.event.inputs.ref }}
+          path: llama.cpp
+
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: |
+          curl.exe -o $env:RUNNER_TEMP/VulkanSDK-Installer.exe -L "https://sdk.lunarg.com/sdk/download/${env:VULKAN_VERSION}/windows/vulkansdk-windows-X64-${env:VULKAN_VERSION}.exe"
+          & "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" --accept-licenses --default-answer --confirm-command install
+          Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_VERSION}"
+          Add-Content $env:GITHUB_PATH "C:\VulkanSDK\${env:VULKAN_VERSION}\bin"
+
+      - name: Install Ninja
+        run: choco install ninja
+
+      - name: Build
+        shell: cmd
+        working-directory: llama.cpp
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          cmake -S . -B build -G "Ninja Multi-Config" ^
+            -D CMAKE_TOOLCHAIN_FILE=cmake/x64-windows-llvm.cmake ^
+            -DLLAMA_BUILD_BORINGSSL=ON ^
+            -DGGML_NATIVE=OFF ^
+            -DGGML_BACKEND_DL=ON ^
+            -DGGML_CPU_ALL_VARIANTS=ON ^
+            -DGGML_OPENMP=ON ^
+            -DGGML_OPENMP_FETCH=ON ^
+            -DGGML_VULKAN=ON ^
+            %CMAKE_ARGS%
+          cmake --build build --config Release --target llama-server ggml-vulkan
+
+      - name: Package
+        shell: pwsh
+        env:
+          REF: ${{ github.event.inputs.ref }}
+        run: |
+          $short = $env:REF.Substring(0, 7)
+          $name = "llama-nl-$short-bin-win-vulkan-x64"
+          New-Item -ItemType Directory -Force pkg | Out-Null
+          Copy-Item llama.cpp\build\bin\Release\*.exe pkg\
+          Copy-Item llama.cpp\build\bin\Release\*.dll pkg\
+          Copy-Item llama.cpp\LICENSE pkg\LICENSE.txt
+          Get-ChildItem pkg | Select-Object Name, Length
+          Compress-Archive -Path pkg\* -DestinationPath "$name.zip"
+          Get-Item "$name.zip" | Select-Object Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win
+          path: llama-nl-*-bin-win-vulkan-x64.zip
+
+  linux:
+    name: llama-server (Vulkan + CPU, Linux x64)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: maternion/llama.cpp
+          ref: ${{ github.event.inputs.ref }}
+          path: llama.cpp
+
+      - name: Dependencies
+        run: |
+          wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
+          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+          sudo apt-get update -y
+          sudo apt-get install -y build-essential mesa-vulkan-drivers vulkan-sdk libssl-dev
+
+      - name: Build
+        working-directory: llama.cpp
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_RPATH='$ORIGIN' \
+            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+            -DGGML_BACKEND_DL=ON \
+            -DGGML_NATIVE=OFF \
+            -DGGML_CPU_ALL_VARIANTS=ON \
+            -DGGML_VULKAN=ON \
+            $CMAKE_ARGS
+          cmake --build build --config Release -j $(nproc) --target llama-server ggml-vulkan
+
+      - name: Package
+        env:
+          REF: ${{ github.event.inputs.ref }}
+        run: |
+          short="${REF:0:7}"
+          cp llama.cpp/LICENSE llama.cpp/build/bin/
+          ls -la llama.cpp/build/bin
+          tar -czvf "llama-nl-$short-bin-ubuntu-vulkan-x64.tar.gz" --transform "s,^\.,llama-nl-$short," -C llama.cpp/build/bin .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: llama-nl-*-bin-ubuntu-vulkan-x64.tar.gz
+
+  publish:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.release_tag }}
+          REF: ${{ github.event.inputs.ref }}
+        run: |
+          cd out
+          sha256sum llama-nl-* | tee SHA256SUMS.txt
+          if ! gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+              --title "$TAG" \
+              --notes "llama-server built from maternion/llama.cpp@$REF (branch nemo-transcribe-iq23nl) for the IQ3_NL / IQ2_NL Nemotron 3.5 Transcribe files. Not an app release."
+          fi
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber llama-nl-* SHA256SUMS.txt
