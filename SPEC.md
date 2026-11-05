@@ -1078,3 +1078,19 @@ v0.14 と同じ 8 文・同じ正規化、llama.cpp b12110 Vulkan。処理時間
 - エンジン一覧で行を選んでも設定パネルは開かない。選択中の行の下には「▸ 設定」ボタンと接続テストだけを出し、パネルは「設定」を押したときだけ開く(`engineSettingsOpen`)。別のエンジンを選ぶと閉じる。選択中の行をもう一度押しても何もしない。
 - ローカルエンジンの接続テストはサーバー起動とモデル読み込みを待つ(Nemotron は数分)。その間「サーバーを起動してモデルを読み込み中… N秒(大きいモデルは数分かかります)」と 1 秒ごとに経過秒を出す(`stt.testLoading`)。クラウドは従来どおり「テスト中…」。
 - Nemotron の小型版(maternion の IQ3_NL 14.9GB / IQ2_NL 11GB)は llama.cpp PR #27983 の量子化型で、本体にも b12110 にも無く、maternion のフォーク `nemo-transcribe-iq23nl` でしか動かない。このリリースでは追加しない。
+
+# v0.17.0 追加仕様: Nemotron の小型版(IQ3_NL / IQ2_NL)
+
+- Nemotron の行は 1 つのまま、設定の「音声モデル」カードで 3 サイズから選ぶ(`stt.qwen.model` = `nemotron` / `nemotron-iq3` / `nemotron-iq2`)。どれも maternion/Nemotron-3.5-Transcribe-30B-A4B-IQ-GGUF の同じコミット(5965081f)、mmproj は共通の F16。
+- IQ3_NL / IQ2_NL は llama.cpp PR #27983 の型で、本体には入っていない。maternion のフォーク(ブランチ nemo-transcribe-iq23nl、コミット 58f922d)を `.github/workflows/llama-nl.yml` でビルドし、このリポジトリのプレリリース `llama-nl-58f922d` に置いた(Windows x64 / Linux x64 の Vulkan + 全 CPU バリアント)。小型版を選ぶと `{app_data}/llama-nl/` にこのビルドを入れて使う(`qwen::Build::Nl`)。ほかのプラットフォームには小型版を出さない。
+- この PC(Ryzen 7 9800X3D 8 スレッド / RTX 4070 Ti SUPER 16GB)で、日本語 8 文のベンチを測った結果:
+
+  | モデル | 文字誤り率 | CPU 1 文 | GPU 1 文 |
+  |---|---|---|---|
+  | IQ4_NL(フォーク版) | 0.0% | 2.5 秒 | — |
+  | IQ3_NL | 4.0% | 3.4〜3.7 秒 | 3.0 秒(一部だけ GPU) |
+  | IQ2_NL | 2.5% | 2.8 秒 | 1.7 秒(全部 GPU)。ただし 1 文が英語に翻訳され、誤り率 24% |
+
+  - IQ2_NL の英訳は、音声エンコーダーを CPU に置いても同じだった。フォークの新しい GPU カーネルはまだ信用できないので、「自動」では小型版を CPU で動かす(`min_vram_mb = NL_NO_AUTO_GPU`)。「GPU」を自分で選べば GPU も使える。
+  - IQ4_NL の「自動」で GPU を使う条件は、VRAM 23GiB 以上のまま。
+- メモリの目安(画面表示): IQ4 32GB〜、IQ3 24GB〜、IQ2 16GB〜。

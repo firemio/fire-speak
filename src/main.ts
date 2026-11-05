@@ -755,7 +755,10 @@ function recommendedChoice(): EngineChoice | null {
 
 function isChoiceActive(c: EngineChoice): boolean {
   if (!settings || settings.stt.engine !== c.engine) return false;
-  return !c.qwenModel || settings.stt.qwen.model === c.qwenModel;
+  if (!c.qwenModel) return true;
+  // the Nemotron row stands for all its sizes (picked in the model card)
+  if (c.qwenModel === "nemotron") return isNemotron(settings.stt.qwen.model);
+  return settings.stt.qwen.model === c.qwenModel;
 }
 
 function bar(value: number, max: number, label: string): HTMLElement {
@@ -905,8 +908,20 @@ function renderSttSection(): void {
 /** Download size of the pinned llama.cpp Vulkan build (`qwen::LLAMA_TAG`). */
 const LLAMA_SERVER_MB = 36;
 
+/** "nemotron" (IQ4_NL) and its v0.17 smaller sizes "nemotron-iq3" / "nemotron-iq2". */
+function isNemotron(id: string): boolean {
+  return id === "nemotron" || id.startsWith("nemotron-");
+}
+
+const NEMOTRON_QUANT: Record<string, string> = {
+  nemotron: "IQ4_NL",
+  "nemotron-iq3": "IQ3_NL",
+  "nemotron-iq2": "IQ2_NL",
+};
+
 function qwenModelLabel(id: string): string {
-  return id === "nemotron" ? "Nemotron 3.5 Transcribe 30B" : `Qwen3-ASR ${id.toUpperCase()}`;
+  if (isNemotron(id)) return `Nemotron 3.5 Transcribe 30B · ${NEMOTRON_QUANT[id] ?? id}`;
+  return `Qwen3-ASR ${id.toUpperCase()}`;
 }
 
 function renderQwenPanel(): void {
@@ -926,10 +941,16 @@ function renderQwenPanel(): void {
     const resolved = s.qwen.effective_accel === "gpu" ? "GPU (Vulkan)" : "CPU";
     const npuNote = s.hw.npu || s.hw.intel_npu ? ` ${t("stt.qwenNoNpu")}` : "";
     // say why a GPU PC still runs Nemotron on the CPU
-    const vramNote =
-      settings.stt.qwen.model === "nemotron" && s.qwen.effective_accel === "cpu" && s.hw.vram_mb > 0
-        ? ` (${t("stt.nemotronVramNote", Math.round(s.hw.vram_mb / 1024))})`
-        : "";
+    const model = settings.stt.qwen.model;
+    const autoCpu =
+      isNemotron(model) && s.qwen.effective_accel === "cpu" && (settings.stt.qwen.accel || "auto") === "auto";
+    const vramNote = !autoCpu
+      ? ""
+      : model !== "nemotron"
+        ? ` (${t("stt.nemotronNlCpuNote")})`
+        : s.hw.vram_mb > 0
+          ? ` (${t("stt.nemotronVramNote", Math.round(s.hw.vram_mb / 1024))})`
+          : "";
     $("qwen-accel-hint").textContent = `${t("stt.accelDetected", found)} → ${resolved}${vramNote}${npuNote}`;
   }
 
@@ -939,15 +960,34 @@ function renderQwenPanel(): void {
     host.appendChild(el("div", "hint", t("stt.loadingModels")));
     return;
   }
-  // The engine list above already picks the model (one row per model), so
-  // this card shows only the selected one: its size and download.
-  for (const m of q.models.filter((x) => x.id === settings!.stt.qwen.model)) {
+  // The engine list above already picks the Qwen model (one row per model),
+  // so the card shows only the selected one: its size and download. The
+  // Nemotron row has three sizes (v0.17), picked here.
+  const selected = settings.stt.qwen.model;
+  const pickable = isNemotron(selected);
+  const shown = q.models.filter((x) => (pickable ? isNemotron(x.id) : x.id === selected));
+  for (const m of shown) {
     const key = downloadKey("qwen-model", m.id);
     const wrap = el("div", "model-row-wrap");
     const row = el("div", "model-row");
-    const opt = el("div", "model-option is-static");
-    if (!m.installed) opt.classList.add("is-disabled");
-    opt.appendChild(el("span", "model-option-name", qwenModelLabel(m.id)));
+    const opt = el("div", "model-option");
+    if (pickable) {
+      opt.classList.toggle("is-selected", m.id === selected);
+      opt.appendChild(el("span", "radio"));
+      opt.addEventListener("click", () => {
+        if (!settings || settings.stt.qwen.model === m.id) return;
+        settings.stt.qwen.model = m.id;
+        scheduleSave();
+        renderQwenPanel();
+        void refreshSetupStatus();
+      });
+    } else {
+      opt.classList.add("is-static");
+      if (!m.installed) opt.classList.add("is-disabled");
+    }
+    // the Nemotron row above already names the model: just the size here
+    opt.appendChild(el("span", "model-option-name", pickable ? (NEMOTRON_QUANT[m.id] ?? m.id) : qwenModelLabel(m.id)));
+    if (pickable) opt.appendChild(el("span", "model-option-meta", t(`stt.quant.${m.id}`)));
     opt.appendChild(
       el("span", "model-option-meta", t(m.installed ? "stt.modelInstalledMeta" : "stt.modelNotInstalledMeta", m.size_mb)),
     );
@@ -964,6 +1004,7 @@ function renderQwenPanel(): void {
     wrap.appendChild(buildProgressEl(key));
     host.appendChild(wrap);
   }
+  if (pickable && shown.length > 1) host.appendChild(el("div", "hint", t("stt.nemotronSizesHint")));
 }
 
 async function startQwenServerDownload(): Promise<void> {

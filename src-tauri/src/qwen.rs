@@ -30,9 +30,23 @@ pub enum Family {
     Nemotron,
 }
 
+/// Which llama-server build runs a model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Build {
+    /// The official llama.cpp release (`LLAMA_TAG`), in `{app_data}/llama/`.
+    Upstream,
+    /// Our build of maternion's fork (`NL_TAG`, v0.17) for the IQ3_NL /
+    /// IQ2_NL types of llama.cpp PR #27983, in `{app_data}/llama-nl/`.
+    Nl,
+}
+
 pub struct QwenModel {
     pub id: &'static str,
     family: Family,
+    build: Build,
+    /// Smallest dedicated GPU memory (MiB) that "auto" offloads to (Nemotron
+    /// only; 0 = any real GPU): model + mmproj + KV cache must fit.
+    min_vram_mb: u64,
     repo: &'static str,
     /// Hugging Face commit the files are pinned to.
     rev: &'static str,
@@ -46,10 +60,20 @@ pub struct QwenModel {
 
 /// Q8_0 conversions by ggml-org (sizes and SHA-256 from the Hugging Face LFS
 /// metadata; 0.6B checked against a local download).
+/// "auto" keeps the IQ3_NL / IQ2_NL files on the CPU (v0.17). Measured on an
+/// RTX 4070 Ti SUPER 16 GB with the whole IQ2_NL model offloaded (1.7 s per
+/// sentence vs 2.8 s on 8 CPU threads), one of the 8 Japanese benchmark
+/// sentences came out translated into English (CER 24% vs 2.5% on the CPU),
+/// also with the audio encoder on the CPU: the fork's new GPU kernels for
+/// these types are not trusted yet. "GPU" is still selectable.
+const NL_NO_AUTO_GPU: u64 = u64::MAX;
+
 pub const MODELS: &[QwenModel] = &[
     QwenModel {
         id: "0.6b",
         family: Family::Qwen3Asr,
+        build: Build::Upstream,
+        min_vram_mb: 0,
         repo: "ggml-org/Qwen3-ASR-0.6B-GGUF",
         rev: "928ab958557df9aa2ef1c93e0e83c7ad0933fae2",
         model_file: "Qwen3-ASR-0.6B-Q8_0.gguf",
@@ -61,6 +85,8 @@ pub const MODELS: &[QwenModel] = &[
     QwenModel {
         id: "1.7b",
         family: Family::Qwen3Asr,
+        build: Build::Upstream,
+        min_vram_mb: 0,
         repo: "ggml-org/Qwen3-ASR-1.7B-GGUF",
         rev: "36a678687ba7d07a74ca70ccb0e36902e005fb80",
         model_file: "Qwen3-ASR-1.7B-Q8_0.gguf",
@@ -77,6 +103,9 @@ pub const MODELS: &[QwenModel] = &[
     QwenModel {
         id: "nemotron",
         family: Family::Nemotron,
+        build: Build::Upstream,
+        // 17.5 GiB model + 1.4 GiB mmproj + KV cache; a 24 GB card reports 24 576
+        min_vram_mb: 23 * 1024,
         repo: "maternion/Nemotron-3.5-Transcribe-30B-A4B-IQ-GGUF",
         rev: "5965081f1dc2f58eacdb65f594c43a0ec2fa0ee1",
         model_file: "NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-IQ4_NL.gguf",
@@ -84,6 +113,35 @@ pub const MODELS: &[QwenModel] = &[
         mmproj_file: "mmproj-NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-F16.gguf",
         mmproj_sha256: "f28378cd7ebb8494012f78b8c3a271402d0daecb8acdfe61565c80196662facb",
         size_mb: 19276,
+    },
+    // v0.17: block-32 imatrix quants that fit the 2688/1856 row widths, from
+    // the same repo and commit. They need the fork build (Build::Nl).
+    QwenModel {
+        id: "nemotron-iq3",
+        family: Family::Nemotron,
+        build: Build::Nl,
+        // never "auto" (see NL_NO_AUTO_GPU)
+        min_vram_mb: NL_NO_AUTO_GPU,
+        repo: "maternion/Nemotron-3.5-Transcribe-30B-A4B-IQ-GGUF",
+        rev: "5965081f1dc2f58eacdb65f594c43a0ec2fa0ee1",
+        model_file: "NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-IQ3_NL.gguf",
+        model_sha256: "75bd25ae4a07d8d735d20121f850d85e34f43ead734cbd621dfa6550f56672b9",
+        mmproj_file: "mmproj-NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-F16.gguf",
+        mmproj_sha256: "f28378cd7ebb8494012f78b8c3a271402d0daecb8acdfe61565c80196662facb",
+        size_mb: 15613,
+    },
+    QwenModel {
+        id: "nemotron-iq2",
+        family: Family::Nemotron,
+        build: Build::Nl,
+        min_vram_mb: NL_NO_AUTO_GPU,
+        repo: "maternion/Nemotron-3.5-Transcribe-30B-A4B-IQ-GGUF",
+        rev: "5965081f1dc2f58eacdb65f594c43a0ec2fa0ee1",
+        model_file: "NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-IQ2_NL.gguf",
+        model_sha256: "3266fd250ee14b7476bcd670d468c454044f51b4d5a9cc601900bacbad78de29",
+        mmproj_file: "mmproj-NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-F16.gguf",
+        mmproj_sha256: "f28378cd7ebb8494012f78b8c3a271402d0daecb8acdfe61565c80196662facb",
+        size_mb: 11913,
     },
 ];
 
@@ -139,6 +197,51 @@ fn llama_asset() -> Option<(&'static str, &'static str)> {
     }
 }
 
+/// Our build of maternion/llama.cpp (branch nemo-transcribe-iq23nl, kept
+/// merged onto upstream master, so it also has the Nemotron audio path) from
+/// `.github/workflows/llama-nl.yml`, published as a prerelease of this repo.
+const NL_TAG: &str = "llama-nl-58f922d";
+
+fn nl_asset() -> Option<(&'static str, &'static str)> {
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    {
+        Some(("llama-nl-58f922d-bin-win-vulkan-x64.zip", NL_SHA_WIN_X64))
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        Some(("llama-nl-58f922d-bin-ubuntu-vulkan-x64.tar.gz", NL_SHA_LINUX_X64))
+    }
+    #[cfg(not(any(
+        all(windows, target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "x86_64")
+    )))]
+    {
+        None
+    }
+}
+
+const NL_SHA_WIN_X64: &str = "52e249740c5126010e810808a31f18a02f9f1772b47badb8dfebe7a8fec1a514";
+const NL_SHA_LINUX_X64: &str = "71dbcd53049262f325890754dfe9791e4fdbeb6f175e1191fbb78ea660dd2c97";
+
+fn build_tag(build: Build) -> &'static str {
+    match build {
+        Build::Upstream => LLAMA_TAG,
+        Build::Nl => NL_TAG,
+    }
+}
+
+/// (download URL, asset name, SHA-256) of a build for this platform.
+fn build_asset(build: Build) -> Option<(String, &'static str, &'static str)> {
+    match build {
+        Build::Upstream => llama_asset().map(|(a, s)| {
+            (format!("https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_TAG}/{a}"), a, s)
+        }),
+        Build::Nl => nl_asset().map(|(a, s)| {
+            (format!("https://github.com/firemio/fire-speak/releases/download/{NL_TAG}/{a}"), a, s)
+        }),
+    }
+}
+
 /// Total context, split evenly across the slots (8,192 each). Qwen3-ASR
 /// spends about 13 tokens per second of audio, so the 5-minute recording cap
 /// is ~3,900 prompt tokens plus the transcript.
@@ -150,9 +253,6 @@ const HEALTH_TIMEOUT_SECS: u64 = 120;
 /// Nemotron's 19 GB load from a cold disk, and its slower CPU decode of a
 /// long recording, outlast the Qwen limits.
 const NEMOTRON_HEALTH_TIMEOUT_SECS: u64 = 600;
-/// Smallest dedicated GPU memory (MiB) that "auto" offloads Nemotron to: the
-/// 17.9 GiB model + 1.4 GiB mmproj + KV cache. A 24 GB card reports 24 576.
-const NEMOTRON_MIN_VRAM_MB: u64 = 23 * 1024;
 const STT_TIMEOUT_SECS: u64 = 120;
 const NEMOTRON_STT_TIMEOUT_SECS: u64 = 300;
 
@@ -184,8 +284,11 @@ pub struct QwenStatus {
     pub effective_accel: String,
 }
 
-fn llama_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(setup::app_data_dir(app)?.join("llama"))
+fn llama_dir(app: &AppHandle, build: Build) -> Result<PathBuf, String> {
+    Ok(setup::app_data_dir(app)?.join(match build {
+        Build::Upstream => "llama",
+        Build::Nl => "llama-nl",
+    }))
 }
 
 fn server_exe_name() -> &'static str {
@@ -210,30 +313,41 @@ fn find_exe(dir: &Path) -> Option<PathBuf> {
     dirs.iter().find_map(|d| find_exe(d))
 }
 
-fn server_path(app: &AppHandle) -> Option<PathBuf> {
-    find_exe(&llama_dir(app).ok()?)
+fn server_path(app: &AppHandle, build: Build) -> Option<PathBuf> {
+    find_exe(&llama_dir(app, build).ok()?)
 }
 
-/// Written next to the install with `LLAMA_TAG` (v0.16); installs from
-/// before have none.
+/// Written next to the install with its tag (v0.16); installs from before
+/// have none.
 const BUILD_FILE: &str = "BUILD";
 
-/// The installed llama.cpp is the pinned build. An older one still runs
-/// Qwen3-ASR but not Nemotron, which needs b12110+.
-fn server_current(app: &AppHandle) -> bool {
-    llama_dir(app)
+/// The installed llama.cpp is the pinned build. An older upstream one still
+/// runs Qwen3-ASR but not Nemotron, which needs b12110+.
+fn server_current(app: &AppHandle, build: Build) -> bool {
+    llama_dir(app, build)
         .ok()
         .and_then(|d| std::fs::read_to_string(d.join(BUILD_FILE)).ok())
-        .is_some_and(|t| t.trim() == LLAMA_TAG)
+        .is_some_and(|t| t.trim() == build_tag(build))
 }
 
 /// The installed server can run `model`.
 fn server_ready(app: &AppHandle, model: &str) -> bool {
-    server_path(app).is_some() && (family_of(model) != Family::Nemotron || server_current(app))
+    let build = build_of(model);
+    server_path(app, build).is_some()
+        && (family_of(model) != Family::Nemotron || server_current(app, build))
 }
 
 fn model_def(id: &str) -> Option<&'static QwenModel> {
     MODELS.iter().find(|m| m.id == id)
+}
+
+fn build_of(id: &str) -> Build {
+    model_def(id).map_or(Build::Upstream, |m| m.build)
+}
+
+/// The model can run here: its server build exists for this platform.
+fn model_available(m: &QwenModel) -> bool {
+    build_asset(m.build).is_some()
 }
 
 fn family_of(id: &str) -> Family {
@@ -259,9 +373,11 @@ pub fn effective_accel(settings: &Settings) -> &'static str {
         // with --cpu-moe was slower still, 3.5 s). So "auto" offloads only to
         // a GPU that holds the whole model: a 24 GB card, or a Radeon APU
         // with that much memory assigned to graphics.
+        // v0.17: the threshold is per model (`min_vram_mb`).
         _ if family_of(&settings.stt.qwen.model) == Family::Nemotron => {
             let hw = crate::hw::get();
-            if (hw.nvidia || hw.amd_gpu) && hw.vram_mb >= NEMOTRON_MIN_VRAM_MB {
+            let min = model_def(&settings.stt.qwen.model).map_or(u64::MAX, |m| m.min_vram_mb);
+            if (hw.nvidia || hw.amd_gpu) && hw.vram_mb >= min {
                 "gpu"
             } else {
                 "cpu"
@@ -289,7 +405,7 @@ fn running() -> bool {
 }
 
 pub fn status(app: &AppHandle, settings: &Settings) -> QwenStatus {
-    let server = server_path(app);
+    let server = server_path(app, build_of(&settings.stt.qwen.model));
     QwenStatus {
         server_installed: server_ready(app, &settings.stt.qwen.model),
         server_path: server
@@ -298,6 +414,7 @@ pub fn status(app: &AppHandle, settings: &Settings) -> QwenStatus {
         model_installed: model_paths(app, &settings.stt.qwen.model).is_some(),
         models: MODELS
             .iter()
+            .filter(|m| model_available(m))
             .map(|m| QwenModelInfo {
                 id: m.id.to_string(),
                 installed: model_paths(app, m.id).is_some(),
@@ -327,7 +444,7 @@ pub async fn ensure_server(app: AppHandle) -> Result<u16, String> {
 
 fn ensure_server_blocking(app: &AppHandle, settings: &Settings) -> Result<u16, String> {
     let q = &settings.stt.qwen;
-    let exe = server_path(app)
+    let exe = server_path(app, build_of(&q.model))
         .filter(|_| server_ready(app, &q.model))
         .ok_or_else(|| SETUP_REQUIRED_MSG.to_string())?;
     let (model, mmproj) =
@@ -457,14 +574,15 @@ pub fn prewarm(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let settings = app.state::<crate::AppState>().settings.lock().unwrap().clone();
-        if settings.stt.engine != "qwen" || server_path(&app).is_none() {
+        let build = build_of(&settings.stt.qwen.model);
+        if settings.stt.engine != "qwen" || server_path(&app, build).is_none() {
             return;
         }
-        // an install from before v0.16: swap in the pinned build (36 MB),
-        // whose success path prewarms again
-        if !server_current(&app) {
+        // an install from before v0.16 (or an older fork build): swap in the
+        // pinned build (36 MB), whose success path prewarms again
+        if !server_current(&app, build) {
             if !SERVER_DOWNLOADING.load(Ordering::SeqCst) {
-                eprintln!("qwen: llama.cpp is not {LLAMA_TAG}; updating");
+                eprintln!("qwen: llama.cpp is not {}; updating", build_tag(build));
                 if let Err(e) = download_server(app.clone()).await {
                     eprintln!("qwen: llama.cpp update failed: {e}");
                 }
@@ -665,9 +783,10 @@ async fn transcribe_at(
 // Downloads
 // ---------------------------------------------------------------------------
 
-/// Install the pinned llama.cpp build into `{app_data}/llama/` (staged in
-/// `llama.new/`, verified, then swapped in). A second call while one runs
-/// joins it (returns Ok; the running one's events report the outcome).
+/// Install the llama.cpp build the selected model needs into
+/// `{app_data}/llama/` or `{app_data}/llama-nl/` (staged in `<dir>.new/`,
+/// verified, then swapped in). A second call while one runs joins it
+/// (returns Ok; the running one's events report the outcome).
 pub async fn download_server(app: AppHandle) -> Result<(), String> {
     if SERVER_DOWNLOADING.swap(true, Ordering::SeqCst) {
         return Ok(());
@@ -684,10 +803,14 @@ pub async fn download_server(app: AppHandle) -> Result<(), String> {
 }
 
 async fn download_server_inner(app: &AppHandle) -> Result<(), String> {
-    let (asset, sha256) = llama_asset().ok_or_else(|| "ERR_NO_SERVER_ASSET".to_string())?;
-    let url = format!("https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_TAG}/{asset}");
-    let dir = llama_dir(app)?;
-    let staging = dir.with_file_name("llama.new");
+    let model = app.state::<crate::AppState>().settings.lock().unwrap().stt.qwen.model.clone();
+    let build = build_of(&model);
+    let (url, asset, sha256) =
+        build_asset(build).ok_or_else(|| "ERR_NO_SERVER_ASSET".to_string())?;
+    let dir = llama_dir(app, build)?;
+    let mut staging_name = dir.file_name().unwrap_or_default().to_os_string();
+    staging_name.push(".new");
+    let staging = dir.with_file_name(staging_name);
     if staging.exists() {
         let _ = tokio::fs::remove_dir_all(&staging).await;
     }
@@ -721,7 +844,7 @@ async fn download_server_inner(app: &AppHandle) -> Result<(), String> {
         }
         #[cfg(not(unix))]
         let _ = exe;
-        std::fs::write(staging.join(BUILD_FILE), LLAMA_TAG)
+        std::fs::write(staging.join(BUILD_FILE), build_tag(build))
             .map_err(|e| format!("ERR_FILE_IO|write build tag: {e}"))?;
         Ok::<(u64, u64), String>((downloaded, total))
     }
@@ -906,5 +1029,32 @@ mod tests {
         assert!(model_def("small").is_none());
         assert_eq!(language_name("ja"), Some("Japanese"));
         assert_eq!(language_name("auto"), None);
+    }
+
+    #[test]
+    fn small_nemotrons_run_on_the_fork_build() {
+        for id in ["nemotron-iq3", "nemotron-iq2"] {
+            assert_eq!(family_of(id), Family::Nemotron);
+            assert_eq!(build_of(id), Build::Nl);
+        }
+        assert_eq!(build_of("nemotron"), Build::Upstream);
+        assert_eq!(build_of("0.6b"), Build::Upstream);
+        // the fork's GPU kernels are not trusted for "auto"
+        for id in ["nemotron-iq3", "nemotron-iq2"] {
+            assert_eq!(model_def(id).unwrap().min_vram_mb, NL_NO_AUTO_GPU);
+        }
+    }
+
+    #[test]
+    fn pins_are_filled() {
+        for m in MODELS {
+            assert_eq!(m.model_sha256.len(), 64, "{}", m.id);
+            assert_eq!(m.mmproj_sha256.len(), 64, "{}", m.id);
+        }
+        for build in [Build::Upstream, Build::Nl] {
+            if let Some((url, _, sha)) = build_asset(build) {
+                assert_eq!(sha.len(), 64, "{url}");
+            }
+        }
     }
 }
