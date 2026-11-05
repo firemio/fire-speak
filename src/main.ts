@@ -1553,7 +1553,7 @@ const LLM_PRESETS: Record<string, Omit<LlmProvider, "id" | "api_key">> = {
   anthropic: { name: "Claude (Anthropic)", kind: "anthropic", base_url: "https://api.anthropic.com", model: "claude-haiku-4-5" },
   openai: { name: "OpenAI", kind: "openai", base_url: "https://api.openai.com/v1", model: "gpt-4o-mini" },
   openrouter: { name: "Laguna S 2.1 (OpenRouter free)", kind: "openai", base_url: "https://openrouter.ai/api/v1", model: "poolside/laguna-s-2.1:free" },
-  groq: { name: "Groq", kind: "openai", base_url: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
+  groq: { name: "Groq", kind: "openai", base_url: "https://api.groq.com/openai/v1", model: "openai/gpt-oss-120b" },
   ollama: { name: "Ollama (local, free)", kind: "openai", base_url: "http://localhost:11434/v1", model: "qwen2.5:7b" },
 };
 

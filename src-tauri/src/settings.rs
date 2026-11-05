@@ -42,7 +42,8 @@ pub struct Settings {
     #[serde(default = "default_modes")]
     pub modes: Vec<Mode>,
     /// Bumped when a new default entry is back-filled into existing settings
-    /// (2 = ninja mode, v0.6; 3 = Ollama provider preset, v0.7). Lets `load`
+    /// (2 = ninja mode, v0.6; 3 = Ollama provider preset, v0.7; 5 = Groq's
+    /// retired llama-3.3-70b-versatile → openai/gpt-oss-120b, v0.16.3). Lets `load`
     /// add each entry exactly once without resurrecting it after the user
     /// deletes it.
     #[serde(default)]
@@ -50,7 +51,21 @@ pub struct Settings {
 }
 
 /// Current defaults version (see `Settings::modes_version`).
-pub const MODES_VERSION: u32 = 4;
+pub const MODES_VERSION: u32 = 5;
+
+/// Groq no longer serves the model the v0.7–v0.16.2 preset added (v0.16.3).
+const GROQ_OLD_MODEL: &str = "llama-3.3-70b-versatile";
+const GROQ_MODEL: &str = "openai/gpt-oss-120b";
+
+/// Point Groq providers still on the retired preset model at the current
+/// one. Providers the user set to another model are left alone.
+fn migrate_groq_model(providers: &mut [LlmProvider]) {
+    for p in providers {
+        if p.base_url.contains("api.groq.com") && p.model.trim() == GROQ_OLD_MODEL {
+            p.model = GROQ_MODEL.to_string();
+        }
+    }
+}
 
 /// The built-in "no mode" entry (v0.9.4): not stored in `modes`; when
 /// `active_mode_id` is this (or names a missing/disabled mode) the transcript
@@ -470,6 +485,9 @@ pub fn load(app: &tauri::AppHandle) -> Settings {
                         s.active_mode_id = NONE_MODE_ID.to_string();
                     }
                 }
+                if s.modes_version < 5 {
+                    migrate_groq_model(&mut s.llm.providers);
+                }
                 s.modes_version = MODES_VERSION;
                 if let Err(e) = save(app, &s) {
                     log_line(app, &format!("migration save failed: {e}"));
@@ -582,4 +600,33 @@ pub fn save(app: &tauri::AppHandle, settings: &Settings) -> Result<(), String> {
     log_line(app, &format!("settings save FAILED ({}): {last_err}", path.display()));
     set_last_save_error(Some(last_err));
     Err(msg)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn provider(base_url: &str, model: &str) -> LlmProvider {
+        LlmProvider {
+            id: "p".into(),
+            name: "Groq".into(),
+            kind: "openai".into(),
+            base_url: base_url.into(),
+            api_key: String::new(),
+            model: model.into(),
+        }
+    }
+
+    #[test]
+    fn groq_preset_model_is_migrated() {
+        let mut ps = vec![
+            provider("https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
+            provider("https://api.groq.com/openai/v1", "qwen/qwen3-32b"),
+            provider("https://openrouter.ai/api/v1", "llama-3.3-70b-versatile"),
+        ];
+        migrate_groq_model(&mut ps);
+        assert_eq!(ps[0].model, "openai/gpt-oss-120b");
+        assert_eq!(ps[1].model, "qwen/qwen3-32b");
+        assert_eq!(ps[2].model, "llama-3.3-70b-versatile");
+    }
 }

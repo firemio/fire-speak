@@ -1065,3 +1065,10 @@ v0.14 と同じ 8 文・同じ正規化、llama.cpp b12110 Vulkan。処理時間
 ## Nemotron の出力 (qwen.rs `clean_nemotron_output`)
 
 - `</think>` までの推論ブロックと話者タグ `<spk:N>` を取り除き、行ごとに余った空白を詰めて前後を trim。改行は残す。通常は `--reasoning off` で出ない(貼り付けの保険)。Qwen3-ASR は従来どおり `parse_asr_output`。
+
+# v0.16.3 追加仕様: Groq の整形プリセットを openai/gpt-oss-120b に
+
+- Groq は `llama-3.3-70b-versatile` を提供しなくなった。AI 整形プリセット Groq のモデルを **`openai/gpt-oss-120b`** に変更(`LLM_PRESETS.groq`)。base_url は `https://api.groq.com/openai/v1` のまま。
+- 既存の設定: `MODES_VERSION` 4 → 5。起動時に一度だけ、base_url に `api.groq.com` を含み、モデルが `llama-3.3-70b-versatile` のプロバイダを `openai/gpt-oss-120b` に書き換える(`migrate_groq_model`)。別のモデルにしてあるプロバイダや、Groq 以外の同名モデルは触らない。
+- gpt-oss は推論モデルだが、Groq は推論を `message.reasoning` に分けて返すので、本文(`message.content`)はそのまま使える。API キーが無く、実機での応答は未確認。
+- 音声認識の Groq プリセットは従来どおり `whisper-large-v3-turbo`(変更なし)。
