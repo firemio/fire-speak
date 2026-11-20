@@ -132,6 +132,8 @@ pub struct SetupStatus {
     pub qwen: crate::qwen::QwenStatus,
     /// Local CrispASR engines: Parakeet JA / Cohere Transcribe (v0.14).
     pub crisp: crate::crisp::CrispStatus,
+    /// Local speech.cpp engines: Haas-ja / ReazonSpeech v2 (v0.18).
+    pub speech: crate::speechcpp::SpeechStatus,
 }
 
 /// Whether the managed whisper-server process is alive.
@@ -583,6 +585,7 @@ pub fn get_setup_status(app: &AppHandle, settings: &Settings) -> Result<SetupSta
         last_save_error: crate::settings::last_save_error().unwrap_or_default(),
         qwen: crate::qwen::status(app, settings),
         crisp: crate::crisp::status(app, settings),
+        speech: crate::speechcpp::status(app, settings),
         model_installed: model.is_some(),
         model_path: model
             .map(|p| p.to_string_lossy().to_string())
@@ -1225,6 +1228,10 @@ pub fn sync_server_build(app: &AppHandle) {
             crate::crisp::prewarm(&app);
             return;
         }
+        if crate::speechcpp::is_speech_engine(&settings.stt.engine) {
+            crate::speechcpp::prewarm(&app);
+            return;
+        }
         if settings.stt.engine != "local" {
             return;
         }
@@ -1286,6 +1293,9 @@ pub async fn quick_setup(app: AppHandle) -> Result<(), String> {
     }
     if crate::crisp::is_crisp_engine(&engine) {
         return crate::crisp::quick_setup(app.clone()).await;
+    }
+    if crate::speechcpp::is_speech_engine(&engine) {
+        return crate::speechcpp::quick_setup(app.clone()).await;
     }
     let current = |app: &AppHandle| app.state::<crate::AppState>().settings.lock().unwrap().clone();
     let settings = current(&app);
@@ -1587,7 +1597,7 @@ async fn install_server_archive(
     Ok(())
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn extract_zip(zip_path: &Path, dest: &Path) -> Result<(), String> {
     let file =
         std::fs::File::open(zip_path).map_err(|e| format!("ERR_ZIP|open: {e}"))?;

@@ -52,6 +52,9 @@ pub async fn transcribe(
         "cloud" => transcribe_cloud(settings, wav, prompt).await,
         "qwen" => crate::qwen::transcribe(app, settings, wav, prompt).await,
         e if crate::crisp::is_crisp_engine(e) => crate::crisp::transcribe(app, settings, wav).await,
+        e if crate::speechcpp::is_speech_engine(e) => {
+            crate::speechcpp::transcribe(app, settings, wav, prompt).await
+        }
         _ => transcribe_local(app, settings, wav, prompt).await,
     }
 }

@@ -1,6 +1,6 @@
 // Shared types mirroring SPEC.md (backend contract). Field names must match exactly.
 
-export type SttEngine = "local" | "cloud" | "qwen" | "parakeet" | "cohere";
+export type SttEngine = "local" | "cloud" | "qwen" | "parakeet" | "cohere" | "haas" | "reazon";
 export type PasteMode = "paste" | "clipboard";
 export type ProviderKind = "anthropic" | "openai";
 /** v0.3: "hold" = record while the hotkey is held (default), "toggle" = press to start/stop. */
@@ -39,12 +39,16 @@ export interface CrispSttSettings {
   accel: string; // "auto" | "gpu" | "cpu"
 }
 
+/** Local speech.cpp server (v0.18), shared by the "haas" and "reazon" engines. */
+export type SpeechSttSettings = CrispSttSettings;
+
 export interface SttSettings {
   engine: SttEngine;
   local: LocalSttSettings;
   cloud: CloudSttSettings;
   qwen: QwenSttSettings;
   crisp: CrispSttSettings;
+  speech: SpeechSttSettings;
 }
 
 export interface LlmProvider {
@@ -150,6 +154,8 @@ export interface SetupStatus {
   last_save_error: string; // "" = last save succeeded (v0.9.5)
   qwen: QwenStatus;
   crisp: CrispStatus;
+  /** speech.cpp (v0.18): same shape; `models[].id` is "haas" | "reazon". */
+  speech: CrispStatus;
 }
 
 export interface QwenStatus {
@@ -229,7 +235,7 @@ export interface UpdateProgressPayload {
 }
 
 export interface DownloadProgressPayload {
-  kind: "server" | "model" | "npu" | "qwen-server" | "qwen-model" | "crisp-server" | "crisp-model";
+  kind: "server" | "model" | "npu" | "qwen-server" | "qwen-model" | "crisp-server" | "crisp-model" | "speech-server" | "speech-model";
   name: string;
   downloaded: number;
   total: number;

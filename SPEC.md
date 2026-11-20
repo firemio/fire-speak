@@ -1094,3 +1094,19 @@ v0.14 と同じ 8 文・同じ正規化、llama.cpp b12110 Vulkan。処理時間
   - IQ2_NL の英訳は、音声エンコーダーを CPU に置いても同じだった。フォークの新しい GPU カーネルはまだ信用できないので、「自動」では小型版を CPU で動かす(`min_vram_mb = NL_NO_AUTO_GPU`)。「GPU」を自分で選べば GPU も使える。
   - IQ4_NL の「自動」で GPU を使う条件は、VRAM 23GiB 以上のまま。
 - メモリの目安(画面表示): IQ4 32GB〜、IQ3 24GB〜、IQ2 16GB〜。
+
+# v0.18.0 追加仕様: speech.cpp エンジン(Haas-ja v1.0 / ReazonSpeech v2)
+
+- 新モジュール `speechcpp.rs`。nyosegawa/speech.cpp **v0.11.0**(MIT、ggml、Python / CUDA 不要の単一実行ファイル)の `speech serve` を管理し、OpenAI 互換 `/v1/audio/transcriptions` で文字起こしする。作りは `crisp.rs` と同じ(専用フォルダ `{app_data}/speechcpp/`、プロセス枠、ポート、設定)。
+- エンジン(`stt.engine`):
+  - `haas`: Haas-ja v1.0(Third Intelligence、FastConformer 616M、Apache-2.0)。句読点つき。`sakasegawa/Haas-ja-v1.0-GGUF` @6b965d50 の `Haas-616M-ja-v1.0-Q8_0.gguf`(626MB)。
+  - `reazon`: ReazonSpeech v2(reazon-research、NeMo RNN-T 619M、Apache-2.0)。句読点つき。`sakasegawa/reazonspeech-nemo-v2-GGUF` @ed04d9ee の `reazonspeech-nemo-619M-v2-Q8_0.gguf`(631MB)。
+  - コミットと SHA-256 は speech.cpp v0.11.0 の `tools/catalog/catalog.json` と同じ。モデルは `models_dir` に置く(speech.cpp 自身のキャッシュは使わない)。
+- 設定 `stt.speech` = `{ server_port: 8181, threads, accel: "auto" | "gpu" | "cpu" }`(2 エンジン共通)。`auto` は NVIDIA / AMD Radeon があれば GPU(Qwen / CrispASR と同じ規則)。
+- サーバー: GitHub リリース `speech-0.11.0-<platform>.zip` を SHA256SUMS の値で検証して展開。Windows x64 は `windows-x64-vulkan`(GPU ドライバの `vulkan-1.dll` が必要)。Linux x64 は `libvulkan.so.1` があれば `linux-x64-vulkan`、無ければ `linux-x64-cpu`(AVX2 / FMA / F16C と glibc 2.34 以降が必要)。入れたビルドは exe 横の `fire-speak-build.txt` に記録し、CPU ビルドなら `effective_accel` は常に cpu。arm64 には出さない(`available: false`)。zip 展開のため `zip` クレートを全プラットフォームの依存に移した。
+- 起動: `speech serve <model.gguf> --host 127.0.0.1 --port N --threads T --device gpu|cpu`、環境変数 `SPEECH_NO_UPDATE_CHECK=1`。モデルの読み込みとウォームアップが終わってから listen するので、`GET /health` が 200 になれば準備完了。
+- リクエスト: `file`(最後)と `response_format=json` だけを送る。`language` は送らない(どちらも日本語専用で、モデルに無い言語は 400 になる)。`temperature` も送らない(speech.cpp は知らないフィールドを無視せず 400 で拒否する)。
+- Haas のカスタム語彙: STT プロンプト(用語辞書 + クリップボードの用語、`context::stt_hint`)の各語を `keywords[]` に 1 つずつ渡す。組み込み用語集の `readings` / `aliases` と用語辞書の `aliases` のうち仮名だけのものを読みとして付ける(`Claude=クロード`)。`=` `,` 改行を含む語は送らない。speech.cpp 側は既定で `keywords_guard` が有効(語彙で変わった箇所は、登録語を丸ごと含むときだけ採用)。キーワード付きで 400 が返ったら、キーワード無しでもう一度送る。ReazonSpeech は語彙を受け付けないので送らない(用語辞書の置換と AI の用語修正は従来どおり効く)。
+- エンジン比較表の 2 行は、このアプリのベンチ(日本語 8 文)ではまだ測っていない。上流の数値から推定して「≈」付きで表示する: 上流では FLEURS ja の CER が Haas 4.4% / Parakeet 5.0%、Common Voice ja が ReazonSpeech 12.0% / Qwen3-ASR 0.6B 11.9% / Parakeet 7.9%。GPU の遅延は Parakeet の約 1.7 倍 / 2 倍。おすすめ(`recommendedChoice`)は変えない。
+- Tauri コマンド: `speech_download_server()`、`speech_download_model(model)`。進捗イベントの kind は `speech-server`(name `speechcpp`)/ `speech-model`(name はエンジン id)。`setup_status` に `speech`(`CrispStatus` と同じ形)を追加。
+- この環境では Hugging Face に繋がらず、実機での推論は未確認。`speechcpp::tests::live_server`(`#[ignore]`)で、起動済みの `speech serve` に対して確かめられる。

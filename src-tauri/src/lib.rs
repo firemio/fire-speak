@@ -12,6 +12,7 @@ mod crisp;
 mod qwen;
 mod pipeline;
 mod settings;
+mod speechcpp;
 mod setup;
 mod stt;
 mod update;
@@ -64,6 +65,7 @@ fn kill_engines(app: &AppHandle) {
     setup::kill_server(app);
     qwen::kill(app);
     crisp::kill(app);
+    speechcpp::kill(app);
 }
 
 fn show_main_window(app: &AppHandle) {
@@ -323,6 +325,9 @@ fn apply_settings(app: &AppHandle, new_settings: Settings) -> Result<(), String>
         if !crisp::is_crisp_engine(&new_settings.stt.engine) {
             crisp::kill(app);
         }
+        if !speechcpp::is_speech_engine(&new_settings.stt.engine) {
+            speechcpp::kill(app);
+        }
         if new_settings.stt.engine != "cloud" {
             // ensure_server compares the launch signature, so this restarts
             // the server only when a launch-relevant field changed (v0.8.1)
@@ -502,6 +507,9 @@ async fn test_stt(app: AppHandle) -> Result<String, String> {
     } else if crisp::is_crisp_engine(&settings.stt.engine) {
         crisp::ensure_server(app.clone()).await?;
         Ok("OK_STT".to_string())
+    } else if speechcpp::is_speech_engine(&settings.stt.engine) {
+        speechcpp::ensure_server(app.clone()).await?;
+        Ok("OK_STT".to_string())
     } else {
         setup::ensure_server(app.clone()).await?;
         Ok("OK_STT".to_string())
@@ -569,6 +577,16 @@ async fn crisp_download_server(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn crisp_download_model(app: AppHandle, model: String) -> Result<(), String> {
     crisp::download_model(app, model).await
+}
+
+#[tauri::command]
+async fn speech_download_server(app: AppHandle) -> Result<(), String> {
+    speechcpp::download_server(app).await
+}
+
+#[tauri::command]
+async fn speech_download_model(app: AppHandle, model: String) -> Result<(), String> {
+    speechcpp::download_model(app, model).await
 }
 
 #[tauri::command]
@@ -795,6 +813,8 @@ pub fn run() {
             qwen_download_model,
             crisp_download_server,
             crisp_download_model,
+            speech_download_server,
+            speech_download_model,
             open_config_dir,
             quit_app,
             check_update,

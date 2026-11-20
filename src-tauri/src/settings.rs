@@ -129,6 +129,9 @@ pub struct SttSettings {
     /// Local CrispASR server (v0.14, engines "parakeet" and "cohere").
     #[serde(default)]
     pub crisp: CrispSttSettings,
+    /// Local speech.cpp server (v0.18, engines "haas" and "reazon").
+    #[serde(default)]
+    pub speech: SpeechSttSettings,
 }
 
 impl Default for SttSettings {
@@ -139,6 +142,7 @@ impl Default for SttSettings {
             cloud: CloudSttSettings::default(),
             qwen: QwenSttSettings::default(),
             crisp: CrispSttSettings::default(),
+            speech: SpeechSttSettings::default(),
         }
     }
 }
@@ -200,6 +204,32 @@ impl Default for CrispSttSettings {
 
 fn default_crisp_port() -> u16 {
     8180
+}
+
+/// Shared by the speech.cpp engines; the engine itself picks the model.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpeechSttSettings {
+    #[serde(default = "default_speech_port")]
+    pub server_port: u16,
+    #[serde(default = "default_threads")]
+    pub threads: u32,
+    /// "auto" (GPU when an NVIDIA / AMD Radeon GPU is present) | "gpu" | "cpu".
+    #[serde(default = "default_accel")]
+    pub accel: String,
+}
+
+impl Default for SpeechSttSettings {
+    fn default() -> Self {
+        Self {
+            server_port: default_speech_port(),
+            threads: default_threads(),
+            accel: default_accel(),
+        }
+    }
+}
+
+fn default_speech_port() -> u16 {
+    8181
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

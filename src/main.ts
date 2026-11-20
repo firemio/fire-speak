@@ -404,7 +404,9 @@ function onboardRedirect(s: SetupStatus): EngineChoice | null {
   const ready =
     reco.engine === "qwen"
       ? s.qwen.server_installed && !!s.qwen.models.find((m) => m.id === reco.qwenModel)?.installed
-      : s.crisp.server_installed && !!s.crisp.models.find((m) => m.id === reco.engine)?.installed;
+      : isSpeechEngine(reco.engine)
+        ? s.speech.server_installed && !!s.speech.models.find((m) => m.id === reco.engine)?.installed
+        : s.crisp.server_installed && !!s.crisp.models.find((m) => m.id === reco.engine)?.installed;
   return ready ? null : reco;
 }
 
@@ -442,6 +444,23 @@ function onboardSteps(s: SetupStatus): OnboardStep[] | null {
       {
         key: downloadKey("crisp-model", id),
         label: t("onboard.stepModel", crispModelLabel(id)),
+        sizeMb: m?.size_mb ?? 0,
+        done: !!m?.installed,
+      },
+    ];
+  }
+  if (settings && engine && isSpeechEngine(engine)) {
+    const m = s.speech.models.find((x) => x.id === engine);
+    return [
+      {
+        key: downloadKey("speech-server", "speechcpp"),
+        label: t("onboard.stepServer", "speech.cpp"),
+        sizeMb: SPEECH_SERVER_MB,
+        done: s.speech.server_installed,
+      },
+      {
+        key: downloadKey("speech-model", engine),
+        label: t("onboard.stepModel", speechModelLabel(engine)),
         sizeMb: m?.size_mb ?? 0,
         done: !!m?.installed,
       },
@@ -668,6 +687,20 @@ function renderHomeStatus(): void {
         ? statusRow("ok", t("sys.model"), crispModelLabel(engine), "stt")
         : statusRow("missing", t("sys.model"), t("sys.notInstalled"), "stt"),
     );
+  } else if (isSpeechEngine(settings.stt.engine)) {
+    const c = s.speech;
+    const engine = settings.stt.engine;
+    const device = c.effective_accel === "gpu" ? "GPU (Vulkan)" : "CPU";
+    card.appendChild(
+      c.server_installed
+        ? statusRow("ok", t("sys.engine"), `speech.cpp · ${device} · ${t(c.server_running ? "sys.running" : "sys.idle")}`, "stt")
+        : statusRow("missing", t("sys.engine"), t("sys.notInstalled"), "stt"),
+    );
+    card.appendChild(
+      c.models.find((m) => m.id === engine)?.installed
+        ? statusRow("ok", t("sys.model"), speechModelLabel(engine), "stt")
+        : statusRow("missing", t("sys.model"), t("sys.notInstalled"), "stt"),
+    );
   } else {
     const cloud = settings.stt.cloud;
     let host = cloud.base_url;
@@ -725,6 +758,8 @@ interface EngineChoice {
   err: number; // %
   cpu: number; // s per sentence
   mb: number; // download size (model + runtime)
+  /** v0.18: not on the app's benchmark yet; err/cpu estimated from upstream's figures (shown with ≈). */
+  est?: boolean;
 }
 
 const ENGINE_CHOICES: EngineChoice[] = [
@@ -732,6 +767,11 @@ const ENGINE_CHOICES: EngineChoice[] = [
   { engine: "qwen", qwenModel: "1.7b", name: "Qwen3-ASR 1.7B", fit: "stt.fitQwen17", err: 1.5, cpu: 1.36, mb: 2434 },
   { engine: "parakeet", name: "Parakeet TDT-CTC 0.6B ja", fit: "stt.fitParakeet", err: 2.0, cpu: 0.32, mb: 678 },
   { engine: "qwen", qwenModel: "0.6b", name: "Qwen3-ASR 0.6B", fit: "stt.fitQwen06", err: 4.5, cpu: 0.54, mb: 1002 },
+  // speech.cpp (v0.18), estimated: upstream measures Haas 4.4% vs Parakeet
+  // 5.0% CER on FLEURS ja, ReazonSpeech 12.0% vs Parakeet 7.9% on Common
+  // Voice ja, and on a GPU 1.7x / 2x Parakeet's latency.
+  { engine: "haas", name: "Haas-ja v1.0 (speech.cpp)", fit: "stt.fitHaas", err: 1.8, cpu: 0.5, mb: 657, est: true },
+  { engine: "reazon", name: "ReazonSpeech v2 (speech.cpp)", fit: "stt.fitReazon", err: 4.5, cpu: 0.6, mb: 662, est: true },
   { engine: "cohere", name: "Cohere Transcribe 2B", fit: "stt.fitCohere", err: 7.0, cpu: 0.88, mb: 2347 },
   { engine: "qwen", qwenModel: "nemotron", name: "Nemotron 3.5 Transcribe 30B", fit: "stt.fitNemotron", err: 0.0, cpu: 2.02, mb: 19306 },
 ];
@@ -807,8 +847,9 @@ function renderEngineCompare(): void {
     name.appendChild(el("span", "engine-fit", t(c ? c.fit : "stt.fitCloud")));
     r.appendChild(name);
     if (c) {
-      r.appendChild(bar(c.err, maxErr, `${c.err.toFixed(1)}%`));
-      r.appendChild(bar(c.cpu, maxCpu, t("stt.seconds", c.cpu.toFixed(1))));
+      const approx = c.est ? "≈" : "";
+      r.appendChild(bar(c.err, maxErr, `${approx}${c.err.toFixed(1)}%`));
+      r.appendChild(bar(c.cpu, maxCpu, approx + t("stt.seconds", c.cpu.toFixed(1))));
       r.appendChild(el("span", "engine-size", formatBytes(c.mb * 1024 * 1024)));
     } else {
       r.appendChild(el("span", "engine-na", t("stt.engineMetaCloud")));
@@ -828,12 +869,13 @@ function renderEngineCompare(): void {
   $("engine-note").textContent = note;
 }
 
-const ENGINE_PANEL_IDS = ["stt-local-panel", "stt-qwen-panel", "stt-crisp-panel", "stt-cloud-panel"];
+const ENGINE_PANEL_IDS = ["stt-local-panel", "stt-qwen-panel", "stt-crisp-panel", "stt-speech-panel", "stt-cloud-panel"];
 
 /** Settings panel of an engine. */
 function enginePanelId(engine: string): string {
   if (engine === "qwen") return "stt-qwen-panel";
   if (isCrispEngine(engine)) return "stt-crisp-panel";
+  if (isSpeechEngine(engine)) return "stt-speech-panel";
   return engine === "cloud" ? "stt-cloud-panel" : "stt-local-panel";
 }
 
@@ -875,6 +917,7 @@ function renderSttSection(): void {
   $("stt-local-panel").hidden = engine !== "local";
   $("stt-qwen-panel").hidden = engine !== "qwen";
   $("stt-crisp-panel").hidden = !isCrispEngine(engine);
+  $("stt-speech-panel").hidden = !isSpeechEngine(engine);
   $("stt-cloud-panel").hidden = engine !== "cloud";
 
   input("in-qwen-port").value = String(settings.stt.qwen.server_port);
@@ -886,6 +929,11 @@ function renderSttSection(): void {
   input("in-crisp-threads").value = String(settings.stt.crisp.threads);
   ($("in-crisp-accel") as HTMLSelectElement).value = settings.stt.crisp.accel || "auto";
   renderCrispPanel();
+
+  input("in-speech-port").value = String(settings.stt.speech.server_port);
+  input("in-speech-threads").value = String(settings.stt.speech.threads);
+  ($("in-speech-accel") as HTMLSelectElement).value = settings.stt.speech.accel || "auto";
+  renderSpeechPanel();
 
   input("in-local-port").value = String(settings.stt.local.server_port);
   input("in-local-threads").value = String(settings.stt.local.threads);
@@ -1198,6 +1246,166 @@ function wireCrispPanel(): void {
       scheduleSave();
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// stt section: local speech.cpp panel — Haas-ja / ReazonSpeech v2 (v0.18)
+// ---------------------------------------------------------------------------
+
+/** Download size of the pinned speech.cpp Vulkan build (`speechcpp::SPEECH_TAG`). */
+const SPEECH_SERVER_MB = 31;
+
+function isSpeechEngine(engine: string): engine is "haas" | "reazon" {
+  return engine === "haas" || engine === "reazon";
+}
+
+function speechModelLabel(id: string): string {
+  return id === "reazon" ? "ReazonSpeech v2" : "Haas-ja v1.0";
+}
+
+function renderSpeechPanel(): void {
+  if (!settings) return;
+  const engine = settings.stt.engine;
+  const c = setupStatus?.speech;
+  const badge = $("speech-server-badge");
+  const installBtn = $("btn-speech-install-server") as HTMLButtonElement;
+  badge.textContent = !c ? t("setup.checking") : c.server_installed ? t("common.installed") : t("common.notInstalled");
+  badge.className = `badge${c?.server_installed ? " ok" : ""}`;
+  $("speech-server-path").textContent = c?.server_path || (c && !c.available ? t("stt.speechUnavailable") : "—");
+  installBtn.textContent = c?.server_installed ? t("setup.reinstall") : t("setup.install");
+  installBtn.className = `btn btn-sm${c?.server_installed ? "" : " btn-primary"}`;
+  installBtn.disabled = !c || !c.available || activeDownloads.has(downloadKey("speech-server", "speechcpp"));
+  if (setupStatus) {
+    const s = setupStatus;
+    const found = s.hw.gpus.length ? s.hw.gpus.join(" / ") : t("stt.noGpu");
+    const resolved = s.speech.effective_accel === "gpu" ? "GPU (Vulkan)" : "CPU";
+    $("speech-accel-hint").textContent = `${t("stt.accelDetected", found)} → ${resolved}`;
+  }
+  $("speech-model-hint").textContent = t(engine === "reazon" ? "stt.reazonHint" : "stt.haasHint");
+
+  const host = $("speech-model-list");
+  host.textContent = "";
+  if (!c) {
+    host.appendChild(el("div", "hint", t("stt.loadingModels")));
+    return;
+  }
+  const m = c.models.find((x) => x.id === engine);
+  if (!m) return;
+  const key = downloadKey("speech-model", m.id);
+  const wrap = el("div", "model-row-wrap");
+  const row = el("div", "model-row");
+  const opt = el("div", "model-option");
+  opt.classList.add(m.installed ? "is-selected" : "is-disabled");
+  opt.appendChild(el("span", "radio"));
+  opt.appendChild(el("span", "model-option-name", speechModelLabel(m.id)));
+  opt.appendChild(
+    el("span", "model-option-meta", t(m.installed ? "stt.modelInstalledMeta" : "stt.modelNotInstalledMeta", m.size_mb)),
+  );
+  row.appendChild(opt);
+  if (!m.installed) {
+    const btn = el("button", "btn btn-sm btn-primary", t("setup.download")) as HTMLButtonElement;
+    btn.type = "button";
+    btn.disabled = activeDownloads.has(key);
+    btn.addEventListener("click", () => void startSpeechModelDownload(m.id));
+    row.appendChild(btn);
+  }
+  wrap.appendChild(row);
+  wrap.appendChild(buildProgressEl(key));
+  host.appendChild(wrap);
+}
+
+async function startSpeechServerDownload(): Promise<void> {
+  const key = downloadKey("speech-server", "speechcpp");
+  activeDownloads.set(key, { kind: "speech-server", name: "speechcpp", downloaded: 0, total: 0, done: false });
+  const wrap = $("speech-server-progress");
+  wrap.dataset.downloadKey = key;
+  wrap.hidden = false;
+  wrap.classList.add("indeterminate");
+  ($("btn-speech-install-server") as HTMLButtonElement).disabled = true;
+  try {
+    await invoke("speech_download_server");
+  } catch (e: unknown) {
+    const stillPending = activeDownloads.has(key);
+    activeDownloads.delete(key);
+    wrap.hidden = true;
+    ($("btn-speech-install-server") as HTMLButtonElement).disabled = false;
+    if (stillPending) toast(t("setup.serverInstallFailed", errText(e)), true);
+  }
+}
+
+async function startSpeechModelDownload(id: string): Promise<void> {
+  const key = downloadKey("speech-model", id);
+  activeDownloads.set(key, { kind: "speech-model", name: id, downloaded: 0, total: 0, done: false });
+  renderSpeechPanel();
+  try {
+    await invoke("speech_download_model", { model: id });
+  } catch (e: unknown) {
+    const stillPending = activeDownloads.has(key);
+    activeDownloads.delete(key);
+    renderSpeechPanel();
+    if (stillPending) toast(t("setup.modelDownloadFailed", speechModelLabel(id), errText(e)), true);
+  }
+}
+
+function wireSpeechPanel(): void {
+  $("btn-speech-install-server").addEventListener("click", () => void startSpeechServerDownload());
+  $("in-speech-accel").addEventListener("change", async () => {
+    if (!settings) return;
+    settings.stt.speech.accel = ($("in-speech-accel") as HTMLSelectElement).value;
+    try {
+      await persistSettings();
+    } catch (e: unknown) {
+      toast(errText(e), true);
+    }
+    await refreshSetupStatus();
+  });
+  input("in-speech-port").addEventListener("input", () => {
+    if (!settings) return;
+    const v = parseInt(input("in-speech-port").value, 10);
+    if (Number.isFinite(v) && v > 0 && v < 65536) {
+      settings.stt.speech.server_port = v;
+      scheduleSave();
+    }
+  });
+  input("in-speech-threads").addEventListener("input", () => {
+    if (!settings) return;
+    const v = parseInt(input("in-speech-threads").value, 10);
+    if (Number.isFinite(v) && v > 0) {
+      settings.stt.speech.threads = v;
+      scheduleSave();
+    }
+  });
+}
+
+function onSpeechDownloadProgress(p: DownloadProgressPayload, key: string): void {
+  const isServer = p.kind === "speech-server";
+  if (p.done) {
+    activeDownloads.delete(key);
+    if (p.error) {
+      toast(
+        isServer
+          ? t("setup.serverInstallFailed", tMsg(p.error))
+          : t("setup.modelDownloadFailed", speechModelLabel(p.name), tMsg(p.error)),
+        true,
+      );
+    } else {
+      toast(isServer ? t("setup.speechServerInstalled") : t("setup.modelDownloaded", speechModelLabel(p.name)));
+    }
+    if (isServer) $("speech-server-progress").hidden = true;
+    void refreshSetupStatus();
+    return;
+  }
+  activeDownloads.set(key, p);
+  const onboardBar = document.querySelector<HTMLElement>(`#onboard-steps .progress[data-download-key="${key}"]`);
+  if (onboardBar) applyProgress(onboardBar, p);
+  if (isServer) {
+    applyProgress($("speech-server-progress"), p);
+    ($("btn-speech-install-server") as HTMLButtonElement).disabled = true;
+  } else {
+    const wrap = document.querySelector<HTMLElement>(`#speech-model-list .progress[data-download-key="${key}"]`);
+    if (wrap) applyProgress(wrap, p);
+    else renderSpeechPanel();
+  }
 }
 
 /** Build the managed model path from setup_status.models_dir. */
@@ -2511,10 +2719,16 @@ function onDownloadProgress(p: DownloadProgressPayload): void {
         ? "llama-server"
         : p.kind === "crisp-server"
           ? "crispasr"
-          : p.name;
+          : p.kind === "speech-server"
+            ? "speechcpp"
+            : p.name;
   const key = downloadKey(p.kind, name);
   if (p.kind === "crisp-server" || p.kind === "crisp-model") {
     onCrispDownloadProgress(p, key);
+    return;
+  }
+  if (p.kind === "speech-server" || p.kind === "speech-model") {
+    onSpeechDownloadProgress(p, key);
     return;
   }
   if (p.kind === "qwen-server" || p.kind === "qwen-model") {
@@ -2643,6 +2857,7 @@ async function refreshSetupStatus(): Promise<void> {
   renderSttModelList();
   renderQwenPanel();
   renderCrispPanel();
+  renderSpeechPanel();
   renderEngineCompare();
   renderOnboard();
   renderHomeStatus();
@@ -3009,6 +3224,7 @@ async function init(): Promise<void> {
   wireServerCard();
   wireQwenPanel();
   wireCrispPanel();
+  wireSpeechPanel();
   wireOnboard();
   wireUpdateSection();
   wireDialogs();

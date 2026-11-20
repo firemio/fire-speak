@@ -312,6 +312,53 @@
             </details>
           </div>
 
+          <div id="stt-speech-panel" hidden>
+            <div class="card setup-card">
+              <div class="setup-row">
+                <div class="setup-info">
+                  <div class="setup-name">speech.cpp <span class="badge" id="speech-server-badge">未インストール</span></div>
+                  <div class="setup-path mono" id="speech-server-path">—</div>
+                </div>
+                <button class="btn btn-primary btn-sm" id="btn-speech-install-server">インストール</button>
+              </div>
+              <div class="accel-row">
+                <label class="field">
+                  <span class="field-label" data-i18n="stt.accel">処理デバイス</span>
+                  <select id="in-speech-accel">
+                    <option value="auto" data-i18n="stt.accelAuto">自動（おすすめ）</option>
+                    <option value="gpu" data-i18n="stt.qwenAccelGpu">GPU (Vulkan) — NVIDIA / AMD / Intel</option>
+                    <option value="cpu" data-i18n="stt.accelCpu">CPU</option>
+                  </select>
+                </label>
+                <div class="hint" id="speech-accel-hint"></div>
+              </div>
+              <div class="progress" id="speech-server-progress" hidden>
+                <div class="progress-bar"></div>
+                <span class="progress-text"></span>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-title" data-i18n="stt.crispModel">モデル</div>
+              <div class="hint" id="speech-model-hint"></div>
+              <div class="model-select-list" id="speech-model-list"></div>
+            </div>
+
+            <details class="card details-card">
+              <summary data-i18n="common.advanced">詳細設定</summary>
+              <div class="form-grid">
+                <label class="field">
+                  <span class="field-label" data-i18n="stt.serverPort">サーバポート</span>
+                  <input type="number" id="in-speech-port" min="1" max="65535" />
+                </label>
+                <label class="field">
+                  <span class="field-label" data-i18n="stt.threads">スレッド数</span>
+                  <input type="number" id="in-speech-threads" min="1" max="64" />
+                </label>
+              </div>
+            </details>
+          </div>
+
           <div id="stt-cloud-panel" hidden>
             <div class="card">
               <div class="preset-row">
