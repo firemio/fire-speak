@@ -736,6 +736,8 @@ mod tests {
 
     /// Against a `speech serve` already listening on 8181:
     /// `FIRE_SPEAK_SPEECH_WAV=<wav> cargo test --lib speechcpp::tests::live_server -- --ignored --nocapture`
+    /// Set `FIRE_SPEAK_SPEECH_KEYWORDS=1` when the server runs Haas
+    /// (ReazonSpeech answers `keywords[]` with a 400, as the app expects).
     #[tokio::test]
     #[ignore]
     async fn live_server() {
@@ -743,7 +745,9 @@ mod tests {
         let t = transcribe_at(8181, wav.clone(), &[]).await.unwrap();
         println!("plain: {:?}", t);
         assert!(!t.text.is_empty());
-        let k = vec!["Claude=クロード".to_string()];
-        println!("keywords: {:?}", transcribe_at(8181, wav, &k).await.unwrap());
+        if std::env::var("FIRE_SPEAK_SPEECH_KEYWORDS").is_ok() {
+            let k = vec!["Claude=クロード".to_string()];
+            println!("keywords: {:?}", transcribe_at(8181, wav, &k).await.unwrap());
+        }
     }
 }
